@@ -14,7 +14,9 @@
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 export function createCommander(h) {
-  const { fleet, say, feed, sfx } = h;
+  const { fleet, feed, sfx } = h;
+  // while the board is open its own messages show on it (the game's centre message is hidden under the board)
+  const say = (t, s = 1.6) => { if (C.isOpen) { C.note = t; C.noteT = s + 1; render(true); } else h.say(t, s); };
   const C = { isOpen: false, sel: 0, baseKey: null, banner: '', lossMode: false, choosing: false, rows: [], bases: [], lastHtml: '' };
   // ---------------------------------------------------------------- DOM
   const css = document.createElement('style');
@@ -25,6 +27,7 @@ export function createCommander(h) {
 #cmdBoard h3{margin:0;font-size:20px;letter-spacing:6px;color:#fff;text-shadow:0 0 10px #0af}
 #cmdBoard .sub{font-size:12px;color:#8ab;margin:2px 0 8px;letter-spacing:1px}
 #cmdBoard .ban{margin:0 0 8px;padding:6px 8px;background:rgba(120,30,10,.55);border:1px solid #f86;color:#fdb;font-size:13px;letter-spacing:1px}
+#cmdBoard .note{margin:0 0 8px;padding:5px 8px;background:rgba(90,80,10,.5);border:1px solid #dd8;color:#ffd;font-size:13px;letter-spacing:1px}
 #cmdBoard .base{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:14px;letter-spacing:2px}
 #cmdBoard .base b{color:#ff8;flex:1;text-align:center}
 #cmdBoard .base span{cursor:pointer;padding:0 8px;border:1px solid #3a8;color:#9ff}
@@ -122,11 +125,12 @@ export function createCommander(h) {
   // ---------------------------------------------------------------- open / close / keys
   C.open = (banner = '') => {
     C.bases = basesNow(); if (!C.baseKey || !C.bases.some(b => b.key === C.baseKey) || !C.isOpen) C.baseKey = nearestBaseKey();
-    C.banner = banner; C.isOpen = true; el.classList.add('on');
+    C.banner = banner; C.isOpen = true; el.classList.add('on'); msgVis(false);   // (the big centre message would sit over the board)
     const i = h.roster.findIndex(r => r.active()); if (!C.lossMode) C.sel = Math.max(0, i);
     h.onOpen?.(); render(true);
   };
-  C.close = () => { if (!C.isOpen) return; C.isOpen = false; el.classList.remove('on'); const lm = C.lossMode && C.choosing; C.banner = ''; if (lm) { C.lossMode = false; C.choosing = false; h.closedWhileLost?.(); } };
+  const msgVis = on => { const m = document.getElementById('msg'); if (m) m.style.visibility = on ? '' : 'hidden'; };
+  C.close = () => { if (!C.isOpen) return; C.isOpen = false; el.classList.remove('on'); msgVis(true); const lm = C.lossMode && C.choosing; C.banner = ''; if (lm) { C.lossMode = false; C.choosing = false; h.closedWhileLost?.(); } };
   C.toggle = () => C.isOpen ? C.close() : C.open();
   // a loss: the board opens on the default next unit; the host's timer hands on unless the commander starts choosing
   C.onLoss = (why, nextLabel) => {
@@ -197,6 +201,7 @@ export function createCommander(h) {
     const b = base();
     let html = `<h3>COMMAND</h3><div class="sub">TASK FORCE ALBATROSS  ·  MATERIEL <b>${Math.floor(h.mat())}</b>  ·  FUEL STORES <b>${Math.round(h.fuelStores())}</b>  ·  LOSSES <b>${fleet.losses()}</b></div>`;
     if (C.banner) html += `<div class="ban">${esc(C.banner)}</div>`;
+    if (C.note && C.noteT > 0) html += `<div class="note">${esc(C.note)}</div>`;
     html += `<div class="base"><span data-b="-1">&lt;</span><b>DEPLOY AT: ${b ? esc(b.name) + (b.kind === 'island' ? ' (ISLAND)' : ' (CARRIER)') : 'NO BASE'}${b && b.d > 60 ? `  ·  ${Math.round(b.d)} m` : ''}</b><span data-b="1">&gt;</span></div>`;
     C.rows.forEach((o, i) => {
       const cls = ['row', i === C.sel ? 'sel' : '', o.action === 'none' ? 'off' : '', o.act ? 'here' : ''].join(' ');
@@ -210,7 +215,7 @@ export function createCommander(h) {
   // per frame: the HUD fleet strip; the open board refreshes ~4x a second (statuses move)
   let rt = 0, st = 0, shown = null;
   C.update = (dt, show) => {
-    if (C.isOpen) { rt -= dt; if (rt <= 0) { rt = 0.25; render(false); } }
+    if (C.isOpen) { if (C.noteT > 0) C.noteT -= dt; rt -= dt; if (rt <= 0) { rt = 0.25; render(false); } }
     if (!strip) return;
     st -= dt; if (st > 0 && show === shown) return; st = 0.25; shown = show;   // the strip: 4x a second is plenty
     const s = fleet.strip(id => { const r = h.roster.find(r => r.id === id); return r ? (r.outCount ? r.outCount() : r.out() ? 1 : 0) : 0; });

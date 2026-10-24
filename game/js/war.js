@@ -327,16 +327,23 @@ export function createWar(ctx) {
   function placeShip(u) {
     const a = u.att; u.mesh.position.set(u.p.x, u.p.y + a.heave, u.p.z); u.mesh.rotation.set(a.pitch, u.yaw, a.roll, 'YXZ');
   }
-  const _pl = new THREE.Vector3();
+  const _pl = new THREE.Vector3(), _avoidPts = [];
+  W.deckAvoid = [];
+  // COMMANDER: the commander switches into a unit standing on a deck: the crew there step clear at once (world x, z, r)
+  W.clearDeck = (x, z, r) => { const u = W.shipAt(x, z); if (!u || !u.parts || !u.parts.crew || !u.parts.crew.clearArea) return; const [lx, lz] = toLocal(u, x, z); u.parts.crew.clearArea(lx, lz, r); };
   function tickParts(u, dt) {
     if (!u.parts.tick) return;
     const d = Math.hypot(u.p.x - ear.x, u.p.y - ear.y, u.p.z - ear.z), pl = W._pl;
     // deck crew clear out from under a helicopter or jet coming down close to them
-    let avoid = null;
+    // (COMMANDER: and from the unit you are in by its size - 9 m for an aircraft's disc / wings, 5 m a vehicle, 2.5 m a man: 4 m -
+    // and from the other Hueys turning on the deck: W.deckAvoid [{ x, z, r }] world, kept by main.js)
+    let avoid = null; const ap = _avoidPts; ap.length = 0;
     if (pl && pl.alive && pl.pos && Math.abs(pl.pos.x - u.p.x) < 90 && Math.abs(pl.pos.z - u.p.z) < 90) {
       const [hx, hz] = toLocal(u, pl.pos.x, pl.pos.z), hy = pl.pos.y - u.p.y - u.dims.DECK;
-      if (hy < 14 && hy > -2) avoid = (x, z) => { const dx = x - hx, dz = z - hz, r = Math.hypot(dx, dz); return r < 9 ? [dx || 0.1, dz] : null; };
+      if (hy < 14 && hy > -2) ap.push(hx, hz, pl.kind === 'foot' ? 4 : pl.kind === 'ground' ? 5.5 : 9);
     }
+    if (u === W.carrier) for (const q of W.deckAvoid) { if (Math.abs(q.x - u.p.x) > 90 || Math.abs(q.z - u.p.z) > 90) continue; const [qx, qz] = toLocal(u, q.x, q.z); ap.push(qx, qz, q.r); }
+    if (ap.length) avoid = (x, z) => { for (let i = 0; i < ap.length; i += 3) { const dx = x - ap[i], dz = z - ap[i + 1]; if (Math.hypot(dx, dz) < ap[i + 2]) return [dx || 0.1, dz]; } return null; };
     u.parts.tick(dt, W.time, d, avoid);
   }
   function sailShip(u, dt) {

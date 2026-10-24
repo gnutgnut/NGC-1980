@@ -64,6 +64,16 @@ export function createCrew(members, { seed = 5 } = {}) {
     }
   }
   // avoid(x, z) -> [dx, dz] | null: a push away from danger (rotor wash, a landing aircraft) in the ship's frame
+  // COMMANDER: clear a circle (ship frame) at once - the commander switches into a unit standing there: whoever is in
+  // it steps out to the edge (and waits there while the unit stays: avoid)
+  crew.clearArea = (cx, cz, r) => {
+    for (const p of members) {
+      if (p.mode === 'seated') continue;
+      const dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz); if (d >= r) continue;
+      const k = d > 0.05 ? 1 / d : 1, ex = d > 0.05 ? dx * k : 1, ez = d > 0.05 ? dz * k : 0;
+      p.x = cx + ex * (r + 0.4); p.z = cz + ez * (r + 0.4); p.yaw = Math.atan2(ex, ez); p.fled = 4;
+    }
+  };
   crew.update = (dt, t, avoid = null) => {
     for (let i = 0; i < n; i++) {
       const p = members[i]; p.ph += dt;
@@ -78,13 +88,16 @@ export function createCrew(members, { seed = 5 } = {}) {
       }
       if (p.fled > 0) {   // drift back to the post once it is clear
         p.fled -= dt;
+        if (p.fled <= 0 && avoid && avoid(p.x0, p.z0)) p.fled = 0.5;   // (the post itself is still under the rotor / the unit: wait at the edge)
         if (p.fled <= 0 && p.mode !== 'walk') { const dx = p.x0 - p.x, dz = p.z0 - p.z, d = Math.hypot(dx, dz); if (d > 0.3) { p.fled = 0.01; const sp = Math.min(d, 1.3 * dt); p.x += dx / d * sp; p.z += dz / d * sp; p.yaw = Math.atan2(-dx, -dz); const w = p.ph * 6.5; lL = Math.sin(w) * 0.5; pose(i, p.x, p.y, p.z, p.yaw, 0, 0, -lL * 0.6, lL * 0.6, aLz, aRz, lL, -lL); continue; } else p.yaw = p.yaw0; }
       }
       switch (p.mode) {
         case 'walk': {
           const P = p.path, a = P[p.seg], b = P[(p.seg + 1) % P.length], dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1;
           p.s += p.speed * dt; if (p.s >= L) { p.s -= L; p.seg = (p.seg + 1) % P.length; }
-          const k = p.s / L; x = p.x = a[0] + dx * k; z = p.z = a[1] + dz * k; yaw = Math.atan2(-dx, -dz);
+          const k = p.s / L, nx = a[0] + dx * k, nz = a[1] + dz * k;
+          if (avoid && avoid(nx, nz)) { p.s = Math.max(0, p.s - p.speed * dt); x = p.x; z = p.z; yaw = p.yaw; break; }   // (the way is under a rotor / the unit: wait at the edge)
+          x = p.x = nx; z = p.z = nz; yaw = p.yaw = Math.atan2(-dx, -dz);
           const w = p.ph * p.speed * 5.2; lL = Math.sin(w) * 0.5; lR = -lL; aL = -lL * 0.7; aR = lL * 0.7; drop = -Math.abs(Math.cos(w)) * 0.03 + 0.03;
           break;
         }

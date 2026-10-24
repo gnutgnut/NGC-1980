@@ -190,7 +190,8 @@ export function createArmorCraft(ctx, type = 'm60', id = type) {
     if (s.troop !== undefined && V.seats) V.seats[s.troop] = false;   // the player takes that seat on the bench
     // in through the open hatch; it swings shut behind you (buttoned up; H to ride head out) - the loader and the M113's
     // commander stay up (the loader's hatch is his lookout; the M2 is fired head out)
-    if (s.hatch) { D.hatch[s.hatch] = 1; D.hatchWant[s.hatch] = s.role === 'loader' || (!M60 && s.role === 'commander') ? 1 : 0; }
+    // (COMMANDER: taken from the command board, you come up in the hatch head out - a clear look round first; H buttons up)
+    if (s.hatch) { D.hatch[s.hatch] = 1; D.hatchWant[s.hatch] = from === 'command' || s.role === 'loader' || (!M60 && s.role === 'commander') ? 1 : 0; }
     D.binos = false;
     if (from === 'foot' && D.driver.state === 'driving') { /* the crew carries on driving until you take the wheel */ }
     // the crew starts up (each crewman his own part of the TM order; the player's station is the player's to do)

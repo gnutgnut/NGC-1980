@@ -107,7 +107,7 @@ export default {
     await h.expect(`__G.G.craft === 'heli' && ${F}.n.tomcat === 1`, 'the hand-on: into the Huey');
 
     // ---- 11. the wingman brought the Hornet home on the recall (pattern, glideslope, trap) and she parks on deck
-    for (let k = 0; k < 75; k++) {   // (polls: a single wait is capped by the browser protocol at 180 s)
+    for (let k = 0; k < 150; k++) {   // (polls: a single wait is capped by the browser protocol at 180 s)
       const r = await h.eval('(() => { const w = __G.jetC.wing; return w ? { t: Math.round(__G.war.time), st: w.state, R: w.lso ? Math.round(w.lso.R) : null, y: Math.round(__G.JP.J.pos.y) } : { done: true }; })()');
       if (!r || r.done) break; await h.wait(8000);
     }
@@ -138,8 +138,11 @@ export default {
     await h.eval('({ craft: __G.G.craft, ai: __G.heliAI.phase, spot: __G.heliAI.spotKey, taken: __G.HUEYS.map(s => __G.war.shipAt(s.H.pos.x, s.H.pos.z) === __G.war.carrier) })');
     await h.expect(`__G.G.craft === 'foot' && __G.heliAI.phase !== 'off' && !!__G.heliAI.spotKey`, 'on foot; the Huey crew flies her to a spot');
     await h.expect(`__G.war.ext.some(t => t.air && t.name === 'UH-1H HUEY')`, 'the Huey flown by her crew is a target in the war (in the air)');
-    await h.waitFor('__G.heliAI.phase === "off" || !__G.Z.alive', 240000);
-    await h.eval('({ pos: __G.H.pos.toArray().map(Math.round), others: __G.HUEYS.map(s => s.H.pos.toArray().map(Math.round)), d: Math.min(...__G.HUEYS.map(s => Math.round(s.H.pos.distanceTo(__G.H.pos)))) })');
+    for (let k = 0; k < 90; k++) {   // (polled: the crew's approach, logged)
+      const r = await h.eval('(() => { const c = __G.war.carrier, H = __G.H, dx = H.pos.x - c.p.x, dz = H.pos.z - c.p.z, cs = Math.cos(c.yaw), sn = Math.sin(c.yaw); return { alive: __G.Z.alive, ph: __G.heliAI.phase, lx: +(dx * cs - dz * sn).toFixed(1), lz: +(dx * sn + dz * cs).toFixed(1), y: +(H.pos.y - 8 - c.p.y).toFixed(1), w: +(c.w || 0).toFixed(3), spd: +(c.speed || 0).toFixed(1), spot: __G.heliAI.spotKey }; })()');
+      if (!r || !r.alive || r.ph === 'off') break; await h.wait(3000);
+    }
+    await h.eval('({ pos: __G.H.pos.toArray().map(Math.round), others: __G.HUEYS.map(s => s.H.pos.toArray().map(Math.round)), d: Math.min(...__G.HUEYS.map(s => Math.round(s.H.pos.distanceTo(__G.H.pos)))), alive: __G.Z.alive, death: __G.Z.lastDeath, w: __G.war.carrier.w })');
     await h.expect(`__G.Z.alive && __G.H.landed && __G.war.shipAt(__G.H.pos.x, __G.H.pos.z) === __G.war.carrier && __G.HUEYS.every(s => s.H.pos.distanceTo(__G.H.pos) > 12) && __G.H.pos.distanceTo(__G.JP.J.pos) > 5`, 'the crew landed her on a free deck spot (clear of the other Hueys and the Hornet)');
     await h.wait(500); await h.shot('free-spot');
     // e. the war hits units you are not in: blasts on the Huey parked on the island and on the Hornet parked on deck

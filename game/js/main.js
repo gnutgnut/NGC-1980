@@ -740,6 +740,18 @@ function laneAstern(c, yaw) {
 // open water from the ship's centre along heading yaw (laneClear measures from the bow as she lies: no use for a turn)
 function seaAhead(c, yaw, max = 700) { const fx = -Math.sin(yaw), fz = -Math.cos(yaw); for (let d = 40; d <= max; d += 15) if (terrainH(c.p.x + fx * d, c.p.z + fz * d) > -1) return d; return max + 1; }
 let laneT = 0;
+// COMMANDER (tests): is anyone standing in the eye? The ALBATROSS's deck crew within 3.5 m in front of the camera
+const _ec = new THREE.Vector3(), _ef = new THREE.Vector3();
+function eyeClear() {
+  const out = [], cam = zCam; cam.getWorldDirection(_ef);
+  const c = war.carrier, crew = c && c.parts && c.parts.crew;
+  if (crew && crew.group.visible) { crew.group.updateMatrixWorld(); crew.members.forEach((p, i) => {
+    _ec.set(p.x, (p.y ?? 8) + 1.1, p.z).applyMatrix4(crew.group.matrixWorld).sub(cam.position);
+    const along = _ec.dot(_ef), lat = Math.sqrt(Math.max(0, _ec.lengthSq() - along * along));
+    if (along > 0.1 && along < 3.5 && lat < 0.9) out.push({ i, jersey: p.jersey, mode: p.mode, along: +along.toFixed(2), lat: +lat.toFixed(2) });
+  }); }
+  return { clear: out.length === 0, blockers: out };
+}
 function recoveryLane(dt) {
   laneT -= dt; if (laneT > 0) return; laneT = 2;
   const c = war.carrier; if (!c || c.sinking !== undefined || (c.sky && c.sky.up)) return;
@@ -1285,6 +1297,8 @@ crafts.onSwitch = (from, to) => {
   if (to.kind === 'foot' || to.kind === 'ground') { if (bigMap) { bigMap = false; setMapSize(); } }   // a click captures the mouse (as in the cockpits)
   else if (document.pointerLockElement && !cockpitCam) document.exitPointerLock();
   head.yaw = head.pitch = 0;
+  // COMMANDER: switched into a unit standing on a deck: the deck crew round it step clear at once (a clean first look)
+  if (to && to.frame && G.mode === 'zarch') { const f = to.frame({}); if (f && Number.isFinite(f.x)) war.clearDeck(f.x, f.z, to.kind === 'air' ? (to === heliC ? 9 : 10) : to.kind === 'ground' ? 5.5 : 4); }
 };
 // Y: get out of whatever you are in (if it lets you), or into the nearest door when on foot
 function getInOut() {
@@ -1382,11 +1396,16 @@ function commandBases() {
 // spots: a clear deck park on the ALBATROSS (r = the vehicle's half length), a motor pool spot, a pad
 function deckSpotFor(def, r) { for (let k = 0; k < 7; k++) { const s = GR.deckSpot(k); if (s && GR.clearAt(s.x, s.z, r, def)) return s; } return null; }
 function padSpot(I) { const p = I.pad; return { x: p.x, z: p.z, y: groundY(p.x, p.z), yaw: Math.atan2(p.x, p.z) }; }
-function marineSpots(b) {
-  if (b.kind === 'ship') { const out = []; for (let k = 0; k < 5; k++) { const s = GR.deckSpot(k); if (s) out.push({ x: s.x, y: s.y, z: s.z, yaw: s.yaw }); } return out; }
-  const p = b.I.pad, out = [];
-  for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6, x = p.x + Math.cos(a) * (p.r + 3), z = p.z + Math.sin(a) * (p.r + 3); if (!holeOf(x, z) && terrainH(x, z) > 0.5) out.push({ x, y: terrainH(x, z), z, yaw: Math.atan2(x - p.x, z - p.z) + Math.PI }); }
-  return out;
+function marineSpots(b) {   // (COMMANDER: a clear place to stand with a clear look ahead - no pole, wall or parked unit in his face)
+  const out = [];
+  if (b.kind === 'ship') { for (let k = 0; k < 5; k++) { const s = GR.deckSpot(k); if (s) out.push({ x: s.x, y: s.y, z: s.z, yaw: s.yaw }); } }
+  else {
+    const p = b.I.pad;
+    for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6, x = p.x + Math.cos(a) * (p.r + 3), z = p.z + Math.sin(a) * (p.r + 3); if (!holeOf(x, z) && terrainH(x, z) > 0.5) out.push({ x, y: terrainH(x, z), z, yaw: Math.atan2(x - p.x, z - p.z) }); }   // facing across the pad
+  }
+  const lookOk = s => { const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw); if (!GR.clearAt(s.x, s.z, 1.2)) return false; for (const d of [1.5, 3, 4.5]) if (!GR.clearAt(s.x + fx * d, s.z + fz * d, 0.9)) return false; return true; };
+  const good = out.filter(lookOk);
+  return good.length ? good : out;
 }
 // ---------------------------------------------------------------- COMMANDER: more than one Huey out
 // The Huey's flying, cockpit, systems, damage, AI crew and weapons stay on main.js's one set of objects (H, SY, D,
@@ -1680,6 +1699,12 @@ const EXT = new Map(), _xp = new THREE.Vector3(), _xf = {};
 let extFrame = 0;
 function updateExt() {
   const L = war.ext; L.length = 0; extFrame++;
+  // the deck crew keep clear of the other Hueys turning on a deck (the one you are in: war.js does that from PL)
+  const DA = war.deckAvoid; DA.length = 0;
+  if (G.mode === 'zarch') {
+    if (crafts.active !== heliC && Z.alive && !G.heliStowed && H.rpm > 0.2) DA.push({ x: H.pos.x, z: H.pos.z, r: 9 });
+    for (const s of HUEYS) if (s.z.alive && s.H.rpm > 0.2) DA.push({ x: s.H.pos.x, z: s.H.pos.z, r: 9 });
+  }
   if (G.mode === 'zarch' && G.state === 'play' && !G.over) {
     const a = crafts.active;
     const add = (key, pos, vel, r, air, name, hurt) => {
@@ -2592,4 +2617,4 @@ function frame(now) {
 const PROF = { sim: 0, prep: 0, render: 0 };
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ, JETS, TOMCATS, ARMS, HUEYS, EXT, withSlot, swapHuey, heliSpotFree, shipHeloSpot, freeShipSpot, deliverArmour, newHueySlot, hurtHueyAway, checkSpent, laneAstern, laneClear, get keyboardOnly() { return keyboardOnly; }, set keyboardOnly(v) { keyboardOnly = v; } }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ, JETS, TOMCATS, ARMS, HUEYS, EXT, withSlot, swapHuey, heliSpotFree, shipHeloSpot, freeShipSpot, deliverArmour, newHueySlot, hurtHueyAway, checkSpent, laneAstern, laneClear, eyeClear, get keyboardOnly() { return keyboardOnly; }, set keyboardOnly(v) { keyboardOnly = v; } }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
