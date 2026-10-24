@@ -27,7 +27,7 @@ import { createBoxCar } from './units/placeholder/boxcar.js';
 import { buildBoxCarMesh } from './units/placeholder/boxcarmodel.js';
 import { createSeaUniforms, updateSeaUniforms, SEA_VS_DECL, SEA_VS, SEA_FS_DECL, SEA_FS_NORMAL, SEA_FS_FOAM } from './units/naval/seasurface.js';   // SEAWORLD: the sea surface
 import { createWorldSolid } from './world/solid.js';   // SEAWORLD: buildings as colliders, piers and bridges as floors
-import { createWorldLife } from './world/life.js'; import { clearedAt } from './world/net.js';   // WORLD: the lived-in world (towns, roads, traffic, people, faction structures)
+import { createWorldLife } from './world/life.js'; import { clearedAt, roadBed } from './world/net.js';   // WORLD: the lived-in world (towns, roads, traffic, people, faction structures)
 // ARMOUR (wave 2): the M60A3 TTS and M113A2 as crafts on the island world, their sights, the LCM-8 delivery
 import { createArmorWorld } from './units/armor/armorworld.js';
 import { createArmorCraft } from './units/armor/armorcraft.js';
@@ -284,9 +284,10 @@ const PAD = HOME_B.isl.pad;   // the home refuel pad
 const RES_MAX = 600;          // the fleet's fuel stores
 const stripW = (x, z, b) => smooth(0, 14, Math.hypot(Math.max(Math.abs(x - b.x) - STRIP_X, 0), Math.max(Math.abs(z - b.z) - STRIP_Z, 0)));
 const terrainH0 = (x, z) => {
-  let h = islandH(x, z);
+  const h0 = islandH(x, z); let h = h0;
   for (const b of BASES) h = lerp(b.h, h, smooth(BASE_R, 60, Math.hypot(x - b.x, z - b.z)));   // flat apron round the shaft
   for (const p of PADS) { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r1) h = lerp(p.h, h, smooth(p.r0, p.r1, d)); }   // flat pads
+  if (h !== h0) h = roadBed(x, z, h);   // TERRAIN: a road across an apron's blend keeps its bed (the ribbon lies on the ground)
   for (const b of BASES) h = lerp(Math.max(h, b.h), h, stripW(x, z, b));                      // ground over the cave
   return h;
 };

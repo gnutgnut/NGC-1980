@@ -396,14 +396,24 @@ export function zoneNet() {
       if (!best || sc > best.sc) best = { x, z, y: h, sc };
     }
     if (!best) continue;
+    // TERRAIN (wave 3): the ground main.js will make of this island - the shaft apron, the pad, the ground over the cave
+    // (terrainH0, same constants) - so the zone roads are graded on it, and routed round the shaft
+    const padY = Math.min(I.cave ? 16 : 14, Math.max(I.cave ? 4 : 3, Math.round(rawH(I.x, I.z))));
+    const finalH = (x, z) => {
+      let h = rawH(x, z);
+      if (I.cave) h = padY + (h - padY) * sm(18, 60, Math.hypot(x - I.x, z - I.z));
+      const dp = Math.hypot(x - p.x, z - p.z); if (dp < p.r1) h = padY + (h - padY) * sm(p.r0, p.r1, dp);
+      if (I.cave) { const k = sm(0, 14, Math.hypot(Math.max(Math.abs(x - I.x) - 76, 0), Math.max(Math.abs(z - I.z) - 9, 0))); h = Math.max(h, padY) + (h - Math.max(h, padY)) * k; }
+      return h;
+    };
+    const routeH = (x, z) => I.cave && Math.hypot(x - I.x, z - I.z) < 28 ? -5 : finalH(x, z);
     const V = site.village = { id: `z${I.id}`, x: best.x, z: best.z, y: best.y, size: 'village', R: 55, zone: true, I, seed: I.id * 131 + 7 };
     // road from the pad apron to the village
     const a = Math.atan2(V.z - p.z, V.x - p.x), sx = p.x + Math.cos(a) * (p.r0 - 2), sz = p.z + Math.sin(a) * (p.r0 - 2);
-    const pts = route(sx, sz, V.x, V.z, { ds: 12, step: 6, wmax: 40, g: ROAD.lane.g, water: 80, res: 5, smooth: 2 });
+    const pts = route(sx, sz, V.x, V.z, { ds: 12, step: 6, wmax: 40, g: ROAD.lane.g, water: 80, res: 5, smooth: 2, h: routeH });
     // TERRAIN (wave 3): the lane leaves the pad apron at the pad's own height (main.js PADS / BASES: the island centre's
     // ground, rounded and clamped), so its first metres lie on the concrete instead of floating over it
-    const padY = Math.min(I.cave ? 16 : 14, Math.max(I.cave ? 4 : 3, Math.round(rawH(I.x, I.z))));
-    const prof = pts && profile(pts, 'lane', padY, V.y, { maxBridge: 0, pin0: 6, pin1: 9 });
+    const prof = pts && profile(pts, 'lane', padY, V.y, { maxBridge: 0, pin0: 6, pin1: 9, h: finalH });
     if (prof) { prof.kind = 'zone'; prof.a = `zp${I.id}`; prof.b = V.id; const rd = addRoad(prof); site.roads.push(rd.id); node(prof.a, sx, sz, prof.ys[0]).roads.push({ road: rd.id, end: 0 }); node(V.id, V.x, V.z, V.y).roads.push({ road: rd.id, end: 1 }); }
     addDisc(V.x, V.z, V.y, 9, 'plaza'); addClear({ x0: V.x - 60, z0: V.z - 60, x1: V.x + 60, z1: V.z + 60, cx: V.x, cz: V.z, r: 52 });
     // a harbour lane on to the shore facing away from the island
@@ -417,8 +427,8 @@ export function zoneNet() {
         if (Math.hypot(x - p.x, z - p.z) < p.r0 + 8 || (I.cave && Math.hypot(x - I.x, z - I.z) < 45)) break;   // not across the pad or the shaft
       }
       if (!q) continue;
-      const pts2 = route(V.x, V.z, q[0], q[1], { ds: 10, step: 5, wmax: 25, g: ROAD.street.g, water: 80, res: 5, smooth: 2 });
-      const pr2 = pts2 && profile(pts2, 'street', V.y, q[2], { maxBridge: 0, pin0: 9, pin1: 8 });
+      const pts2 = route(V.x, V.z, q[0], q[1], { ds: 10, step: 5, wmax: 25, g: ROAD.street.g, water: 80, res: 5, smooth: 2, h: routeH });
+      const pr2 = pts2 && profile(pts2, 'street', V.y, q[2], { maxBridge: 0, pin0: 9, pin1: 8, h: finalH });
       if (!pr2) continue;
       pr2.kind = 'zone'; pr2.a = V.id; pr2.b = `zq${I.id}`; const rd = addRoad(pr2); site.roads.push(rd.id);
       node(V.id, V.x, V.z, V.y).roads.push({ road: rd.id, end: 0 }); node(pr2.b, q[0], q[1], q[2]).roads.push({ road: rd.id, end: 1 });
@@ -435,8 +445,8 @@ export function zoneNet() {
       if (ok === 4 && m > bs) { bs = m; bestA = a; }
     }
     if (bestA !== null && bs > 0.7) {
-      const ex = V.x + Math.cos(bestA) * 60, ez = V.z + Math.sin(bestA) * 60, pts = route(V.x, V.z, ex, ez, { ds: 10, step: 5, wmax: 20, g: ROAD.street.g, water: 80, res: 5, smooth: 2 });
-      const pr = pts && profile(pts, 'street', V.y, undefined, { maxBridge: 0, pin0: 9 });
+      const ex = V.x + Math.cos(bestA) * 60, ez = V.z + Math.sin(bestA) * 60, pts = route(V.x, V.z, ex, ez, { ds: 10, step: 5, wmax: 20, g: ROAD.street.g, water: 80, res: 5, smooth: 2, h: routeH });
+      const pr = pts && profile(pts, 'street', V.y, undefined, { maxBridge: 0, pin0: 9, h: finalH });
       if (pr) { pr.kind = 'zone'; pr.town = V.id; const rd = addRoad(pr); site.roads.push(rd.id); V.layout.streets.push(rd.id); }
     }
     // the lots, levelled into the ground like the wild villages (main.js bakes islandH after this)
