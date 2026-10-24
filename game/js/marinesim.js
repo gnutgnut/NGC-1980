@@ -65,6 +65,7 @@ export function createMarineSim(o = {}) {
     groundY: (x, z) => { if (!GRc) return W.y; const f = GRc.floor(x, z, W.y + 0.3, 0.75); return f === Infinity || f < W.y - 3 ? W.y : f; },
     surface: () => W.swim || W.wade > 0.05 ? 'water' : SURF_MAP[W.surface] || 'grass',
     waterDepth: () => W.swim ? 2 : W.wade * 1.3,
+    onStair: () => !!(GRc && GRc.stairAt && GRc.stairAt(W.x, W.z, W.y)),   // ngc/interiors
     move: pos => ({ x: pos.x, z: pos.z }),
     // a ledge under the handguard (sandbags, a deck-edge coaming, a wall top): rested aim
     restAt: (x, y, z, yaw) => {

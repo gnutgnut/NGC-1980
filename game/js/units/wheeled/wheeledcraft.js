@@ -347,6 +347,7 @@ export function createWheeledCraft(ctx, type, o = {}) {
   }
   function wreck(cause) {
     if (V.wrecked) return; V.wrecked = true;
+    if (T.mil) ctx.unitLost?.(V, cause, crafts.active === V);   // COMMANDER: the fleet's loss
     fx.explode(S.pos[0], S.pos[1] + 1, S.pos[2], cause === 'blast' ? 1.4 : 0.9, { fire: 0, debris: 8, color: T.mil ? 0x3d4430 : 0x3a3530 });
     ctx.sfx.boom?.(0.8);
     V.burnFx = fx.burn(S.pos[0], S.pos[1] + 1, S.pos[2], 45, 0.8);

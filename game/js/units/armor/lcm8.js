@@ -36,7 +36,7 @@ export function lcmDeck(lx, lz, ramp) {
   return -1e9;
 }
 
-export function buildLCM8Mesh() {
+export function buildLCM8Mesh(opts = {}) {
   const g = new THREE.Group(); g.name = 'LCM-8';
   const grey = M(0x7d858b), dgrey = M(0x5b6166), deckM = M(0x4e5458), black = M(0x1e2022), boot = M(0x24272a), red = M(0x7a2a22), white = M(0xd8d8d0, 0.2), rust = M(0x6a4a34), rubber = M(0x161616), glass = M(0x2a3a44, 0.15), canvas = M(0x5d6450);
   const add = (geo, m, p = g) => { const o = new THREE.Mesh(geo, m); p.add(o); return o; };
@@ -94,7 +94,7 @@ export function buildLCM8Mesh() {
   // rust streaks and the hull number (white stencil) on both bows
   for (const s of [-1, 1]) {
     for (const [z, h] of [[-8, 1.2], [-2, 0.9], [4, 1.4], [9, 0.8]]) add(box(0.02, h, 0.12, s * (hb + 0.005), L.GUNWALE - h / 2 - 0.1, z), rust);
-    const c = document.createElement('canvas'); c.width = 256; c.height = 96; const k = c.getContext('2d'); k.fillStyle = '#e8e8e0'; k.font = 'bold 72px Arial'; k.textAlign = 'center'; k.fillText('8-41', 128, 74);
+    const c = document.createElement('canvas'); c.width = 256; c.height = 96; const k = c.getContext('2d'); k.fillStyle = '#e8e8e0'; k.font = 'bold 72px Arial'; k.textAlign = 'center'; k.fillText(opts.num || '8-41', 128, 74);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
     const num = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.6), new THREE.MeshLambertMaterial({ map: t, transparent: true }));
     num.position.set(s * (hb + 0.02), 1.3, -6.5); num.rotation.y = s * Math.PI / 2; g.add(num);
@@ -105,11 +105,48 @@ export function buildLCM8Mesh() {
   add(box(R.hw * 2, 0.14, R.len, 0, 0.07, -R.len / 2), grey, rp);
   add(box(R.hw * 2, 0.04, R.len - 0.2, 0, 0.16, -R.len / 2), deckM, rp);
   for (let z = -0.3; z > -R.len; z -= 0.32) add(box(R.hw * 2 - 0.2, 0.05, 0.05, 0, 0.19, z), black, rp);   // cleats
-  for (const s of [-1, 1]) { add(box(0.14, 0.75, R.len, s * (R.hw - 0.07), -0.3, -R.len / 2), dgrey, rp); add(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 5).rotateX(-0.6).translate(s * (R.hw - 0.2), 1.0, -1.0), black, ramp); }
+  for (const s of [-1, 1]) add(box(0.14, 0.75, R.len, s * (R.hw - 0.07), -0.3, -R.len / 2), dgrey, rp);
   add(box(R.hw * 2 - 0.3, 0.5, 0.1, 0, -0.25, -R.len + 0.05), grey, rp);   // the toe
+  // the ramp gallows: a post at the forward end of each wing wall with a sheave; the ramp winch's wire runs from the
+  // sheave to an eye at the ramp's upper corner (the cables are re-laid every frame as the ramp moves)
+  const sheaves = [], cables = [], cableM = black;
+  for (const s of [-1, 1]) {
+    const px = s * (W.x + 0.45), pz = W.z0 + 0.25, top = L.GUNWALE + 2.0;
+    add(box(0.22, top - L.GUNWALE, 0.22, px, (top + L.GUNWALE) / 2, pz), dgrey);
+    add(box(0.5, 0.12, 0.14, px - s * 0.18, top - 0.1, pz), dgrey);
+    add(new THREE.CylinderGeometry(0.16, 0.16, 0.08, 12).rotateZ(Math.PI / 2).translate(px - s * 0.38, top - 0.1, pz), black);
+    sheaves.push(new THREE.Vector3(px - s * 0.38, top - 0.25, pz));
+    const cb = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1, 5), cableM); g.add(cb); cables.push(cb);
+  }
+  add(new THREE.CylinderGeometry(0.28, 0.28, 0.9, 12).rotateZ(Math.PI / 2).translate(0, L.STERN_DECK + 0.45, W.z1 + 1.2), M(0x3a3d40));   // the ramp winch on the after deck
+  // the stern (kedge) anchor and its winch: dropped on the run in, the boat heaves itself off the beach on it
+  const kedge = new THREE.Group(); kedge.position.set(1.6, L.STERN_DECK + 0.2, L.STERN - 0.5); g.add(kedge);
+  add(box(0.08, 0.08, 1.1, 0, 0, 0), black, kedge); add(box(0.9, 0.06, 0.08, 0, 0, 0.5), black, kedge);
+  for (const s of [-1, 1]) { const f = add(box(0.06, 0.05, 0.6, s * 0.3, 0, 0.25), black, kedge); f.rotation.y = s * 0.35; }   // Danforth flukes
+  add(new THREE.CylinderGeometry(0.22, 0.22, 0.7, 12).rotateZ(Math.PI / 2).translate(1.6, L.STERN_DECK + 0.35, L.STERN - 2.0), M(0x3a3d40));   // the anchor winch drum
+  // two deckhands on the gunwale walkways (dungarees, kapok life jackets, helmets)
+  const hand = (x, z, ry) => {
+    const d = new THREE.Group(); d.position.set(x, L.GUNWALE + 0.05, z); d.rotation.y = ry; g.add(d);
+    add(box(0.32, 0.8, 0.2, 0, 0.4, 0), M(0x283a5a), d); add(box(0.4, 0.42, 0.3, 0, 1.05, 0), M(0xd86a1a), d);   // trousers, the orange kapok jacket
+    add(box(0.12, 0.45, 0.12, -0.24, 1.0, 0), M(0x7f9ab8), d); add(box(0.12, 0.45, 0.12, 0.24, 1.0, 0), M(0x7f9ab8), d);   // chambray sleeves
+    add(new THREE.SphereGeometry(0.1, 8, 6).translate(0, 1.38, 0), M(0xc19a76), d);
+    add(new THREE.SphereGeometry(0.13, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 1.42, 0), M(0x5a5e48), d);
+    return d;
+  };
+  const hands = [hand(-2.85, -7.6, 0.2), hand(2.85, -5.8, -0.3)];
   const wake = { t: 0 };
-  const api = { group: g, ramp: rp, flag, coxswain, wake };
-  api.animate = (o = {}) => { rp.rotation.x = o.ramp ?? R.up; };
+  const api = { group: g, ramp: rp, flag, coxswain, wake, kedge, hands };
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion();
+  api.animate = (o = {}) => {
+    rp.rotation.x = o.ramp ?? R.up;
+    for (let i = 0; i < 2; i++) {   // wire from the sheave to the ramp's upper corner eye
+      const s = i ? 1 : -1, a = rp.rotation.x;
+      _b.set(s * (R.hw - 0.1), W.y + Math.sin(a) * (R.len - 0.2), W.z0 - Math.cos(a) * (R.len - 0.2));
+      _a.copy(sheaves[i]); const d = _b.clone().sub(_a), l = d.length();
+      cables[i].position.copy(_a).addScaledVector(d, 0.5); cables[i].scale.set(1, l, 1); cables[i].quaternion.copy(_q.setFromUnitVectors(_up, d.normalize()));
+    }
+    kedge.visible = !o.anchorOut;
+  };
   api.animate({});
   g.userData.heat = 0.42; wh.userData.heat = 0.5;
   return api;
@@ -176,6 +213,19 @@ export function buildHardMesh(h, mats = {}) {
     const board = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 1.0), mats.sign ? mats.sign(t) : new THREE.MeshLambertMaterial({ map: t, side: THREE.DoubleSide }));
     board.position.set(x, y + 1.9, z); board.rotation.y = h.yaw; g.add(board);   // facing down the hard, to the boats
     for (const s of [-0.85, 0.85]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.9, 0.08), kerbM); p.position.set(x + Math.cos(h.yaw) * s, y + 0.95, z - Math.sin(h.yaw) * s); g.add(p); }
+  }
+  // beach marker panels either side of the top of the hard (the shore party's markers in the beach's colour, seen from
+  // the boats coming in; the left one carries a vertical stripe)
+  {
+    const pm = mats.red ? mats.post : new THREE.MeshLambertMaterial({ color: 0x8c8a84, flatShading: true });
+    const green = mats.green || new THREE.MeshLambertMaterial({ color: 0x2f7a3a, flatShading: true, side: THREE.DoubleSide }), white = mats.white || new THREE.MeshLambertMaterial({ color: 0xe8e8e0, flatShading: true });
+    for (const s of [-1, 1]) {
+      const [x, z] = h.at(h.u1 - 1, s * (h.w + 3.2)), y = h.y(h.u1 - 1);
+      const p = new THREE.Group(); p.position.set(x, y, z); p.rotation.y = h.yaw; g.add(p);
+      const pan = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.0, 0.06), green); pan.position.set(0, 2.6, 0); p.add(pan);
+      if (s < 0) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2.0, 0.07), white); st.position.set(0, 2.6, 0); p.add(st); }
+      for (const q of [-0.7, 0.7]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 3.6, 0.09), pm); post.position.set(q, 1.8, 0.06); p.add(post); }
+    }
   }
   g.userData.heat = 0.3;
   return g;

@@ -13,6 +13,9 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const deg = r => r * 180 / Math.PI;
 const BINGO_LB = 1500;
+// caution keys (P.cautions) that are lights of their own, not left-DDI messages, and the DDI wording of the others
+const DDI_SKIP = new Set(['L FIRE', 'R FIRE', 'SPD BRK', 'LAUNCH BAR']);
+const DDI_NAME = { 'L ENG': 'L EGT HIGH', 'R ENG': 'R EGT HIGH', HYD: 'HYD 1A 2A' };
 const KG_PER_UNIT = HORNET.FUEL_MAX / 100;   // fleet fuel stores: a full jet tank = 100 units (like a helicopter tank)
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _f = new THREE.Vector3(), _u = new THREE.Vector3();
 const _iq = new THREE.Quaternion(), _p = new THREE.Vector3(), _m = new THREE.Matrix4(), _cmv = new THREE.Vector3();
@@ -20,7 +23,7 @@ const _iq = new THREE.Quaternion(), _p = new THREE.Vector3(), _m = new THREE.Mat
 export function createJetPlay(ctx) {
   const { scene, war, fx, sfx, say, feed, CTL, GRAV } = ctx;
   const J = createJetSim(GRAV), D = createJetDamage();
-  const model = buildJetMesh(1), cockpit = buildJetCockpit();
+  const model = buildJetMesh(1, 0), cockpit = buildJetCockpit();   // FSD #3, BuNo 160777
   model.group.add(cockpit.group); model.group.visible = false; scene.add(model.group);
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(11.4, 17).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.35, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
   shadow.visible = false; scene.add(shadow);
@@ -38,6 +41,7 @@ export function createJetPlay(ctx) {
     thr: 0, thrSrc: 'kb', kb: { pitch: 0, roll: 0, yaw: 0 }, ctl: { pitch: 0, roll: 0, yaw: 0, throttle: [0, 0], brakeL: 0, brakeR: 0 },
     tgt: null, lockT: 0, contacts: [], gunCd: 0, firing: false, aamSide: 0, bombIdx: 0, cautions: [], mcSeen: new Set(), masterCaution: false,
     blood: 0, red: 0, gloc: 0, shake: 0, kick: 0, headZ: 0, view: 'cockpit', zoom: 0, ejectHold: 0, deadT: 0,
+    batt: true, apu: 'OFF', apuT: 0, apuOffT: 0, crank: -1, autoStart: null, cautLights: [],   // start panel (see startPanel)
   };
   // CM: the ALE-39 dispenser in the aft fuselage (headline: 60 cartridges, here 30 flares + 30 chaff); a press drops a
   // pair of flares or two chaff, out of the bottom of the fuselage behind the main gear
@@ -55,12 +59,12 @@ export function createJetPlay(ctx) {
     for (const e of J.eng) { e.run = true; e.n = 0.68; e.egt = 430; }
     if (!J.attachCat(env)) return false;
     for (const e of J.eng) { e.run = true; e.n = 0.68; e.egt = 430; }
-    Object.assign(P, { active: true, alive: true, ejected: null, mode: 'NAV', arm: true, tgt: null, lockT: 0, thr: 0, thrSrc: 'kb', blood: 0, red: 0, gloc: 0, deadT: 0, ejectHold: 0 });
+    Object.assign(P, { active: true, alive: true, ejected: null, mode: 'NAV', arm: true, tgt: null, lockT: 0, thr: 0, thrSrc: 'kb', blood: 0, red: 0, gloc: 0, deadT: 0, ejectHold: 0, batt: true, apu: 'OFF', crank: -1, autoStart: null });
     J.nzMax = J.nzMin = 1; P.mcSeen.clear(); P.serviced = true; model.group.visible = true; chute.visible = false;
     say('HORNET ON CAT 1  -  THROTTLE TO MIL (OR AB) TO LAUNCH', 3); return true;
   };
   P.stow = () => { P.active = false; P.alive = false; model.group.visible = false; shadow.visible = false; chute.visible = false; cockpit.group.visible = false; sfx.jet?.(0, 0, 0, false, false); sfx.seeker?.(0); sfx.jetGun?.(false); };
-  P.respot = () => { if (!J.attachCat(env)) return; for (const e of J.eng) if (!e.run) { e.start = 0.01; } say('SPOTTED ON CAT 1  -  MIL POWER TO LAUNCH', 2.5); };
+  P.respot = () => { if (!J.attachCat(env)) return; if (J.eng.some(e => !e.run)) P.autoStart = 'batt'; say('SPOTTED ON CAT 1  -  MIL POWER TO LAUNCH', 2.5); };
   P.stoppedOnDeck = () => P.alive && !P.ejected && J.onGround && !J.wire && !J.cat && relSpeed() < 0.6 && !!ctx.onCarrier(J.pos.x, J.pos.z);
   function relSpeed() { const sv = war.surfVel(J.pos.x, J.pos.z); return Math.hypot(J.vel.x - (sv ? sv.vx : 0), J.vel.z - (sv ? sv.vz : 0)); }
   function lose(why) {
@@ -85,6 +89,9 @@ export function createJetPlay(ctx) {
   }
 
   // ---------------------------------------------------------------- input
+  // the voice alert system ("Bitching Betty"); P.voices keeps what was called, for tests
+  P.voices = new Set();
+  const voice = (msg, every) => { P.voices.add(msg); sfx.betty?.(msg, every); };
   const kd = ctx.keyDown;
   function readControls(dt) {
     const st = CTL.state, kbx = (kd('KeyD', 'ArrowRight') ? 1 : 0) - (kd('KeyA', 'ArrowLeft') ? 1 : 0), kby = (kd('KeyS', 'ArrowDown') ? 1 : 0) - (kd('KeyW', 'ArrowUp') ? 1 : 0), kbz = (kd('KeyE') ? 1 : 0) - (kd('KeyQ') ? 1 : 0);
@@ -126,11 +133,13 @@ export function createJetPlay(ctx) {
     else if (id === 'canopy') { if (!J.onGround && !J.canopyCmd) { say('CANOPY STAYS SHUT IN FLIGHT', 1.2); return; } J.canopyCmd = J.canopyCmd ? 0 : 1; }
     else if (id === 'lights') { P.lights = !P.lights; say(P.lights ? 'LIGHTS ON' : 'LIGHTS OFF', 1); }
     else if (id === 'pbrake') { P.pbrake = !P.pbrake; say(P.pbrake ? 'PARKING BRAKE SET' : 'PARKING BRAKE OFF', 1); }
-    else if (id === 'engines' || id === 'engL' || id === 'engR') {
-      const ks = id === 'engL' ? [0] : id === 'engR' ? [1] : [0, 1], anyRun = ks.some(k => J.eng[k].run);
-      for (const k of ks) { const e = J.eng[k]; if (anyRun) { e.run = false; e.start = 0; } else if (D.mods().eng[k] > 0.05 && J.fuel > 0) e.start = 0.01; }
-      say(anyRun ? (ks.length > 1 ? 'ENGINES OFF' : `${ks[0] ? 'RIGHT' : 'LEFT'} ENGINE OFF`) : (ks.length > 1 ? 'ENGINE START  -  CRANKING' : `${ks[0] ? 'RIGHT' : 'LEFT'} ENGINE CRANK`), 1.6);
+    else if (id === 'engines') {   // I: shut both down (throttles OFF), or run the whole start: BATT, APU, crank R, crank L
+      if (J.eng.some(e => e.run || e.start > 0)) { for (const e of J.eng) { e.run = false; e.start = 0; } P.crank = -1; P.autoStart = null; say('THROTTLES OFF  -  ENGINES SHUTTING DOWN', 1.6); }
+      else { P.autoStart = 'batt'; say('START  -  BATT ON, APU ON, CRANK RIGHT THEN LEFT', 2); }
     }
+    else if (id === 'engL' || id === 'engR') crank(id === 'engL' ? 0 : 1);
+    else if (id === 'batt') { P.batt = !P.batt; say(P.batt ? 'BATTERY ON' : 'BATTERY OFF', 1); }
+    else if (id === 'apu') { if (P.apu !== 'OFF') { P.apu = 'OFF'; say('APU OFF', 1); } else if (!P.batt) say('APU  -  BATTERY SWITCH IS OFF', 1.4); else { P.apu = 'START'; P.apuT = 0; say('APU START  -  WAIT FOR THE READY LIGHT', 1.6); } }
     else if (id === 'fireL' || id === 'fireR') { const r = D.extinguish(id === 'fireL' ? 0 : 1); say(r === 'FIRE OUT' ? 'FIRE EXTINGUISHED' : r, 1.5); if (r === 'FIRE OUT') sfx.refuel?.(); }
     else if (id === 'arm') { P.arm = !P.arm; say(P.arm ? 'MASTER ARM ON' : 'MASTER ARM SAFE', 1); }
     else if (id === 'cas') { J.cas = !J.cas; say(J.cas ? 'FCS  CAS ON' : 'FCS DIRECT  -  NO PROTECTION, NO TRIM', 2); }
@@ -236,7 +245,7 @@ export function createJetPlay(ctx) {
     const held = ctx.keyDown('Backspace') || CTL.state.actions.eject, now = performance.now();   // real time: a hold is a human second
     if (!held) P.ejectHold = 0; else if (!P.ejectHold) P.ejectHold = now; else if (now - P.ejectHold > 900) eject();
     if (P.ejected) { c.pitch = c.roll = c.yaw = 0; updateChute(dt); }
-    env.mods = D.mods();
+    env.mods = D.mods(); startPanel(dt);
     J.fuel = Math.max(0, J.fuel - D.update(dt));
     const events = J.step(dt, c, env);
     for (const e of events) handle(e);
@@ -251,6 +260,16 @@ export function createJetPlay(ctx) {
     // seeker tone
     if (P.mode === 'AA' && P.arm && J.stores.aam.some(Boolean) && !P.ejected) sfx.seeker(P.tgt && P.tgt.lock ? 2 : P.tgt && P.tgt.off < 0.3 ? 1 : 0); else sfx.seeker(0);
   };
+  // COMMANDER: nobody in the cockpit but the AI wingman (units/commander/wingman.js): the commander switched to another
+  // unit. The pilot flies the airframe (pilot.update steps J through FD's stick and throttles); the jet's own damage
+  // and leaks keep running, a crash is a loss like any other. aiEnv: the pilot's world (terrain, carrier, anchor...).
+  const _wenv = {};
+  P.wingman = (dt, pilot, aiEnv) => {
+    if (!P.active || !P.alive || P.ejected) return;
+    env.mods = D.mods(); J.fuel = Math.max(0, J.fuel - D.update(dt));
+    pilot.update(dt, Object.assign(_wenv, env, aiEnv));
+    if (J.dead) lose(J.dead === 'water' ? 'HORNET DITCHED IN THE SEA' : 'HORNET CRASHED');
+  };
   function handle(e) {
     switch (e.e) {
       case 'catshot': sfx.catShot(); P.kick = 1; say('', 0); feed('ALBATROSS: HORNET LAUNCHED', 'good'); { const p = J.pos; for (let i = 0; i < 30; i++) fx.mix.spawn(p.x + rnd(-1, 1), p.y - 1.8, p.z + rnd(-1, 1), rnd(-3, 3), rnd(1, 4), rnd(-3, 3), rnd(1, 2.5), 1.4, 6, .92, .94, .96, 0.5, -0.2, 1.4, 0.4); } break;
@@ -259,11 +278,37 @@ export function createJetPlay(ctx) {
       case 'wirefree': say('CLEAR OF THE WIRE  -  TAXI, OR PRESS 5 FOR THE CAT, Y FOR THE HELICOPTER', 3.5); break;
       case 'touchdown': sfx.thump(0.6); if (J.hookCmd && !J.wire && ctx.onCarrier(J.pos.x, J.pos.z)) P.bolterT = 1.5; break;
       case 'hardland': D.hit(0.35, 'gear'); say('HARD LANDING  -  GEAR DAMAGED', 1.8); sfx.boom(0.4); break;
-      case 'overstress': D.hit(0.25 + (e.g - 9.5) * 0.1, 'airframe'); say(`OVERSTRESS  ${e.g.toFixed(1)} G  -  AIRFRAME DAMAGED`, 2); sfx.betty('Overstress', 4); break;
+      case 'overstress': D.hit(0.25 + (e.g - 9.5) * 0.1, 'airframe'); say(`OVERSTRESS  ${e.g.toFixed(1)} G  -  AIRFRAME DAMAGED`, 2); break;   // no voice: the period set has no over-g call
       case 'breakup': lose('THE AIRFRAME FAILED'); break;
       case 'flameout': say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE FLAMED OUT${J.fuel <= 0 ? '  -  OUT OF FUEL' : ''}`, 2.2); break;
       case 'lightoff': say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE LIGHT-OFF`, 1.2); break;
     }
+  }
+  // ---------------------------------------------------------------- start panel (F/A-18A NATOPS order, game-timed)
+  // BATT ON -> APU ON (green READY light after APU_SPOOL s; the real APU takes ~15-30 s) -> ENG CRANK R: the APU's bleed
+  // air spins the right engine, light-off at ~24% N2 (the airframe's starter model; the throttle-to-IDLE step is folded
+  // into it), the switch drops back to OFF at light-off, the generator comes on line above ~60% -> ENG CRANK L. A
+  // running engine at 80%+ can cross-bleed start the other. The APU shuts itself down 60 s after both generators are on.
+  const APU_SPOOL = 12;
+  function crank(k) {
+    const e = J.eng[k], name = k ? 'RIGHT' : 'LEFT';
+    if (e.run) { say(`${name} ENGINE RUNNING`, 1); return true; }
+    if (!P.batt) { say('ENG CRANK  -  BATTERY OFF', 1.4); return false; }
+    if (!(P.apu === 'READY' || (J.eng[1 - k].run && J.eng[1 - k].n > 0.8))) { say(P.apu === 'START' ? 'ENG CRANK  -  WAIT FOR APU READY' : 'ENG CRANK  -  NO BLEED AIR: APU ON FIRST', 1.6); return P.apu === 'START'; }
+    if (D.mods().eng[k] <= 0.05 || J.fuel <= 0) { say(`${name} ENGINE WILL NOT START`, 1.4); return false; }
+    e.start = 0.01; P.crank = k; say(`ENG CRANK ${k ? 'R' : 'L'}  -  LIGHT-OFF AT 24%`, 1.6); return true;
+  }
+  function startPanel(dt) {
+    if (P.apu === 'START' && (P.apuT += dt) > APU_SPOOL) { P.apu = 'READY'; say('APU READY', 1); }
+    if (P.apu !== 'OFF' && !P.batt && !(P.gens && (P.gens[0] || P.gens[1]))) P.apu = 'OFF';
+    if (P.crank >= 0) { const e = J.eng[P.crank]; if (e.run || !(e.start > 0)) P.crank = -1; }
+    P.gens = J.eng.map(e => e.run && e.n > 0.6);
+    if (P.apu !== 'OFF' && P.gens[0] && P.gens[1] && !P.autoStart) { if ((P.apuOffT += dt) > 60) { P.apu = 'OFF'; say('APU OFF  -  60 S AFTER THE SECOND GENERATOR', 1.4); } } else P.apuOffT = 0;
+    // the one-key start (I), step by step as the pilot would do it
+    const A = P.autoStart;
+    if (A === 'batt') { P.batt = true; if (P.apu === 'OFF') { P.apu = 'START'; P.apuT = 0; } P.autoStart = 'apu'; }
+    else if (A === 'apu' && P.apu === 'READY') P.autoStart = 'R';
+    else if (A === 'R' || A === 'L') { const k = A === 'R' ? 1 : 0; if (J.eng[k].run) P.autoStart = k ? 'L' : null; else if (P.crank < 0 && !crank(k)) P.autoStart = null; }
   }
   function service(dt) {   // on the ALBATROSS deck, stopped: refuel from the fleet stores, rearm, repair
     if (P.bolterT > 0) { P.bolterT -= dt; if (P.bolterT <= 0 && !J.wire && !J.onGround) say('BOLTER  BOLTER  -  POWER UP, GO AROUND', 2); }
@@ -317,17 +362,27 @@ export function createJetPlay(ctx) {
     P.gcasT = (P.gcasT || 0) - dt;
     if (P.gcasT <= 0 && !J.onGround) { P.gcasT = 0.1; P.gcas = escapeFails(1, agl) ? 2 : escapeFails(3, agl, true) ? 1 : 0; }
     if (J.onGround) P.gcas = 0;
-    if (!J.onGround && (sink || P.gcas === 2)) { P.warn = 'PULL UP'; sfx.betty('Pull up, pull up', 2.5); }
-    else if (!J.onGround && P.gcas === 1) { P.warn = 'TERRAIN'; sfx.betty('Terrain, terrain', 4); }
-    else if (!J.onGround && agl < 60 && J.gear < 0.5 && J.vel.y < -1.5) sfx.betty('Altitude, altitude', 4);
-    if (lb < BINGO_LB && !J.onGround) sfx.betty('Bingo, bingo', 30);
-    if (D.fire[0]) sfx.betty('Engine fire left, engine fire left', 6); if (D.fire[1]) sfx.betty('Engine fire right, engine fire right', 6);
-    if (!m.fcsOk) sfx.betty('Flight controls, flight controls', 12);
+    // voice alerts: the 1980 Hornet's set (NATOPS voice alert system): ENGINE FIRE LEFT / RIGHT, BINGO, FUEL LOW, FLIGHT
+    // CONTROLS, ALTITUDE (the radar altimeter's low-altitude warning), ENGINE LEFT / RIGHT (INFERRED: flame-out). No
+    // "pull up" or "terrain" voice: ground proximity warning came to the Hornet decades later.
+    const pw = P.batt || (P.gens && (P.gens[0] || P.gens[1]));
+    if (!J.onGround && (sink || P.gcas === 2)) { P.warn = 'PULL UP'; voice('Altitude, altitude', 2.5); }
+    else if (!J.onGround && P.gcas === 1) { P.warn = 'TERRAIN'; voice('Altitude, altitude', 4); }
+    else if (!J.onGround && agl < 60 && J.gear < 0.5 && J.vel.y < -1.5) voice('Altitude, altitude', 4);
+    if (pw && lb < BINGO_LB && !J.onGround) voice('Bingo, bingo', 30);
+    if (pw && lb < 800 && !J.onGround) voice('Fuel low, fuel low', 30);
+    if (pw && D.fire[0]) voice('Engine fire left, engine fire left', 6); if (pw && D.fire[1]) voice('Engine fire right, engine fire right', 6);
+    if (pw && !m.fcsOk) voice('Flight controls, flight controls', 12);
+    if (pw && !J.onGround) for (const k of [0, 1]) if (!J.eng[k].run && J.eng[k].n > 0.3 && !(J.eng[k].start > 0)) voice(k ? 'Engine right, engine right' : 'Engine left, engine left', 8);
     const cz = [...D.cautions()];
     if (lb < 800) cz.push('FUEL LO'); if (lb < BINGO_LB) cz.push('BINGO'); if (J.canopy > 0.02 && !J.onGround) cz.push('CANOPY');
     if (J.surf.brake > 0.05) cz.push('SPD BRK'); if (J.launchBar && !J.cat) cz.push('LAUNCH BAR'); if (J.hookCmd !== Math.round(J.hook)) cz.push('HOOK');
-    P.cautions = cz; if (cz.some(c => !P.mcSeen.has(c))) { P.masterCaution = true; for (const c of cz) P.mcSeen.add(c); }
-    for (const c of [...P.mcSeen]) if (!cz.includes(c)) P.mcSeen.delete(c);
+    const gens = P.gens || [true, true]; if (!gens[0]) cz.push('L GEN'); if (!gens[1]) cz.push('R GEN');
+    P.cautions = pw ? cz : []; if (P.cautions.some(c => !P.mcSeen.has(c))) { P.masterCaution = true; for (const c of P.cautions) P.mcSeen.add(c); }
+    for (const c of [...P.mcSeen]) if (!P.cautions.includes(c)) P.mcSeen.delete(c);
+    // the caution light panel (its own captions; the rest are left-DDI messages, see hudState)
+    const L = P.cautLights; L.length = 0;
+    if (pw) { if (lb < 800) L.push('FUEL LO'); if (!m.fcsOk) L.push('FCES'); if (!gens[0]) L.push('L GEN'); if (!gens[1]) L.push('R GEN'); if (P.batt && !gens[0] && !gens[1] && P.apu === 'OFF') L.push('BATT SW'); }
     P.agl = agl;
   }
   // shake, vapour, damage smoke
@@ -381,7 +436,12 @@ export function createJetPlay(ctx) {
   };
   function hudState(hover) {
     const m = D.mods();
-    st.power = J.eng[0].n > 0.4 || J.eng[1].n > 0.4 || J.onGround;
+    // power: the generators (an engine above ~60%) run the HUD, DDIs, HI and UFC; the battery alone runs the EFD, the
+    // warning and caution lights and the APU start
+    const gens = P.gens || [true, true];
+    st.power = gens[0] || gens[1]; st.battPower = st.power || P.batt; st.batt = P.batt; st.apu = P.apu; st.crank = P.crank; st.cautLights = P.cautLights;
+    st.ddiCautions = P.cautions.filter(c => !DDI_SKIP.has(c)).map(c => DDI_NAME[c] || c);
+    st.ufcOpt = [':T/R', ' RCV', ' A/A', ' X', ' Y'];
     st.flicker = m.avionics < 0.4; st.mode = P.mode; st.arm = P.arm; st.agl = Math.max(0, P.agl ?? 0); st.bingo = BINGO_LB; st.dmg = m;
     st.tgt = P.tgt; st.seeker = P.mode === 'AA' ? { dir: P.tgt && P.tgt.lock ? _w.copy(P.tgt.pos).sub(J.pos).normalize() : J.forward(new THREE.Vector3()), locked: !!(P.tgt && P.tgt.lock) } : null;
     st.pipper = P.mode !== 'AG' && (P.firing || (P.tgt && P.tgt.range < 1200) || P.mode === 'AA') ? gunPipper() : null;
@@ -421,6 +481,7 @@ export function createJetPlay(ctx) {
   P.weapLine = () => `${P.mode}  ${P.arm ? 'ARM' : 'SAFE'}  AIM-9 ${J.stores.aam.filter(Boolean).length}  MK-82 ${J.stores.bomb.filter(Boolean).length}  GUN ${J.gun * 5}  FLR ${P.cm.flare}  CHF ${P.cm.chaff}`;
   P.hint = () => {
     if (!P.alive) return P.ejected ? 'UNDER THE CANOPY  -  WAITING FOR RESCUE' : '';
+    if (J.onGround && !J.eng[0].run && !J.eng[1].run) return P.crank >= 0 ? `CRANKING ${P.crank ? 'RIGHT' : 'LEFT'}  -  LIGHT-OFF AT 24%` : P.apu === 'START' ? 'APU STARTING  -  WAIT FOR THE GREEN READY LIGHT' : P.apu === 'READY' ? 'APU READY  -  ENG CRANK R, THEN L (RIGHT CONSOLE)' : 'ENGINES OFF  -  I: FULL START, OR BATT, APU, ENG CRANK ON THE RIGHT CONSOLE';
     if (J.cat && J.cat.state === 'hold' && J.catClear === false) return 'CAT 1 HOLD  -  THE ALBATROSS IS TURNING INTO CLEAR WATER FOR THE LAUNCH';
     if (J.cat && J.cat.state === 'hold') return J.eng[0].n > 0.95 ? 'MIL POWER  -  STAND BY FOR THE SHOT' : 'HOOKED UP ON CAT 1  -  THROTTLE TO MIL (80%+) OR AFTERBURNER';
     if (J.wire && J.wire.held > 0) return 'TRAPPED  -  THROTTLE TO IDLE, HOOK UP (H)';

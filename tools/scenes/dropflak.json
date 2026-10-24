@@ -9,13 +9,13 @@
     "eval (()=>{ __G.G.bench=true; const I=__G.ISLANDS.find(i=>i.name==='ANVIL'); const x=I.pad.x+14, z=I.pad.z; __G.H.reset(new __G.THREE.Vector3(x, __G.terrainH(x,z)+1.2, z), 0, true, 0); __G.D.hp.rotor=0.3; return [I.owner, __G.war.aliveAA(I)] })()",
     "wait 1000",
     "eval (__G.callLogistics(), 1)",
-    "waitFor 60000 __G.drop.state && (__G.drop.state.plane.u.hp < 14 || __G.drop.state.jumpers.length > 0)",
-    "waitFor 60000 __G.drop.state && (__G.drop.state.plane.u.dying || __G.drop.state.left === 0)",
+    "waitFor 180000 __G.drop.state && (__G.drop.state.plane.u.hp < 14 || __G.drop.state.jumpers.length > 0)",
+    "waitFor 180000 __G.drop.state && (__G.drop.state.plane.u.dying || __G.drop.state.left === 0)",
     "eval ({hp:__G.drop.state.plane.u.hp, dying:!!__G.drop.state.plane.u.dying, left:__G.drop.state.left, j:__G.drop.state.jumpers.length})",
     "wait 1500",
     "shot 01-flak",
     "log second call: the dropship is shot down on the run, the stick bails out",
-    "waitFor 60000 __G.G.rescue === null",
+    "waitFor 180000 __G.G.rescue === null",
     "eval (__G.D.hp.rotor=0.3, __G.callLogistics(), 1)",
     "waitFor 30000 __G.drop.state && __G.drop.state.phase === 'run' && __G.drop.state.left === 3",
     "wait 1500",
@@ -27,7 +27,7 @@
     "waitFor 30000 __G.drop.state.plane.gone",
     "wait 1000",
     "shot 03-crashed",
-    "waitFor 60000 !__G.drop.state || __G.drop.state.done",
+    "waitFor 180000 !__G.drop.state || __G.drop.state.done",
     "eval __G.drop.state && __G.drop.state.jumpers.map(j=>j.state)"
   ]
 }

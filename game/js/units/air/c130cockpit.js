@@ -10,7 +10,8 @@
 //   buttons, autofeather arm.
 // - Pilot's side console: the PARATROOP panel - jump light switch (OFF / RED / GREEN), alarm bell, and (a game liberty:
 //   in the real aircraft the loadmaster runs them) the para door and ramp switches.
-// - Both yokes and both pairs of rudder pedals move with the controls; a copilot and a flight engineer in their seats.
+// - Both yokes and both pairs of rudder pedals move with the controls; a copilot, a flight engineer and the navigator
+//   (at his table with the APN-59 radar scope and the APN-147 Doppler readout) in their seats.
 // Every gauge face is a canvas drawn live, round-robin (~15 Hz each). Switches are clickable (hit boxes; the hover gets a
 // yellow frame), like the Huey and Hornet cockpits.
 // API: buildC130Deck() -> { group, hitBoxes, labelOf(id, S, X), update(S, X, dt, hoverId), canvases() }
@@ -201,16 +202,21 @@ export function buildC130Deck() {
   const OH = new THREE.Group(); OH.position.set(0, 1.8, -11.0); OH.rotation.x = Math.PI / 2 - 0.42; g.add(OH);
   box(1.2, 0.9, 0.06, panelM, 0, 0, -0.04, OH);
   const ohArt = canvasTex(1024, 768); plane(1.2, 0.9, canvasMat(ohArt, 0.5), 0, 0, 0.0, OH);
-  const OX = [-0.18, -0.06, 0.06, 0.18];
+  const OX = [-0.18, -0.06, 0.06, 0.18], OIL_X = [0.385, 0.435, 0.485, 0.535];
   {
     const c = ohArt.ctx, X = x => (x + 0.6) / 1.2 * 1024, Y = y => (0.45 - y) / 0.9 * 768; c.fillStyle = '#1e2122'; c.fillRect(0, 0, 1024, 768);
     const lab = (t, x, y, s = 16, col = '#d8d6cc') => txt(c, t, X(x), Y(y), col, s);
     c.strokeStyle = '#3a3f42'; c.lineWidth = 3; c.strokeRect(X(-0.32), Y(-0.06), 0.64 / 1.2 * 1024, 0.38 / 0.9 * 768); lab('ENGINE CONDITION', 0, -0.09, 16, '#9a9d98');
-    ['RUN', 'GND STOP', 'AIR START', 'FEATHER'].forEach((t, i) => lab(t, -0.38, -0.39 + i * 0.075, 11));
+    ['RUN', 'GND STOP', 'AIR START', 'FEATHER'].forEach((t, i) => lab(t, -0.27, -0.39 + i * 0.075, 10));
     OX.forEach((x, k) => lab(String(k + 1), x, -0.42, 15));
     c.fillStyle = '#121314'; for (const x of OX) c.fillRect(X(x) - 5, Y(-0.12), 10, Y(-0.4) - Y(-0.12));
     lab('FIRE EMERGENCY', 0, 0.2, 15, '#e05040'); OX.forEach((x, k) => lab('ENG ' + (k + 1), x, 0.0, 11));
     lab('ENGINE START', 0, 0.37, 14, '#9a9d98'); lab('AUTOFEATHER', 0.42, 0.37, 12, '#9a9d98'); lab('ARM', 0.42, 0.33, 11);
+    // the flight engineer's side: electrics, GTC and bleed air (left), engine oil (right)
+    c.strokeRect(X(-0.58), Y(-0.06), 0.22 / 1.2 * 1024, 0.38 / 0.9 * 768); lab('GTC / AIR', -0.47, -0.09, 13, '#9a9d98');
+    lab('BATTERY', -0.47, -0.37, 11); lab('GTC START', -0.47, -0.27, 11); lab('BLEED AIR', -0.47, -0.17, 11); lab('GTC RPM', -0.47, 0.1, 10, '#9a9d98');
+    c.strokeRect(X(0.34), Y(-0.06), 0.24 / 1.2 * 1024, 0.38 / 0.9 * 768); lab('ENGINE OIL', 0.46, -0.09, 13, '#9a9d98');
+    lab('PRESS', 0.46, -0.355, 9); lab('TEMP', 0.46, -0.235, 9); OIL_X.forEach((x, k) => lab(String(k + 1), x, -0.42, 10));
     ohArt.tex.needsUpdate = true;
   }
   const COND_POS = { run: 0, stop: 1, airstart: 2, feather: 3 };
@@ -225,6 +231,29 @@ export function buildC130Deck() {
   const fireLamps = OX.map((x, k) => lamp(OH, 0.05, 0.022, x, 0.13, 0.004, 'FIRE', '#ff2010', '#300806', '#fff'));
   const startB = OX.map((x, k) => { const b = cyl(0.016, 0.016, 0.012, M(0x2a62c8), x, 0.3, 0.006, OH, Math.PI / 2, 0, 12); hit('start' + k, 0.05, 0.05, 0.04, x, 0.3, 0.015, OH, 'ENGINE START ' + (k + 1)); return b; });
   toggle('af', OH, 0.42, 0.28, 'AUTOFEATHER ARM');
+  toggle('bat', OH, -0.47, -0.33, 'BATTERY'); toggle('gtc', OH, -0.47, -0.23, 'GTC (APU)  START / STOP'); toggle('bleed', OH, -0.47, -0.13, 'GTC BLEED AIR VALVE');
+  // small round gauges on the overhead: GTC rpm, oil pressure and oil temperature per engine
+  const ohG = []; let ohRR = 0;
+  const ohGauge = (x, y, d, face, dyn) => { const t = canvasTex(96, 96), o = new THREE.Mesh(new THREE.CircleGeometry(d / 2, 24), new THREE.MeshBasicMaterial({ map: t.tex, toneMapped: false, color: 0xe2e2e2 })); o.position.set(x, y, 0.004); OH.add(o);
+    const bg = document.createElement('canvas'); bg.width = bg.height = 96; face(bg.getContext('2d'), 96); ohG.push({ ...t, bg, dyn, W: 96 }); };
+  const opMap = lin(0, -140, 100, 140), otMap = lin(0, -140, 120, 140), gtcMap = lin(0, -140, 110, 140);
+  ohGauge(-0.47, 0.2, 0.09, (c, W) => dialFace(c, W, { map: gtcMap, v0: 0, v1: 110, minor: 10, major: 50, bands: [[95, 105, '#2a8a3a']], labels: [[0, '0'], [50, '50'], [100, '100']], ls: 0.22 }), (c, W, S) => { needle(c, W / 2, gtcMap(S.gtc.N * 100), W * 0.4); hub(c, W / 2); });
+  OIL_X.forEach((x, k) => {
+    ohGauge(x, -0.3, 0.045, (c, W) => dialFace(c, W, { map: opMap, v0: 0, v1: 100, minor: 10, major: 50, bands: [[50, 60, '#2a8a3a']], ls: 0.2 }), (c, W, S) => { const e = S.eng[k]; needle(c, W / 2, opMap(55 * Math.min(1, e.N / 0.35) * (e.N > 0.05 ? 1 : 0)), W * 0.42); hub(c, W / 2); });   // 50-60 psi (OPS)
+    ohGauge(x, -0.18, 0.045, (c, W) => dialFace(c, W, { map: otMap, v0: 0, v1: 120, minor: 10, major: 40, bands: [[60, 85, '#2a8a3a']], reds: [100], ls: 0.2 }), (c, W, S) => { const e = S.eng[k]; e.oilT = (e.oilT ?? (e.run ? 75 : 20)) + ((e.run ? 70 + 10 * (e.shp / 4591) : 20) - (e.oilT ?? 20)) * 0.002; needle(c, W / 2, otMap(e.oilT), W * 0.42); hub(c, W / 2); });   // 60-85 C (OPS)
+  });
+  // the checklist: a card clipped by the pilot's side window, drawn from what the crew is doing (X.checklist)
+  const ckT = canvasTex(320, 420); { const o = plane(0.26, 0.34, new THREE.MeshLambertMaterial({ map: ckT.tex, emissive: 0xffffff, emissiveMap: ckT.tex, emissiveIntensity: 0.45 }), -1.5, 0.72, -10.7); o.rotation.set(-0.35, 1.15, 0.1); box(0.03, 0.02, 0.02, metal, -1.5, 0.89, -10.7); }   // on the side wall by the pilot's left knee
+  let ckKey = '';
+  function drawChecklist(C) {
+    const key = JSON.stringify(C); if (key === ckKey) return; ckKey = key;
+    const c = ckT.ctx; c.fillStyle = '#e8e2c8'; c.fillRect(0, 0, 320, 420); c.fillStyle = '#c8bf98'; c.fillRect(0, 0, 320, 44);
+    txt(c, 'KC-130R CHECKLIST', 160, 14, '#222', 15); txt(c, (C && C.title) || 'CRUISE', 160, 33, '#7a1010', 15);
+    (C && C.items || []).forEach(([t, done, val], i) => { const y = 64 + i * 26; c.fillStyle = '#333'; c.font = 'bold 13px ' + SANS; c.textAlign = 'left'; c.fillText(t, 10, y);
+      c.textAlign = 'right'; c.fillStyle = done ? '#1a6a20' : '#888'; c.fillText(done ? (val || 'CHECK') : '. . . . .', 310, y); if (done) { c.strokeStyle = '#1a6a20'; c.lineWidth = 2; c.beginPath(); c.moveTo(6, y - 4); c.lineTo(9, y); c.lineTo(15, y - 10); c.stroke(); } });
+    ckT.tex.needsUpdate = true;
+  }
+  drawChecklist(null);
 
   // ---------------------------------------------------------------- pilot's side console: the paratroop panel
   const SC = new THREE.Group(); SC.position.set(-1.28, 0.42, -10.85); SC.rotation.set(-Math.PI / 2, 0, 0.35); g.add(SC);   // face up, tipped toward the pilot
@@ -268,28 +297,65 @@ export function buildC130Deck() {
   // ---------------------------------------------------------------- crew: copilot (right seat) and flight engineer
   // seated aircrew (1980 USMC: sage CWU-27/P flight suit, grey HGU-26/P helmet with the visor down, oxygen mask
   // hanging, brown gloves): capsule limbs between joints, hands on the given points
-  const capsule = (a, b, r, m) => { const L = a.distanceTo(b); const o = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.01, L - 2 * r * 0.6), 3, 8), m); o.position.copy(a).lerp(b, 0.5); o.quaternion.setFromUnitVectors(_up, _v.subVectors(b, a).normalize()); g.add(o); return o; };
-  const seated = (x, seatY, z, hands, lean = 0.12) => {
+  const capsule = (a, b, r, m, p = g) => { const L = a.distanceTo(b); const o = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.01, L - 2 * r * 0.6), 3, 8), m); o.position.copy(a).lerp(b, 0.5); o.quaternion.setFromUnitVectors(_up, _v.subVectors(b, a).normalize()); p.add(o); return o; };
+  const seated = (x, seatY, z, hands, lean = 0.12, p = g) => {
     const hip = V3(x, seatY + 0.1, z), neck = V3(x, seatY + 0.66, z + Math.sin(lean) * 0.55);
-    const torso = capsule(hip, neck, 0.16, suit); torso.scale.set(1.12, 1, 0.72);
-    box(0.3, 0.2, 0.06, M(0x4c513c), x, seatY + 0.42, z - 0.1);   // survival vest pockets
+    const torso = capsule(hip, neck, 0.16, suit, p); torso.scale.set(1.12, 1, 0.72);
+    box(0.3, 0.2, 0.06, M(0x4c513c), x, seatY + 0.42, z - 0.1, p);   // survival vest pockets
     const head = V3(x, seatY + 0.84, z + 0.05);
-    const h = new THREE.Mesh(new THREE.SphereGeometry(0.105, 10, 7), skinM); h.position.copy(head); g.add(h);
-    const hm = new THREE.Mesh(new THREE.SphereGeometry(0.135, 12, 8, 0, TAU, 0, 1.9), helmetM); hm.position.copy(head).add(V3(0, 0.035, 0.01)); hm.scale.set(1, 1, 1.12); g.add(hm);
-    box(0.2, 0.06, 0.05, M(0x1c2a30), x, head.y + 0.0, head.z - 0.11);                                  // visor
-    box(0.07, 0.07, 0.06, black, x + 0.07, head.y - 0.09, head.z - 0.08);                                // mask hanging off one bayonet
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.105, 10, 7), skinM); h.position.copy(head); p.add(h);
+    const hm = new THREE.Mesh(new THREE.SphereGeometry(0.135, 12, 8, 0, TAU, 0, 1.9), helmetM); hm.position.copy(head).add(V3(0, 0.035, 0.01)); hm.scale.set(1, 1, 1.12); p.add(hm);
+    box(0.2, 0.06, 0.05, M(0x1c2a30), x, head.y + 0.0, head.z - 0.11, p);                                  // visor
+    box(0.07, 0.07, 0.06, black, x + 0.07, head.y - 0.09, head.z - 0.08, p);                                // mask hanging off one bayonet
     for (const s of [-1, 1]) {
       const kn = V3(x + s * 0.13, seatY + 0.14, z - 0.46), ft = V3(x + s * 0.15, FLOOR + 0.1, z - 0.62);
-      capsule(V3(x + s * 0.1, seatY + 0.1, z), kn, 0.075, suit); capsule(kn, ft, 0.06, suit);
-      box(0.1, 0.09, 0.27, bootM, ft.x, FLOOR + 0.05, ft.z - 0.06);
+      capsule(V3(x + s * 0.1, seatY + 0.1, z), kn, 0.075, suit, p); capsule(kn, ft, 0.06, suit, p);
+      box(0.1, 0.09, 0.27, bootM, ft.x, FLOOR + 0.05, ft.z - 0.06, p);
     }
     for (const [s, hd] of hands) {
       const sh = V3(x + s * 0.2, seatY + 0.6, z + 0.05), H = V3(...hd), el = sh.clone().lerp(H, 0.5).add(V3(s * 0.08, -0.14, 0.06));
-      capsule(sh, el, 0.055, suit); capsule(el, H, 0.045, suit); const gl = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 5), gloveM); gl.position.copy(H); gl.scale.set(1, 0.8, 1.3); g.add(gl);
+      capsule(sh, el, 0.055, suit, p); capsule(el, H, 0.045, suit, p); const gl = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 5), gloveM); gl.position.copy(H); gl.scale.set(1, 0.8, 1.3); p.add(gl);
     }
   };
   seated(0.62, FLOOR + 0.54, -10.32, [[-1, [0.44, FLOOR + 0.92, -10.96]], [1, [0.8, FLOOR + 0.92, -10.96]]]);   // copilot, hands on the yoke horns
   seated(0.0, FLOOR + 0.66, -9.85, [[-1, [-0.1, FLOOR + 0.86, -10.5]], [1, [0.16, FLOOR + 0.86, -10.45]]], 0.3);   // engineer: leaning in, a hand by the power levers
+  // the navigator at his table, facing outboard: on the run he computes the release point (CARP) and calls the red and
+  // the green. His panel: the APN-59 search radar scope (green P7 phosphor, the sweep painting the coast and the DZ
+  // island ahead) and the APN-147 Doppler readout (ground speed and drift angle), the 1980 KC-130 navigation fit.
+  box(0.45, 0.08, 0.45, seatM, -0.8, FLOOR + 0.42, -9.8); box(0.42, 0.06, 0.4, cushion, -0.8, FLOOR + 0.49, -9.8);
+  box(0.08, 0.6, 0.45, seatM, -0.52, FLOOR + 0.82, -9.8, g, 0, 0, -0.1); cyl(0.05, 0.05, 0.4, metal, -0.8, FLOOR + 0.2, -9.8);
+  { const nav = new THREE.Group(); nav.position.set(-0.8, 0, -9.8); nav.rotation.y = Math.PI / 2; g.add(nav);
+    seated(0, FLOOR + 0.48, 0, [[-1, [-0.17, FLOOR + 0.82, -0.42]], [1, [0.12, FLOOR + 0.82, -0.5]]], 0.28, nav);
+    box(0.012, 0.012, 0.16, M(0x2a62c8), 0.12, FLOOR + 0.83, -0.56, nav, 0, 0.5); }   // grease pencil in his right hand
+  const chart = canvasTex(256, 192);
+  { const c = chart.ctx; c.fillStyle = '#e4dcc4'; c.fillRect(0, 0, 256, 192); c.strokeStyle = '#b8c8d0'; c.lineWidth = 1;
+    for (let i = 16; i < 256; i += 32) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i, 192); c.stroke(); } for (let i = 16; i < 192; i += 32) { c.beginPath(); c.moveTo(0, i); c.lineTo(256, i); c.stroke(); }
+    c.fillStyle = '#c9c294'; c.strokeStyle = '#6a6040'; c.lineWidth = 1.5;
+    for (const [x, y, r] of [[70, 60, 22], [150, 110, 30], [205, 45, 16], [60, 150, 14]]) { c.beginPath(); for (let a = 0; a <= 12; a++) { const q = a / 12 * TAU, rr = r * (0.8 + 0.25 * Math.sin(q * 3 + x)); c.lineTo(x + Math.cos(q) * rr, y + Math.sin(q) * rr * 0.8); } c.closePath(); c.fill(); c.stroke(); }
+    c.strokeStyle = '#1a1a1a'; c.lineWidth = 2; c.beginPath(); c.moveTo(10, 180); c.lineTo(150, 110); c.lineTo(250, 70); c.stroke();
+    c.strokeStyle = '#c01810'; c.lineWidth = 2.5; c.beginPath(); c.arc(150, 110, 9, 0, TAU); c.stroke(); txt(c, 'DZ', 168, 98, '#c01810', 13);
+    c.beginPath(); c.moveTo(118, 126); c.lineTo(126, 118); c.stroke(); txt(c, 'CARP', 112, 136, '#c01810', 11); txt(c, 'IP', 30, 168, '#1a1a1a', 11);
+    txt(c, 'JUMP RUN 130 KIAS  800 FT AGL', 128, 182, '#2a62c8', 11); chart.tex.needsUpdate = true; }
+  { const o = plane(0.6, 0.42, new THREE.MeshLambertMaterial({ map: chart.tex }), -1.33, FLOOR + 0.805, -9.9); o.rotation.x = -Math.PI / 2; }
+  const scope = canvasTex(128, 128), dop = canvasTex(160, 48);
+  { const o = new THREE.Mesh(new THREE.CircleGeometry(0.1, 24), canvasMat(scope, 0.9)); o.position.set(-1.548, FLOOR + 1.15, -9.95); o.rotation.y = Math.PI / 2; g.add(o);
+    cyl(0.115, 0.115, 0.03, ringM_(), -1.57, FLOOR + 1.15, -9.95, g, 0, Math.PI / 2, 20); cyl(0.1, 0.1, 0.032, black, -1.569, FLOOR + 1.15, -9.95, g, 0, Math.PI / 2, 20);
+    const d = plane(0.2, 0.06, canvasMat(dop, 0.8), -1.565, FLOOR + 0.98, -9.65); d.rotation.y = Math.PI / 2;
+    txtPlate('RADAR', -1.57, FLOOR + 1.3, -9.95); txtPlate('DOPPLER', -1.57, FLOOR + 1.05, -9.65); }
+  function ringM_() { return M(0x2a2c2e); }
+  function txtPlate(t, x, y, z) { const tt = canvasTex(128, 24); txt(tt.ctx, t, 64, 12, '#cfcdc0', 16); tt.tex.needsUpdate = true; const o = plane(0.13, 0.025, canvasMat(tt, 0.5), x, y, z); o.rotation.y = Math.PI / 2; o.material.transparent = true; }
+  let navT = 0;
+  function drawNav(S, X) {   // the radar sweep (one revolution in 4 s) and the Doppler counters, ~10 Hz
+    const c = scope.ctx, t = X.time || 0, R = 64; c.fillStyle = 'rgba(2,14,6,0.35)'; c.fillRect(0, 0, 128, 128);
+    const sw = (t / 4 % 1) * TAU; c.strokeStyle = '#3cff70'; c.lineWidth = 2; c.beginPath(); c.moveTo(R, R); c.lineTo(R + Math.sin(sw) * R, R - Math.cos(sw) * R); c.stroke();
+    if (X.dz) { const a = X.dz.brg - S.heading, r = Math.min(0.92, X.dz.dist / 6000) * R; const da = ((sw - (-a)) % TAU + TAU) % TAU; if (da < 1.2) { c.fillStyle = `rgba(80,255,120,${1 - da / 1.2})`; c.beginPath(); c.arc(R + Math.sin(-a) * r, R - Math.cos(-a) * r, 5, 0, TAU); c.fill(); } }
+    c.strokeStyle = 'rgba(80,255,120,0.25)'; c.lineWidth = 1; for (const rr of [0.33, 0.66, 1]) { c.beginPath(); c.arc(R, R, rr * R - 1, 0, TAU); c.stroke(); }
+    scope.tex.needsUpdate = true;
+    const gs = Math.hypot(S.vel.x, S.vel.z) * K_EQ * KT,   // real-equivalent knots, like the ASI and DME
+    dr = Math.round(((S.track ? S.track() : S.heading) - S.heading + 3 * Math.PI) % TAU / D2R - 180);
+    const d = dop.ctx; d.fillStyle = '#0c0d0e'; d.fillRect(0, 0, 160, 48); txt(d, `GS ${String(Math.round(gs)).padStart(3, '0')}`, 40, 24, '#ffb43a', 17);
+    txt(d, `DA ${String(Math.abs(dr)).padStart(2, '0')}${dr < 0 ? 'L' : dr > 0 ? 'R' : ' '}`, 118, 24, '#ffb43a', 17); dop.tex.needsUpdate = true;
+  }
 
   // hover marker
   const hovs = [0, 1].map(() => { const o = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0xffd040, depthTest: false, transparent: true })); o.renderOrder = 9; o.visible = false; o.matrixAutoUpdate = false; g.add(o); return o; });
@@ -378,6 +444,7 @@ export function buildC130Deck() {
       if (id.startsWith('fire')) return `ENGINE ${k + 1} FIRE HANDLE  -  PULL: FUEL OFF, FEATHER, AGENT`;
       if (id.startsWith('start')) return `ENGINE ${k + 1} START  (CONDITION LEVER AT RUN)`;
       return {
+        bat: `BATTERY  -  ${S.battery ? 'ON' : 'OFF'}`, gtc: `GTC  -  ${S.gtc.cmd ? (S.gtc.N > 0.95 ? 'ON SPEED' : 'STARTING ' + Math.round(S.gtc.N * 100) + ' %') : 'OFF'}`, bleed: `GTC BLEED AIR  -  ${S.bleedValve ? 'OPEN' : 'CLOSED'}`,
         gear: `LANDING GEAR  -  ${S.gearCmd ? 'DOWN' : 'UP'}  (G)`, flap: `FLAP LEVER  -  ${Math.round(S.flapSel * 100)} %  (CLICK STEPS 0 / 50 / 100)`, mc: 'MASTER CAUTION  -  RESET',
         ap: `AUTOPILOT  -  ${X.ap ? 'ENGAGED' : 'OFF'}  (H)`, apAlt: 'ALTITUDE HOLD (WITH THE AUTOPILOT)', af: `AUTOFEATHER  -  ${S.autoFeatherArm ? 'ARMED' : 'OFF'}`,
         jump: `JUMP LIGHTS  -  ${(X.jumpLight || 'off').toUpperCase()}  (CLICK: OFF / RED / GREEN · F = GREEN)`, bell: 'ALARM BELL  -  BAIL OUT: THE STICK GOES NOW',
@@ -400,6 +467,10 @@ export function buildC130Deck() {
       const c = X.ctl || { pitch: 0, roll: 0, yaw: 0 };
       for (const y of yokes) { y.col.rotation.x = clamp(c.pitch || 0, -1, 1) * 0.18; y.wheel.rotation.z = -clamp(c.roll || 0, -1, 1) * 1.1; }
       for (const pr of pedals) { pr[0].position.z = -11.55 + clamp(c.yaw || 0, -1, 1) * 0.06; pr[1].position.z = -11.55 - clamp(c.yaw || 0, -1, 1) * 0.06; }
+      setToggle('bat', S.battery ? 1 : -1); setToggle('gtc', S.gtc.cmd ? 1 : -1); setToggle('bleed', S.bleedValve ? 1 : -1);
+      for (let i = 0; i < 3; i++) { const G = ohG[(ohRR++) % ohG.length]; G.ctx.drawImage(G.bg, 0, 0); G.dyn(G.ctx, G.W, S); G.tex.needsUpdate = true; }   // three a frame
+      drawChecklist(X.checklist);
+      navT += dt; if (navT > 0.1) { navT = 0; drawNav(S, X); }
       setToggle('ap', X.ap ? 1 : -1); setToggle('apAlt', X.ap ? 1 : -1); setToggle('af', S.autoFeatherArm ? 1 : -1);
       setToggle('jump', X.jumpSwitch === 'green' ? 1 : X.jumpSwitch === 'red' ? -1 : 0);
       setToggle('doorL', S.doorCmd[0] ? 1 : -1); setToggle('doorR', S.doorCmd[1] ? 1 : -1); setToggle('ramp', S.rampCmd ? 1 : -1);

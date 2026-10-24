@@ -57,7 +57,9 @@ export class ArmorAudio {
     this.stW = c.createOscillator(); this.stW.type = 'sawtooth'; this.stWF = c.createBiquadFilter(); this.stWF.type = 'bandpass'; this.stWF.Q.value = 4; this.stW.connect(this.stWF); this.stWG = gain(this.stWF);
     this.brk = noise('bandpass', 3800, 22); this.brkG = gain(this.brk);
     this.hiss = noise('bandpass', 2200, 1.5); this.hissG = gain(this.hiss);
-    for (const o of [this.fire, this.sub, this.fan, this.fan2, this.stW, this.sc, this.st, this.clk, this.clk2, this.sqLfo, this.hyd, this.srv]) o.start();
+    // the stabiliser's gyros running up after turret power on (a rising whine that settles to a hum)
+    this.gyr = c.createOscillator(); this.gyr.type = 'sine'; this.gyrG = gain(this.gyr);
+    for (const o of [this.fire, this.sub, this.fan, this.fan2, this.stW, this.sc, this.st, this.clk, this.clk2, this.sqLfo, this.hyd, this.srv, this.gyr]) o.start();
     this.built = true; this.on = true;
   }
   // V: the vehicle (createM60A3 / createM113); veh: 'm60' | 'm113'; o: { inside, view, dt, cam }
@@ -101,6 +103,7 @@ export class ArmorAudio {
       sp(this.hydG.gain, V.hydP * (inside ? 0.03 : 0.008)); sp(this.hyd.frequency, 380 + 30 * V.hydP);
       sp(this.srv.frequency, 900 + tr * 1800); sp(this.srvG.gain, Math.min(0.05, tr * 0.12) * (inside ? 1 : 0.3));
       sp(this.hissG.gain, Math.min(0.04, tr * 0.1) * V.hydP * (inside ? 1 : 0.2));
+      const gy = V.gyro ?? 0; sp(this.gyr.frequency, 120 + 1500 * gy); sp(this.gyrG.gain, V.hydP > 0.5 ? (gy < 1 ? 0.012 + 0.01 * gy : 0.004) * (inside ? 1 : 0.15) : 0, 0.3);
     } else { sp(this.hydG.gain, 0); sp(this.srvG.gain, 0); sp(this.hissG.gain, 0); }
     // inside: the hull filters the highs; outside: distance from the camera
     sp(this.muff.frequency, inside ? 1100 : 16000, 0.1);
@@ -135,6 +138,10 @@ export class ArmorAudio {
     this.burst(big ? 1800 : 2600, big ? 200 : 400, big ? 0.13 : 0.08, (big ? 0.35 : 0.22) * (ins ? (weapon === 'coax' ? 0.8 : 0.5) : 1), 'bandpass', 0.6);
     this.tone(big ? 110 : 160, big ? 50 : 80, big ? 0.08 : 0.05, big ? 0.2 : 0.1, 'sine');
   }
+  // a switch thrown in the station (relay: a heavier clunk - the MASTER relay, turret power contactor)
+  click(relay = false) { if (!this.built) return; this.burst(5200, 2600, 0.025, 0.22, 'bandpass', 2); if (relay) { this.tone(140, 90, 0.08, 0.2, 'square', 0.02); this.burst(700, 200, 0.12, 0.25, 'lowpass', 1, 0.02); } }
+  // a hatch: the latch and spring as it lifts, the slam on its stop as it shuts (louder when it is your own)
+  hatch(shut, mine = true) { if (!this.built) return; const v = mine ? 1 : 0.4; if (shut) { this.clang(180, 0.35 * v); this.burst(900, 120, 0.25, 0.45 * v, 'lowpass', 0.8); } else { this.burst(2200, 600, 0.08, 0.2 * v, 'bandpass', 1.5); this.clang(330, 0.12 * v, 0.05); } }
   loaded() { if (this.inside) { this.clang(520, 0.2); this.burst(900, 300, 0.12, 0.25, 'bandpass', 1, 0.05); } }
   impact(big, dist = 100) {
     if (!this.built) return; const d = Math.max(0, dist), delay = Math.min(6, d / 343), att = Math.min(1, 80 / Math.max(80, d));

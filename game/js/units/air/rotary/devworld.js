@@ -12,7 +12,7 @@ export function createDevWorld() {
     if (d < 52) { const k = clamp((d - 30) / 22, 0, 1); h = PAD.h + (h - PAD.h) * k * k * (3 - 2 * k); }
     return h;
   }
-  const mkDeck = (x, z, yaw, sp, w) => ({ x, z, yaw, sp, w, L: 120, W: 28, H: 8 });
+  const mkDeck = (x, z, yaw, sp, w) => ({ x, z, yaw, sp, w, L: 120, W: 40, H: 8 });   // (40 m: room for the stick waiting on the port side, embark.js)
   const deck = mkDeck(0, 0, 1.0, 6, 0.004), kraken = mkDeck(-4000, 5150, 0.4, 5, 0), decks = [deck, kraken];
   const toLocalD = (d, x, z) => { const dx = x - d.x, dz = z - d.z, c = Math.cos(d.yaw), s = Math.sin(d.yaw); return [dx * c - dz * s, dx * s + dz * c]; };
   const toWorldD = (d, lx, lz) => { const c = Math.cos(d.yaw), s = Math.sin(d.yaw); return [d.x + lx * c + lz * s, d.z - lx * s + lz * c]; };

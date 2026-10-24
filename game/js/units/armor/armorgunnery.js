@@ -26,7 +26,7 @@ export function createGunnery(o) {
     const s = newShot(e.round, e.p, e.dir, e.vel || [0, 0, 0], (Math.random() - 0.5) * 0.002);
     const sp = SPREAD[e.weapon] || 0.001, mv = s.round.mv;
     s.v[0] += (Math.random() - 0.5) * 2 * sp * mv; s.v[1] += (Math.random() - 0.5) * 2 * sp * mv; s.v[2] += (Math.random() - 0.5) * 2 * sp * mv;
-    s.weapon = e.weapon; s.side = side; s.origin = e.p.slice(); s.tracer = e.weapon === 'main' || !!e.tracer; s.big = s.round.cal >= 100;
+    s.weapon = e.weapon; s.side = side; s.origin = e.p.slice(); s.aimR = e.aimR || 1200; s.tracer = e.weapon === 'main' || !!e.tracer; s.big = s.round.cal >= 100;
     shots.push(s); if (e.weapon === 'main') GN.stats.shots++;
     return s;
   };
@@ -44,7 +44,7 @@ export function createGunnery(o) {
       const g = o.ground(x, z);
       if (y < g) { impact(s, x, Math.max(g, y), z, null); return true; }
       if (o.solid && o.solid(x, y, z)) { impact(s, x, y, z, null, true); return true; }
-      if (s.t > (s.big ? 9 : 3.2)) return true;   // spent / out of the fight
+      if (s.t > (s.big ? 9 : 3.2)) { if (s.big) o.onMiss?.(s.round, { over: true }); return true; }   // spent / out of the fight
     }
     return false;
   }
@@ -57,6 +57,7 @@ export function createGunnery(o) {
       if (!was && (t.dead || t.dying || t.sinking !== undefined)) GN.stats.kills++;
       o.onHit?.(t, R, s);
     }
+    if (!t && s.big) o.onMiss?.(R, { over: Math.hypot(x - s.origin[0], z - s.origin[2]) > s.aimR * 1.05 });   // the sensing: beyond the range the computer was set for = over
     if (D.blast) war.blast(x, y, z, D.r, D.blast, s.side);
     if (s.big) {
       if (R.kind === 'KE') {   // a dart: a spray of sparks and dust, no fireball

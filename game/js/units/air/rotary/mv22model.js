@@ -8,7 +8,22 @@
 // Local frame: x right, y up, nose -z, origin at the CG, wheels on the ground at y = MV22M.GROUND.
 // API: buildMV22Mesh() -> { group, animate(S, dt, time), RAMP_END, parts }
 import * as THREE from 'three';
-import { M, B, V, clamp, smooth, slab, loft, merge, cylZ, cylX, cylY, boxG, sphG, mesh, group, rodG, bucket, rr, full, QH, shift, ringGeo, decal, canDecal, sideDecal } from './modelkit.js';
+import { M, B, V, clamp, smooth, slab, loft, merge, cylZ, cylX, cylY, boxG, sphG, mesh, group, rodG, bucket, rr, full, QH, shift, ringGeo, decal, canDecal, sideDecal, geom } from './modelkit.js';
+
+// a proprotor blade as one smooth piece: stations along the span, each a thin lens section, chord tapering from the
+// broad root to the tip and twisted ~47 deg root to tip (the V-22's nonlinear twist, simplified). Along +x from r0.
+function bladeGeo(r0, r1, n = 12) {
+  const st = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n, r = r0 + (r1 - r0) * u, c = 0.95 - 0.42 * u, t = 0.62 * (1 - u) - 0.2 * u * u, th = 0.075 * (1 - u) + 0.02;
+    const ct = Math.cos(t), sn = Math.sin(t), P = (zc, yc) => [r, yc * ct + zc * sn, -yc * sn + zc * ct];
+    st.push([P(-0.42 * c, 0), P(0.05 * c, th / 2), P(0.58 * c, 0), P(0.05 * c, -th / 2)]);   // leading edge, top, trailing edge, bottom
+  }
+  const pos = [];
+  for (let i = 0; i < n; i++) for (let k = 0; k < 4; k++) { const a = st[i][k], b = st[i][(k + 1) % 4], c = st[i + 1][(k + 1) % 4], d = st[i + 1][k]; pos.push(...a, ...b, ...c, ...a, ...c, ...d); }
+  for (const [s, f] of [[st[0], 1], [st[n], 0]]) { const [a, b, c, d] = s; if (f) pos.push(...a, ...c, ...b, ...a, ...d, ...c); else pos.push(...a, ...b, ...c, ...a, ...c, ...d); }
+  return geom(pos);
+}
 
 const D2R = Math.PI / 180;
 export const MV22M = { GROUND: -2.22, R: 5.805, PIVOT: [7.0, 1.9, -0.05], MAST: 1.9, OMEGA: 412 * Math.PI / 30, RAMP_HINGE: [0, -1.25, 4.6], RAMP_LEN: 3.1 };
@@ -79,13 +94,16 @@ export function buildMV22Mesh() {
   { const wb = bucket();
     wb.add(cylY(1.1, 1.1, 0.25, 20).translate(0, -0.05, 0), grey2M);                                                       // stow ring
     for (const s of [-1, 1]) {
-      wb.add(slab([[0.2, -1.25, 0.56], [6.4, -1.05, 0.5], [6.4, 1.2, 0.2], [0.2, 1.25, 0.24]].map(([a, b, w]) => [a * s, b, w, 0.35]), (a, b, w) => [a, 0.12 + w, b]), greyM);
+      wb.add(slab([[0.2, -1.25, 0.56], [6.4, -1.5, 0.5], [6.4, 1.15, 0.2], [0.2, 1.25, 0.24]].map(([a, b, w]) => [a * s, b, w, 0.35]), (a, b, w) => [a, 0.12 + w + Math.abs(a) * 0.035, b]), greyM);   // 6 deg forward sweep on the leading edge, ~2 deg dihedral
       wb.add(boxG(5.6, 0.03, 0.05, s * 3.4, 0.42, -1.12), cyanM);                                                         // leading-edge seam
       wb.add(boxG(0.4, 0.02, 1.6, s * 2.0, 0.42, -0.1), primerM);                                                          // primer patch over a repair
     }
+    // the dorsal fairing over the wing's stow ring and mid-wing gearbox, blending into the fuselage top
+    const DF = [[-2.7, 0.05, 0.0, 0.25], [-2.0, 0.5, 0.0, 0.6], [-1.3, 0.72, 0.0, 0.74], [0.4, 0.76, 0.0, 0.76], [1.7, 0.62, 0.0, 0.66], [2.8, 0.25, 0.0, 0.4], [3.6, 0.04, 0.0, 0.18]];
+    wb.add(loft(DF.map(([z, t, b, w]) => full(rr(z, t, b - 0.3, w, Math.min(0.35, w), 0.05, [t - 0.1, t - 0.2, t - 0.3]))), () => 0, 0, 0), greyM);
     wb.flush(wing, 'wingParts'); }
   const flaperons = [-1, 1].map(s => { const f = group(wing, 'flaperon', s * 3.3, 0.18, 1.2); mesh(boxG(5.6, 0.1, 0.7, 0, 0, 0.35), grey2M, f); return f; });
-  const nacelles = [];
+  const nacelles = [], BLADE = bladeGeo(0.1, 4.75), BLADE_TIP = bladeGeo(4.75, 5.25, 2);
   for (const s of [-1, 1]) {
     const piv = group(wing, 'nacelle', s * MV22M.PIVOT[0], MV22M.PIVOT[1] - 1.65, 0);   // pivot at the wing tip; local +y = along the shaft toward the rotor
     const nb = bucket();
@@ -96,16 +114,12 @@ export function buildMV22Mesh() {
     nb.add(boxG(0.05, 2.6, 0.05, s * 0.8, 0.1, 0), cyanM);                                // cyan seam
     nb.flush(piv, 'nacelleParts');
     const hub = group(piv, 'hub', 0, MV22M.MAST, 0), spin = group(hub, 'spin');
-    { const hb = bucket(); hb.add(new THREE.ConeGeometry(0.62, 1.1, 14).translate(0, 0.55, 0), grey2M); hb.add(cylY(0.62, 0.62, 0.3, 14), metalM); hb.flush(spin, 'spinner'); }
+    { const hb = bucket(); hb.add(new THREE.SphereGeometry(0.64, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1.1, 1).translate(0, 0.12, 0), grey2M); hb.add(cylY(0.62, 0.62, 0.3, 14), metalM); hb.flush(spin, 'spinner'); }
     const blades = [];
     for (let k = 0; k < 3; k++) {
       const arm = group(spin, 'arm'); arm.rotation.y = k * 2 * Math.PI / 3;
       const fold = group(arm, 'fold', 0.55, 0.1, 0), pitch = group(fold, 'pitch');
-      // a wide, strongly twisted blade: four panels, each feathered a little less toward the tip
-      for (let i = 0; i < 4; i++) {
-        const r0 = 0.15 + i * 1.28, r1 = r0 + 1.28, c = 0.78 - i * 0.07, tw = 0.62 - i * 0.18;
-        const p = group(pitch, 'seg'); p.rotation.x = tw; mesh(boxG(r1 - r0, 0.07, c, (r0 + r1) / 2, 0, 0), i === 3 ? tipM : bladeM, p);
-      }
+      mesh(BLADE, bladeM, pitch, 'blade'); mesh(BLADE_TIP, tipM, pitch, 'bladeTip'); mesh(boxG(0.45, 0.16, 0.34, 0.05, 0, 0), metalM, pitch, 'cuff');
       blades.push({ fold, pitch });
     }
     const discG = group(hub, 'disc'); const dm = B(0x2a2d30, { transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false });
@@ -144,6 +158,9 @@ export function buildMV22Mesh() {
       sideDecal(g, decal('rwfin', 256, 256, (x, w, h) => { x.fillStyle = '#5ff2ff'; x.fillRect(w * 0.1, h * 0.42, w * 0.8, h * 0.16); glyph(x, w, h); }, 0.9, 0.9), s, s * 3.04, 2.3, 7.7);
     }
   }
+  // small square cabin windows (two a side); the RUNAWAY plated one over with ceramic primer
+  { const winM = M(0x1b2328, { shininess: 90, specular: 0x8aa0aa });
+    for (const [s, z, plated] of [[-1, -3.3, false], [-1, -0.9, true], [1, -2.3, false], [1, 0.4, false]]) { body.add(boxG(0.03, 0.4, 0.4, s * 1.322, 0.55, z), plated ? primerM : winM); body.add(boxG(0.025, 0.48, 0.48, s * 1.318, 0.55, z), darkM); } }
   body.flush(g, 'airframe');
 
   // ---- animation. S: { nr, nac (rad), coll, tR/tL: { tx, ty } TPP tilts, gear 0..1, ramp 0..1, flap, el, rud, ail,
@@ -158,7 +175,7 @@ export function buildMV22Mesh() {
       for (const b of N.blades) {
         const a = N.spin.rotation.y + b.fold.parent.rotation.y;
         b.fold.rotation.z = (0.03 - tx * Math.sin(a) - ty * Math.cos(a)) * (1 - fold) + fold * -1.35;   // fold: blades swing back along the nacelle
-        b.pitch.rotation.x = N.s * -(0.1 + coll * 0.3) * (1 - fold);
+        b.pitch.rotation.x = N.s * -((S.th75 ?? (0.1 + coll * 0.3)) - 0.3) * (1 - fold);   // feathers with the real blade angle: fine in the hover, coarse in cruise
       }
       const dk = smooth(nr, 0.35, 0.9) * (1 - fold); N.dm.opacity = 0.18 * dk; N.discG.visible = dk > 0.01;
       N.discG.rotation.set(-tx, 0, -ty); N.discG.scale.y = 0.03;
@@ -167,7 +184,9 @@ export function buildMV22Mesh() {
     const gr = clamp(S.gear ?? 1, 0, 1); noseGear.rotation.x = (1 - gr) * 1.6; for (const m of mains) m.rotation.x = -(1 - gr) * 1.55;
     noseGear.visible = gr > 0.02; for (const m of mains) m.visible = gr > 0.02;
     ramp.rotation.x = -(RAMP_UP + (RAMP_DOWN - RAMP_UP) * clamp(S.ramp ?? 0, 0, 1));
-    for (const [i, f] of flaperons.entries()) f.rotation.x = (S.flap ?? 0) * 0.6 + (i ? -1 : 1) * (S.ail ?? 0) * 0.35;
+    // flaperons: flaps, plus the big droop in the hover that cuts the rotor wash on the wing (the V-22's download fix)
+    const droop = clamp(((S.nac ?? 1.57) - 1.2) / 0.37, 0, 1) * (S.gear ?? 1);
+    for (const [i, f] of flaperons.entries()) f.rotation.x = (S.flap ?? 0) * 0.45 + droop * 0.75 + (i ? -1 : 1) * (S.ail ?? 0) * 0.35;
     elev.rotation.x = -(S.el ?? 0) * 0.35; for (const r of rudders) r.rotation.y = (S.rud ?? 0) * 0.35;
     const fl = (time % 1.3) < 0.1 && (S.run ?? true); for (const b of beacons) { b.material = fl ? beaconM : beaconOff; b.scale.setScalar(fl ? 1.6 : 1); }
     cyanM.color.setHSL(0.52, 1, 0.62 + 0.12 * Math.sin(time * 2.1));

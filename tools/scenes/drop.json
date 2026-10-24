@@ -49,7 +49,7 @@
     "expect __G.drop.state.ap === true",
     "waitFor 90000 __G.drop.state.light==='green' || __G.drop.state.left < 3",
     "key tap KeyF",
-    "wait 200",
+    "waitFor 6000 __G.drop.state.left < 3 && __G.drop.state.bundleOut",
     "expect __G.drop.state.left < 3",
     "waitFor 90000 __G.drop.state.done",
     "eval __G.drop.state.jumpers.map(j=>j.state)"

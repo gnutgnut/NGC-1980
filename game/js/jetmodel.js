@@ -1,5 +1,5 @@
-// HORNET: an F/A-18C look-alike carrier fighter, exterior model with every moving part (surfaces, gear, hook, canopy,
-// nozzles, afterburner, lights, stores). Low-poly, flat-shaded, real-world metres.
+// HORNET: the F/A-18A of 1980 (a full-scale development jet, see "1980 markings"), exterior model with every moving part
+// (surfaces, gear, hook, canopy, nozzles, afterburner, lights, stores). Low-poly, flat-shaded, real-world metres.
 // Local frame: +x right wing, +y up, nose along -z, origin at the CG (over the wing root, main gear just behind it).
 import * as THREE from 'three';
 
@@ -89,20 +89,59 @@ function hinged(parent, geo, mat, p0, p1, name) {
   const pv = new THREE.Group(); pv.name = name; o.add(pv); mesh(geo, mat, pv, name + 'Skin'); parent.add(o); return pv;
 }
 
-// ------------------------------------------------------------------------------------------- side number decal
-let numTex = null;
-function sideNumber() {
-  if (numTex) return numTex;
-  const c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d');
-  x.font = 'bold 50px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#41474d'; x.fillText('100', 64, 34);
-  numTex = new THREE.CanvasTexture(c); numTex.colorSpace = THREE.SRGBColorSpace; return numTex;
+// two-tone paint on a plate: faces looking down get material 1 (the white undersides), the rest material 0
+function twoTone(geo, below = -0.35) {
+  const p = geo.attributes.position.array, up = [], dn = [], a = V(), b = V(), c = V(), n = V();
+  for (let i = 0; i < p.length; i += 9) {
+    a.fromArray(p, i); b.fromArray(p, i + 3); c.fromArray(p, i + 6); n.subVectors(c, b).cross(a.clone().sub(b)).normalize();
+    (n.y < below ? dn : up).push(...p.slice(i, i + 9));
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([...up, ...dn], 3));
+  g.addGroup(0, up.length / 3, 0); g.addGroup(up.length / 3, dn.length / 3, 1); g.computeVertexNormals(); return g;
+}
+
+// ------------------------------------------------------------------------------------------- 1980 markings
+// In summer 1980 the only Hornets in the world are the eleven full-scale development jets of the Naval Air Test Center,
+// Patuxent River (VFA-125, the first squadron, only forms in November 1980). So the ALBATROSS flies FSD single-seaters:
+// the player's jet is FSD #3, BuNo 160777, the carrier-suitability jet (USS America trials, Oct-Nov 1979); every
+// further model (the parked jets on deck) takes the next single-seater. Paint: the pre-low-visibility Navy scheme still
+// in force in 1980, gloss light gull grey FS 16440 over gloss white FS 17875, full-colour national insignia (upper left /
+// lower right wing, intake sides), black NAVY titles, the FSD number on the nose and fins, the BuNo on the fins, and a
+// day-glo red-orange test band at the fin tips (NATC practice; the exact trim of this jet is INFERRED, not checked
+// against photographs).
+const FSD = [[3, 160777], [1, 160775], [2, 160776], [4, 160778], [5, 160779], [6, 160780], [8, 160782], [9, 160783], [11, 160785]];
+let fsdNext = 0;
+const _tex = new Map();
+function texOf(key, w, h, draw) {
+  if (_tex.has(key)) return _tex.get(key);
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.clearRect(0, 0, w, h); draw(x, w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; _tex.set(key, t); return t;
+}
+const INK = '#16191c';
+const stencil = (x, t, cx, cy, px, col = INK) => { x.font = `bold ${px}px "Arial Narrow", Arial, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = col; x.fillText(t, cx, cy); };
+function starBar(x, w, h) {   // US national insignia: white star on a blue disc, white bars (R x R/2) with a red stripe, blue border
+  const cx = w / 2, cy = h / 2, R = h * 0.44, blue = '#1c2f6e';
+  x.fillStyle = blue; x.fillRect(cx - R * 2.12, cy - R * 0.31 - R * 0.12, R * 4.24, R * 0.74);
+  x.fillStyle = '#f4f4f0'; x.fillRect(cx - R * 2.0, cy - R * 0.31, R * 4.0, R * 0.5);
+  x.fillStyle = '#b0202a'; x.fillRect(cx - R * 2.0, cy - R * 0.31 + R * 0.25 - R / 12, R * 4.0, R / 6);
+  x.fillStyle = blue; x.beginPath(); x.arc(cx, cy, R * 1.08, 0, 7); x.fill();
+  x.fillStyle = '#f4f4f0'; x.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? R * 0.38 : R; x.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); }
+  x.fill();
+}
+function decalMesh(tex, w, h, parent, name) {
+  const m = mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshPhongMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, shininess: 22 }), parent, name);
+  if (!tex) m.visible = false; return m;
 }
 
 // ------------------------------------------------------------------------------------------- the model
-export function buildJetMesh(side = 1) {
+export function buildJetMesh(side = 1, fsd) {   // fsd: index into FSD (0 = the player's #3); default: the next of the others
   const g = new THREE.Group(); g.name = 'hornet';
-  const team = side === 2 ? 0xff3322 : 0x33bbff;
-  const greyM = M(0x8f979e), underM = M(0xa4abb1), radomeM = M(0x5d646a), glareM = M(0x3b4045), darkM = M(0x24272a), blackM = M(0x0c0d0e, { shininess: 5 });
+  const team = side === 2 ? 0xff3322 : 0xff5a22;   // fin tip band: day-glo red-orange test band (side 2: red)
+  const [fsdNo, buno] = FSD[fsd ?? 1 + (fsdNext++ % (FSD.length - 1))];
+  const greyM = M(0xa7aaab, { shininess: 40 }), underM = M(0xe8e9e6, { shininess: 40 }), radomeM = M(0x9a9d9e, { shininess: 30 }), glareM = M(0x2a2d30), darkM = M(0x24272a), blackM = M(0x0c0d0e, { shininess: 5 });
+  const pair2 = [greyM, underM];
   const metalM = M(0x4a4d52, { shininess: 50 }), gearM = M(0xd9dcde), tyreM = M(0x1b1b1b, { shininess: 4 }), teamM = M(team, { emissive: team, emissiveIntensity: 0.15 });
   const glassM = new THREE.MeshPhongMaterial({ color: 0x9fc6d8, specular: 0xffffff, shininess: 90, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide });
   const frameM = M(0x34383c);
@@ -138,8 +177,15 @@ export function buildJetMesh(side = 1) {
   }, 4), fuseMats, g, 'fuselage');
   // cockpit coaming lip (top of the side walls, x 0.52..0.62 at the sill) is part of the loft; a dark rim edge on it:
   for (const s of [-1, 1]) mesh(boxG(0.1, 0.03, 2.7, s * 0.57, 0.735, -4.35), darkM, g, 'coaming');
-  const decal = new THREE.MeshBasicMaterial({ map: sideNumber(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
-  for (const s of [-1, 1]) { const d = mesh(new THREE.PlaneGeometry(0.5, 0.25), decal, g, 'sideNumber'); d.position.set(s * 0.625, -0.02, -6.2); d.rotation.y = s * (Math.PI / 2 - 0.12); }
+  // FSD number on the nose, NAVY on the aft fuselage, the ejection seat warning triangle under the canopy rail
+  const noseNo = texOf('fsdNose' + fsdNo, 128, 128, (x, w, h) => stencil(x, String(fsdNo), w / 2, h / 2 + 4, 110));
+  const navyT = texOf('fsdNavy', 256, 64, (x, w, h) => stencil(x, 'NAVY', w / 2, h / 2 + 2, 54));
+  const ejT = texOf('ejectTri', 64, 64, (x, w, h) => { x.fillStyle = '#d42a1c'; x.beginPath(); x.moveTo(w / 2, 3); x.lineTo(w - 3, h - 6); x.lineTo(3, h - 6); x.closePath(); x.fill(); x.fillStyle = '#f2f0e8'; x.beginPath(); x.moveTo(w / 2, 18); x.lineTo(w - 15, h - 13); x.lineTo(15, h - 13); x.closePath(); x.fill(); stencil(x, 'EJECT', w / 2, h - 19, 10, '#111'); });
+  for (const s of [-1, 1]) {
+    const d = decalMesh(noseNo, 0.42, 0.42, g, 'sideNumber'); d.position.set(s * 0.6, -0.05, -6.35); d.rotation.y = s * (Math.PI / 2 - 0.16);
+    const n = decalMesh(navyT, 0.95, 0.24, g, 'navyTitle'); n.position.set(s * 1.17, 0.0, 4.4); n.rotation.y = s * Math.PI / 2;
+    const e = decalMesh(ejT, 0.16, 0.16, g, 'ejectWarning'); e.position.set(s * 0.73, 0.5, -3.3); e.rotation.y = s * (Math.PI / 2 - 0.05);
+  }
   // gun port
   mesh(new THREE.BoxGeometry(0.07, 0.03, 0.22).rotateX(0.27).translate(0, 0.335, -7.0), blackM, g, 'gunPort');
 
@@ -153,11 +199,10 @@ export function buildJetMesh(side = 1) {
       else p.setXYZ(i, s * (0.68 + (Math.abs(x) - 0.68) * 0.45), -0.45 + (y + 0.45) * 0.75, 3.2);   // fair into the body
     }
     ig.computeVertexNormals(); mesh(ig, [blackM, greyM], g, 'intake' + (s < 0 ? 'L' : 'R'));
-    mesh(slab([[.55, -4.95, .04], [.78, -4.1, .05], [1.02, -3.25, .06], [1.3, -2.4, .07], [1.55, -1.72, .08], [1.78, -1.24, .08], [1.4, -0.7, .1], [.6, -0.7, .12]],
-      (a, b, w) => [s * a, 0.1 + w, b]), greyM, g, 'lex');
-    // low-vis roundel on the intake side
-    const rd = new THREE.Group(); rd.position.set(s * 1.342, -0.5, -1.45); rd.rotation.y = s * Math.PI / 2; g.add(rd);
-    mesh(new THREE.RingGeometry(0.13, 0.19, 16), teamM, rd); mesh(new THREE.CircleGeometry(0.07, 10), teamM, rd);
+    mesh(twoTone(slab([[.55, -4.95, .04], [.78, -4.1, .05], [1.02, -3.25, .06], [1.3, -2.4, .07], [1.55, -1.72, .08], [1.78, -1.24, .08], [1.4, -0.7, .1], [.6, -0.7, .12]],
+      (a, b, w) => [s * a, 0.1 + w, b])), pair2, g, 'lex');
+    // full-colour national insignia on the intake side (1980: the low-visibility grey insignia is still to come)
+    const rd = decalMesh(texOf('starBar', 256, 128, starBar), 1.1, 0.55, g, 'insignia'); rd.position.set(s * 1.343, -0.48, -0.95); rd.rotation.y = s * Math.PI / 2;
   }
 
   // ---- wings: fixed box + leading-edge flap (x 1.6..tip), trailing-edge flap (1.2..3.6), aileron (3.6..5.5)
@@ -166,12 +211,12 @@ export function buildJetMesh(side = 1) {
   const surf = {};
   for (const s of [-1, 1]) {
     const S = s < 0 ? 'L' : 'R', map = (a, b, w) => [s * a, 0.05 + w, b], wv = (x, z, f) => [x, z, TM(x) * f, 0.42];
-    mesh(slab([wv(0.8, LE(0.8), .3), wv(1.6, LE(1.6), .3), wv(1.6, HL(1.6), .85), wv(5.71, HL(5.71), .85), wv(5.71, TE(5.71), .12), wv(5.5, TE(5.5), .12),
-      wv(5.5, HT(5.5), .55), wv(3.6, HT(3.6), .55), wv(1.2, HT(1.2), .55), wv(1.2, TE(1.2), .12), wv(0.8, TE(0.8), .12)], map), greyM, g, 'wing' + S);
+    mesh(twoTone(slab([wv(0.8, LE(0.8), .3), wv(1.6, LE(1.6), .3), wv(1.6, HL(1.6), .85), wv(5.71, HL(5.71), .85), wv(5.71, TE(5.71), .12), wv(5.5, TE(5.5), .12),
+      wv(5.5, HT(5.5), .55), wv(3.6, HT(3.6), .55), wv(1.2, HT(1.2), .55), wv(1.2, TE(1.2), .12), wv(0.8, TE(0.8), .12)], map)), pair2, g, 'wing' + S);
     const hp = (x, z) => V(s * x, 0.05, z), pair = (a, b) => s > 0 ? [a, b] : [b, a];   // hinge axis always points +x
-    surf['lef' + S] = hinged(g, slab([wv(1.6, LE(1.6), .3), wv(5.71, LE(5.71), .3), wv(5.71, HL(5.71), .85), wv(1.6, HL(1.6), .85)], map), greyM, ...pair(hp(1.6, HL(1.6)), hp(5.71, HL(5.71))), 'lef' + S);
-    surf['flap' + S] = hinged(g, slab([wv(1.2, HT(1.2), .55), wv(3.6, HT(3.6), .55), wv(3.6, TE(3.6), .12), wv(1.2, TE(1.2), .12)], map), greyM, ...pair(hp(1.2, HT(1.2)), hp(3.6, HT(3.6))), 'flap' + S);
-    surf['ail' + S] = hinged(g, slab([wv(3.6, HT(3.6), .55), wv(5.5, HT(5.5), .55), wv(5.5, TE(5.5), .12), wv(3.6, TE(3.6), .12)], map), greyM, ...pair(hp(3.6, HT(3.6)), hp(5.5, HT(5.5))), 'ail' + S);
+    surf['lef' + S] = hinged(g, twoTone(slab([wv(1.6, LE(1.6), .3), wv(5.71, LE(5.71), .3), wv(5.71, HL(5.71), .85), wv(1.6, HL(1.6), .85)], map)), pair2, ...pair(hp(1.6, HL(1.6)), hp(5.71, HL(5.71))), 'lef' + S);
+    surf['flap' + S] = hinged(g, twoTone(slab([wv(1.2, HT(1.2), .55), wv(3.6, HT(3.6), .55), wv(3.6, TE(3.6), .12), wv(1.2, TE(1.2), .12)], map)), pair2, ...pair(hp(1.2, HT(1.2)), hp(3.6, HT(3.6))), 'flap' + S);
+    surf['ail' + S] = hinged(g, twoTone(slab([wv(3.6, HT(3.6), .55), wv(5.5, HT(5.5), .55), wv(5.5, TE(5.5), .12), wv(3.6, TE(3.6), .12)], map)), pair2, ...pair(hp(3.6, HT(3.6)), hp(5.5, HT(5.5))), 'ail' + S);
     // wingtip launcher rail
     mesh(boxG(0.07, 0.1, 2.5, s * 5.79, 0.03, 1.25), metalM, g, 'rail' + S);
     // pylons for the bombs
@@ -179,7 +224,9 @@ export function buildJetMesh(side = 1) {
   }
 
   // ---- vertical tails (canted 20 deg out), rudders on the lower aft part; team band at the tip
-  const CANT = 20 * Math.PI / 180, FS = 2.93, FTE = v => 7.2 + v * 0.188, FT = v => 0.16 - v * 0.03;
+  // fin span 2.5 m along the cant: Jane's gives 9.68 m2 for both fins, i.e. 4.84 m2 each over a ~2.85 m root and ~1.1 m
+  // tip chord = ~2.45 m; the first model had 2.93 m (overall height 5.45 m against the real 4.66 m)
+  const CANT = 20 * Math.PI / 180, FS = 2.5, FTE = v => 7.2 + v * 0.188, FT = v => 0.16 - v * 0.03;
   for (const s of [-1, 1]) {
     const S = s < 0 ? 'L' : 'R';
     const map = (z, v, w) => [s * (1.05 + w * Math.cos(CANT) + v * Math.sin(CANT)), 0.65 - w * Math.sin(CANT) + v * Math.cos(CANT), z];
@@ -189,7 +236,16 @@ export function buildJetMesh(side = 1) {
     const a = V(...map(rz(0.15), 0.15, 0)), b = V(...map(rz(1.6), 1.6, 0));
     surf['rud' + S] = hinged(g, slab([fv(rz(0.15), 0.15, .6), fv(FTE(0.15), 0.15, .15), fv(FTE(1.6), 1.6, .15), fv(rz(1.6), 1.6, .6)], map), greyM, a, b, 'rudder' + S);
     surf['finTip' + S] = V(...map(7.6, FS, 0));
+    // outer face of the fin: the FSD number large, the BuNo low on the fixed part (ahead of the rudder hinge)
+    const onFin = (tex, w, h, z, v, name) => { const piv = new THREE.Group(); piv.position.set(...map(z, v, FT(v) * 0.5 + 0.004)); piv.rotation.z = -s * CANT; g.add(piv); const d = decalMesh(tex, w, h, piv, name); d.rotation.y = s * Math.PI / 2; return d; };
+    onFin(texOf('fsdFin' + fsdNo, 128, 128, (x, w, h) => stencil(x, String(fsdNo), w / 2, h / 2 + 4, 116)), 0.7, 0.7, 6.52, 1.6, 'finNumber');
+    onFin(texOf('buno' + buno, 256, 48, (x, w, h) => stencil(x, String(buno), w / 2, h / 2 + 2, 40)), 0.8, 0.15, 5.95, 0.5, 'bunoFin');
+    onFin(texOf('fsdNavyFin', 256, 48, (x, w, h) => stencil(x, 'NAVY', w / 2, h / 2 + 2, 40)), 0.6, 0.11, 5.95, 0.72, 'navyFin');
   }
+  // national insignia: top of the left wing, underside of the right wing (1980 Navy practice)
+  { const t = texOf('starBar', 256, 128, starBar);
+    const up = decalMesh(t, 1.5, 0.75, g, 'wingStarTop'); up.position.set(-3.3, 0.135, 0.95); up.rotation.x = -Math.PI / 2;
+    const dn = decalMesh(t, 1.16, 0.58, g, 'wingStarLow'); dn.position.set(3.25, -0.012, 0.95); dn.rotation.set(Math.PI / 2, 0, Math.PI); }
 
   // ---- all-moving stabilators: pivot at z 7.0, 2 deg anhedral
   const AN = Math.tan(2 * Math.PI / 180);
@@ -197,7 +253,7 @@ export function buildJetMesh(side = 1) {
     const S = s < 0 ? 'L' : 'R', map = (x, z, w) => [s * x, -0.05 - (x - 1.2) * AN + w, z];
     const geo = slab([[1.2, 6.0, .12], [3.3, 7.7, .05], [3.3, 8.45, .03], [1.2, 8.5, .05]], map);
     const p0 = V(s * 1.2, -0.05, 7.0), p1 = V(s * 3.3, -0.05 - 2.1 * AN, 7.0);
-    surf['stab' + S] = hinged(g, geo, greyM, ...(s > 0 ? [p0, p1] : [p1, p0]), 'stab' + S);
+    surf['stab' + S] = hinged(g, twoTone(geo), pair2, ...(s > 0 ? [p0, p1] : [p1, p0]), 'stab' + S);
   }
 
   // ---- spine speedbrake (hinged at its front)

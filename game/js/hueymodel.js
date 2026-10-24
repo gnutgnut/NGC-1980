@@ -140,8 +140,17 @@ let armyTex = null;
 function armyDecal() {
   if (armyTex) return armyTex;
   const c = document.createElement('canvas'); c.width = 256; c.height = 40; const x = c.getContext('2d');
-  x.font = 'bold 34px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#f2f2ea'; x.fillText('U.S. ARMY', 128, 22);
+  x.font = 'bold 34px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#121310'; x.fillText('U.S. ARMY', 128, 22);   // 1980: subdued black on olive drab
   armyTex = new THREE.CanvasTexture(c); armyTex.colorSpace = THREE.SRGBColorSpace; return armyTex;
+}
+// the tail number on the fin: the Army serial (fiscal year - number), black; 72-21509 is a UH-1H serial block of the
+// period (the airframe itself is fictional)
+let serialTex = null;
+function serialDecal() {
+  if (serialTex) return serialTex;
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
+  x.font = 'bold 50px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#121310'; x.fillText('72-21509', 128, 34);
+  serialTex = new THREE.CanvasTexture(c); serialTex.colorSpace = THREE.SRGBColorSpace; return serialTex;
 }
 
 // a seated crewman facing -z, origin on the seat cushion; put(geo, mat) gets geometry in that frame
@@ -218,7 +227,10 @@ export function buildHueyMesh() {
   const beamM = B(0xfff2c0, { transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
   const beam = mesh(new THREE.CylinderGeometry(1.3, 0.1, 7, 12, 1, true).translate(0, 3.55, 0).rotateX(-Math.PI / 2), beamM, lens, 'landingBeam');
   beam.rotation.y = Math.PI;   // circle faces +z: point the cone the same way
+  // wire strike protection (fielded on Army Hueys from 1979-80): roof cutter, the deflector down the windscreen
+  // centre post, the belly cutter under the chin
   front.add(rodG([0, 0.44, -2.15], [0, 0.66, -2.42], 0.03), metalM);   // upper wire cutter
+  front.add(tubeG([-3.5, -3.25, -2.95, -2.65, -2.35].map(z => [0, at(z)[0][1] + 0.03, z]), 0.016, 10, 4), metalM);   // windscreen deflector
   body.add(rodG([0.3, 0.44, -1.95], [0.3, 0.56, -2.05], 0.025), metalM); body.add(rodG([0.3, 0.56, -2.0], [0.3, 0.56, -2.45], 0.016, 4), metalM);   // pitot
   front.add(rodG([0, -1.12, -3.0], [0, -1.32, -3.25], 0.05), metalM);                                                                   // lower wire cutter
 
@@ -253,6 +265,11 @@ export function buildHueyMesh() {
   body.add(rodG([0, -1.15, 0.6], [0, -1.45, 0.9], 0.02, 4), blackM); body.add(boxG(0.03, 0.25, 0.3, 0, -1.25, -0.6), darkM);   // belly antennas
   for (const s of [-1, 1]) body.add(rodG([s * 0.25, 0.6, 5.4], [s * 0.25, 0.6, 6.4], 0.02, 4), blackM), body.add(rodG([s * 0.25, 0.53, 5.4], [s * 0.25, 0.6, 5.4], 0.02, 4), blackM),
     body.add(rodG([s * 0.25, 0.55, 6.4], [s * 0.25, 0.6, 6.4], 0.02, 4), blackM);   // towel-bar antennas on the boom
+  // AN/APR-39 radar warning receiver: four spiral antennas, two on the nose looking forward-out, two at the end of the
+  // boom looking aft-out (the scope in the cockpit is theirs)
+  for (const s of [-1, 1]) for (const [p, n] of [[[s * 0.88, -0.56, -3.44], [s * 0.7, 0, -0.7]], [[s * 0.15, 0.42, 8.96], [s * 0.6, 0, 0.8]]]) {
+    const a = V(...p), b = V(...p).addScaledVector(V(...n), 0.045); body.add(rodG(a, b, 0.11, 10), darkM); body.add(rodG(b, V(...p).addScaledVector(V(...n), 0.05), 0.08, 10), blackM);
+  }
 
   // ---- tail: fin, gearbox fairings, tail skid, synchronized elevator, markings
   const FIN = [[7.55, 0.55, 0.24], [8.85, 2.68, 0.13], [9.05, 2.76, 0.1], [9.5, 2.74, 0.08], [9.45, 2.3, 0.09], [9.35, 1.0, 0.11], [9.25, 0.3, 0.13], [9.05, 0.06, 0.15], [8.45, 0.18, 0.2]];
@@ -267,6 +284,8 @@ export function buildHueyMesh() {
   for (const s of [-1, 1]) {
     const d = mesh(new THREE.PlaneGeometry(1.08, 0.18),new THREE.MeshBasicMaterial({ map: armyDecal(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), g, 'usArmy');
     d.position.set(s * 0.462, 0.13, 4.86); d.rotation.y = s * (Math.PI / 2 - 0.085);
+    const n = mesh(new THREE.PlaneGeometry(0.86, 0.21), new THREE.MeshBasicMaterial({ map: serialDecal(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), g, 'tailNumber');
+    n.position.set(s * 0.08, 1.3, 8.8); n.rotation.y = s * Math.PI / 2;
   }
 
   // ---- skids: tubes with upturned toes, arched cross tubes, steps
@@ -296,16 +315,24 @@ export function buildHueyMesh() {
   const [gx, gy, gz] = HUEY.GUN;
   body.add(rodG([gx + 0.08, -1.05, gz], [gx + 0.08, 0.42, gz], 0.05, 6), metalM); body.add(rodG([gx + 0.08, gy - 0.06, gz], [gx, gy - 0.06, gz], 0.04, 5), metalM);
   const gunYaw = group(g, 'doorGun', gx, gy, gz), gunPitch = group(gunYaw, 'gunPitch'), gunBody = group(gunPitch, 'm60');
-  { const gb = bucket();
+  const m60 = gb => {   // M60D on its pintle: receiver, butt with spade grips, barrel, flash hider, feed tray, ammo can (olive), mount
     gb.add(boxG(0.07, 0.11, 0.42, 0, 0.02, 0), blackM); gb.add(boxG(0.05, 0.1, 0.25, 0, 0.0, 0.33), blackM); gb.add(cylZ(0.017, 0.017, 0.56, 6).translate(0, 0.03, -0.48), blackM);
     gb.add(boxG(0.03, 0.03, 0.3, 0, -0.01, -0.36), blackM); gb.add(cylZ(0.026, 0.026, 0.08, 6).translate(0, 0.03, -0.8), blackM); gb.add(boxG(0.06, 0.05, 0.18, 0, -0.02, -0.28), blackM);
     gb.add(boxG(0.03, 0.1, 0.04, 0, -0.08, 0.1), blackM); gb.add(boxG(0.1, 0.17, 0.24, 0.1, -0.1, -0.02), olive2M); gb.add(boxG(0.06, 0.02, 0.1, 0.05, 0.0, -0.02), metalM);
-    gb.add(boxG(0.05, 0.06, 0.06, 0, -0.06, 0), metalM); gb.flush(gunBody, 'm60Parts'); }
+    gb.add(boxG(0.05, 0.06, 0.06, 0, -0.06, 0), metalM); };
+  { const gb = bucket(); m60(gb); gb.flush(gunBody, 'm60Parts'); }
   const flashM = B(0xffc860, { transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
   const flash = mesh(merge([new THREE.PlaneGeometry(0.22, 0.5).rotateX(Math.PI / 2), new THREE.PlaneGeometry(0.22, 0.5).rotateX(Math.PI / 2).rotateZ(Math.PI / 2)]).translate(0, 0.03, -1.05), flashM, gunBody, 'muzzleFlash');
   const gunnerG = group(g, 'gunner', gx + 0.5, -0.74, gz + 0.04);
   body.add(boxG(0.42, 0.06, 0.42, gx + 0.52, -0.77, gz + 0.06), darkM); body.add(rodG([gx + 0.52, -1.05, gz + 0.06], [gx + 0.52, -0.77, gz + 0.06], 0.05, 5), metalM);
   { const gb = bucket(); crewman((geo, m) => gb.add(geo, m), crewM); gb.flush(gunnerG, 'gunnerBody'); }
+  // the crew chief on the right with the second M60D (static: the game aims the left gun only), as an Army slick flew
+  { body.add(rodG([-gx - 0.08, -1.05, gz], [-gx - 0.08, 0.42, gz], 0.05, 6), metalM); body.add(rodG([-gx - 0.08, gy - 0.06, gz], [-gx, gy - 0.06, gz], 0.04, 5), metalM);
+    const yawR = group(g, 'doorGunR', -gx, gy, gz); yawR.rotation.y = -Math.PI / 2; const pR = group(yawR, 'gunPitchR'); pR.rotation.x = -0.35;
+    const gb = bucket(); m60(gb); gb.flush(pR, 'm60RParts');
+    const chief = group(g, 'crewChief', -gx - 0.5, -0.74, gz + 0.04); chief.rotation.y = -Math.PI / 2;
+    body.add(boxG(0.42, 0.06, 0.42, -gx - 0.52, -0.77, gz + 0.06), darkM); body.add(rodG([-gx - 0.52, -1.05, gz + 0.06], [-gx - 0.52, -0.77, gz + 0.06], 0.05, 5), metalM);
+    const cb = bucket(); crewman((geo, m) => cb.add(geo, m), crewM); cb.flush(chief, 'crewChiefBody'); }
 
   // ---- main rotor: tilted mast -> swashplate -> spinning hub -> teetering blade beam (+ precone) + stabilizer bar
   const mast = group(g, 'mast', ...HUEY.HUB); mast.rotation.x = -MAST_TILT;   // axis (0, cos 5, -sin 5)

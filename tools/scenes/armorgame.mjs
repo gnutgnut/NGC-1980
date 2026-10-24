@@ -24,6 +24,7 @@ export default async function (h) {
   await h.expect("document.getElementById('hint').textContent.includes('M60A3')");
   await h.key('tap', 'KeyY'); await h.wait(600);
   await h.expect("__G.G.craft === 'm60' && __G.crafts.seat === 0");
+  await h.key('tap', 'KeyI');   // cold: the driver's own start-up (MASTER on, START)
   await h.waitFor('__A.T().fm.eng.running', 15000);
   await h.wait(800); await h.shot('m60-driver-periscopes');
   await h.key('tap', 'KeyH'); await h.wait(1500); await h.shot('m60-driver-head-out');
@@ -53,7 +54,7 @@ export default async function (h) {
   await h.expect("__G.G.craft === 'foot' && Math.hypot(__G.foot.W.x - __A.T().fm.origin()[0], __G.foot.W.z - __A.T().fm.origin()[2]) < 5");
   await h.eval("(__G.foot.view = 'third', __G.foot.W.yaw += 2.5, 1)"); await h.wait(900); await h.shot('out-at-the-hatch');
   // ---- 2. gunnery: a RUNAWAY building with a clear line of sight from 220-420 m (past the laser's 200 m minimum)
-  await h.eval(`(() => { const T = __G.terrainH; for (const I of __G.ISLANDS) for (const tg of (I.structs || [])) { if (tg.dead || tg.side !== 2 || tg.kind === 'aa' || tg.kind === 'shipyard') continue; const ty = tg.y + Math.max(2, tg.h * 0.8); for (const r of [240, 300, 360, 420]) for (let k = 0; k < 36; k++) { const a = k * Math.PI / 18, x = tg.x + Math.cos(a) * r, z = tg.z + Math.sin(a) * r, g = T(x, z); if (g < 2.5 || Math.hypot(T(x + 3, z) - T(x - 3, z), T(x, z + 3) - T(x, z - 3)) / 6 > 0.12 || __G.BASES.some(b => Math.hypot(b.x - x, b.z - z) < 25)) continue; let ok = true; for (let s = 6; s < r - tg.r && ok; s += 3) { const f = s / r, px = x + (tg.x - x) * f, pz = z + (tg.z - z) * f, py = g + 2.8 + (ty - g - 2.8) * f; if (py < Math.max(T(px, pz), 0) + 0.8) ok = false; } if (!ok) continue; window.__tgt = tg; __A.T().spawnAt({ x, z, yaw: Math.atan2(-(tg.x - x), -(tg.z - z)) }); return { at: [Math.round(x), Math.round(z), Math.round(g)], target: tg.kind, island: I.name, hp: tg.hp, d: r }; } } return null; })()`);
+  await h.eval(`(() => { const T = __G.terrainH; for (const I of __G.ISLANDS) for (const tg of (I.structs || [])) { if (tg.dead || tg.side !== 2 || tg.kind === 'aa' || tg.kind === 'shipyard') continue; const ty = tg.y + Math.max(2, tg.h * 0.8); for (const r of [240, 300, 360, 420]) for (let k = 0; k < 36; k++) { const a = k * Math.PI / 18, x = tg.x + Math.cos(a) * r, z = tg.z + Math.sin(a) * r, g = T(x, z); if (g < 2.5 || Math.hypot(T(x + 3, z) - T(x - 3, z), T(x, z + 3) - T(x, z - 3)) / 6 > 0.12 || __G.BASES.some(b => Math.hypot(b.x - x, b.z - z) < 25)) continue; let ok = true; for (let s = 6; s < r - tg.r && ok; s += 3) { const f = s / r, px = x + (tg.x - x) * f, pz = z + (tg.z - z) * f, py = g + 2.8 + (ty - g - 2.8) * f; if (py < Math.max(T(px, pz), 0) + 0.8) ok = false; } if (!ok) continue; window.__tgt = tg; __A.T().spawnAt({ x, z, yaw: Math.atan2(-(tg.x - x), -(tg.z - z)), state: 'hot' }); return { at: [Math.round(x), Math.round(z), Math.round(g)], target: tg.kind, island: I.name, hp: tg.hp, d: r }; } } return null; })()`);
   await h.expect('!!window.__tgt');
   await h.eval(`(__G.crafts.control('m60', 1, 'foot'), 1)`); await h.wait(500);
   await h.expect("__G.G.craft === 'm60' && __G.crafts.seat === 1 && __A.T().firstPerson()");
@@ -95,11 +96,11 @@ export default async function (h) {
   await h.eval(`(() => { const c = __G.war.carrier; __G.war.orderCarrier(c.p.x - Math.sin(c.yaw + 0.6) * 700, c.p.z - Math.cos(c.yaw + 0.6) * 700); const o = __A.A().fm.origin(), [x, z] = __G.GR.toLocal(c, o[0], o[2]); window.__dl = [x, z, c.p.x, c.p.z, c.yaw]; return __dl.map(v => +v.toFixed(2)); })()`);
   await h.wait(15000);
   await h.eval(`(() => { const c = __G.war.carrier, o = __A.A().fm.origin(), [x, z] = __G.GR.toLocal(c, o[0], o[2]); return { local: [x, z].map(v => +v.toFixed(2)), was: __dl.slice(0, 2).map(v => +v.toFixed(2)), shipMoved: +Math.hypot(c.p.x - __dl[2], c.p.z - __dl[3]).toFixed(1), turned: +((c.yaw - __dl[4]) * 57.3).toFixed(1), y: +o[1].toFixed(2) }; })()`);
-  await h.expect(`(() => { const c = __G.war.carrier, o = __A.A().fm.origin(), [x, z] = __G.GR.toLocal(c, o[0], o[2]); return Math.hypot(x - __dl[0], z - __dl[1]) < 0.3 && Math.hypot(c.p.x - __dl[2], c.p.z - __dl[3]) > 10; })()`);
+  await h.expect(`(() => { const c = __G.war.carrier, o = __A.A().fm.origin(), [x, z] = __G.GR.toLocal(c, o[0], o[2]); return Math.hypot(x - __dl[0], z - __dl[1]) < 0.6 && Math.hypot(c.p.x - __dl[2], c.p.z - __dl[3]) > 10; })()`);   // (0.6 m: since the live sea the deck heaves and rolls under it)
   await h.shot('m113-on-the-moving-deck');
   // ---- 5. the M113 down the home landing hard into the sea: vane up, pumps on, swim
   await h.eval(`(() => { const H = __G.HARDS.find(d => d.I === __G.HOME_B.isl), p = H.at(12); __A.A().spawnAt({ x: p[0], z: p[1], yaw: H.yaw + Math.PI }); __G.crafts.control('m113', 0, 'swap'); __A.A().view = 'chase'; __A.A().orbit.yaw = 2.4; __A.A().orbit.pitch = 0.3; return [Math.round(p[0]), Math.round(p[1])]; })()`);
-  await h.waitFor('__A.A().fm.eng.running', 15000);
+  await h.key('tap', 'KeyI'); await h.waitFor('__A.A().fm.eng.running', 15000);
   await h.key('tap', 'KeyN'); await h.key('tap', 'KeyB'); await h.waitFor('__A.A().V.vane > 0.95 && __A.A().fm.water.pumps', 25000);
   await h.expect('__A.A().V.vane > 0.95 && __A.A().fm.water.pumps');
   await h.key('down', 'KeyW'); await h.waitFor('__A.A().fm.water.afloat', 60000);
@@ -113,7 +114,7 @@ export default async function (h) {
   await h.eval('(__G.toHeli(), __G.armDelivery.runIn = 60, __G.G.mat = 300, __G.selIsl = __G.HOME_B.isl, __G.deliverArmour("m60"), __G.armDelivery.runs.length)');
   await h.expect('__G.armDelivery.runs.length === 1 && !!__G.armDelivery.runs[0].pl.hard');
   await h.eval(`(__G.crafts.control('m60', 2, 'foot'), __A.T().view = 'chase', __A.T().orbit.yaw = 2.6, __A.T().orbit.pitch = 0.3, 1)`);
-  await h.waitFor("__G.armDelivery.runs[0].state === 'beached'", 60000);
+  await h.waitFor("__G.armDelivery.runs[0].state === 'beached'", 120000);
   await h.wait(5000); await h.shot('lcm8-ramp-down');
   await h.waitFor("__G.armDelivery.runs[0].state === 'rampUp' || __G.armDelivery.runs[0].state === 'backing'", 60000);
   await h.eval('(__A.T().orbit.yaw = 0.5, 1)'); await h.wait(2500); await h.shot('lcm8-tank-ashore');

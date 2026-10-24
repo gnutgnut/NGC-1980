@@ -53,7 +53,7 @@ export function createTomcatSound(sfx) {
       for (let k = 0; k < 2; k++) { const e = o.n[k], w = N.wh[k]; sp(w.o.frequency, 180 + 820 * e + k * 3); sp(w.f.frequency, 1000 + 2600 * e); sp(w.g.gain, 0.04 * Math.min(1, e * 1.6) * (o.inside ? 1.4 : 0.8)); }
       sp(N.howl.frequency, 90 + 140 * n); sp(N.howlG.gain, 0.03 * Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (n - 0.6) / 0.4)))));
       const crank = o.start[0] || o.start[1];
-      sp(N.huf.gain, crank ? 0.06 : 0, 0.3); sp(N.stG.gain, crank ? 0.05 : 0, 0.2); sp(N.st.frequency, 400 + 3200 * Math.min(0.35, n) / 0.35);
+      sp(N.huf.gain, crank ? 0.06 : o.cart ? 0.022 : 0, 0.3);   // the huffer: idling beside a cold jet, roaring as it cranks one sp(N.stG.gain, crank ? 0.05 : 0, 0.2); sp(N.st.frequency, 400 + 3200 * Math.min(0.35, n) / 0.35);
       const st = o.stalled[0] || o.stalled[1]; sp(N.chug.gain, st ? 0.12 : 0, 0.05); sp(N.chugD.gain, st ? 0.12 : 0, 0.05);   // 0..0.24, pulsing
       sp(N.shkG.gain, 0.08 * o.shaker * on, 0.03);
       sp(N.muff.frequency, o.inside ? 1300 + 4000 * o.canopy : 18000);
@@ -71,6 +71,18 @@ export function createTomcatSound(sfx) {
     },
     bang(v = 1) { if (!sfx.ctx) return; sfx.boom?.(0.9 * v); sfx.noiseBurst?.(2600, 180, 0.12, 0.5 * v); },   // compressor stall
     lightoff() { sfx.noiseBurst?.(400, 80, 0.5, 0.25); },
+    // cockpit controls moving (synthesised clicks): a toggle's snap, a push-button's tick, a handle's clunk, a lever over
+    // its detent, a guard flipping, the ENG CRANK switch's solenoid (in, and thumping out at 50%), the thumb switches
+    click(kind = 'toggle') {
+      if (!sfx.ctx) return; const nb = (...a) => sfx.noiseBurst?.(...a), bl = (...a) => sfx.blip?.(...a);
+      if (kind === 'toggle') { nb(4200, 2400, 0.025, 0.22); bl(1900, 900, 0.015, 'square', 0.03); }
+      else if (kind === 'button') { nb(2600, 1700, 0.02, 0.13); bl(1300, 1100, 0.012, 'square', 0.02); }
+      else if (kind === 'handle') { nb(700, 180, 0.13, 0.32); bl(180, 80, 0.09, 'sine', 0.14); }
+      else if (kind === 'lever') { nb(1300, 380, 0.08, 0.22); bl(260, 160, 0.05, 'triangle', 0.06); }
+      else if (kind === 'guard') { nb(3200, 1500, 0.03, 0.2); setTimeout(() => nb(900, 300, 0.06, 0.18), 70); }
+      else if (kind === 'crank') { nb(950, 280, 0.07, 0.22); bl(140, 70, 0.1, 'square', 0.07); }
+      else if (kind === 'thumb') { nb(3600, 2600, 0.015, 0.1); }
+    },
     chime() { sfx.blip?.(880, 870, 0.18, 'sine', 0.07); setTimeout(() => sfx.blip?.(660, 650, 0.25, 'sine', 0.07), 190); },
     silence() { if (ready) { const t = sfx.ctx.currentTime; for (const g of [N.out.gain, N.shkG.gain, N.toneG.gain, N.rwrG.gain]) g.setTargetAtTime(0, t, 0.03); } },
   };

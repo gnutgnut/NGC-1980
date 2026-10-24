@@ -30,8 +30,29 @@ const env = { groundY: () => 0, water: () => false, wind: { x: 2, z: 1 } };
 const S = createC130Sim(), model = buildC130Mesh(), deck = buildC130Deck(); scene.add(model.group); model.group.add(deck.group);
 const sfx = new Sfx(), snd = createC130Audio(sfx);
 const START = Q.get('start') || 'air';
+let crewStart = false;
+// Engine start checklist (T.O. 1C-130H-1 flow, simplified): BEFORE STARTING ENGINES, then STARTING ENGINES in the
+// order 3, 4, 2, 1 (the GTC feeds #3 first; the rest start on its bleed or cross-bleed), then BEFORE TAXI.
+const START_ORDER = [2, 3, 1, 0];
+function startChecklist() {
+  const E = S.eng, allRun = E.every(e => e.run && e.N > 0.94);
+  if (!allRun) return { title: 'STARTING ENGINES', items: [['BATTERY', S.battery, 'ON'], ['GTC', S.gtc.N > 0.95, 'ON SPEED'], ['BLEED AIR VALVE', S.bleedValve, 'OPEN'],
+    ['POWER LEVERS', E.every(e => e.lever <= 19), 'GROUND IDLE'], ['BRAKES', brakes > 0, 'SET'], ...START_ORDER.map(k => [`ENGINE ${k + 1}`, E[k].run && E[k].N > 0.94, `${Math.round(E[k].N * 100)} %  ${Math.round(E[k].peakTit || E[k].tit)} C`])] };
+  return { title: 'BEFORE TAXI', items: [['GTC', !S.gtc.cmd, 'OFF'], ['GTC BLEED AIR VALVE', !S.bleedValve, 'CLOSED'], ['FLAPS', S.flapSel === 0.5, '50 %'], ['FLIGHT CONTROLS', true, 'FREE'], ['NOSE STEERING', true, 'CHECKED'], ['BRAKES', brakes === 0, 'OFF']] };
+}
+function crewStep(dt) {   // the engineer working through it: one action at a time, waiting for each engine to come on speed
+  if (!crewStart) return; crewStep.t = (crewStep.t || 0) + dt; if (crewStep.t < 1.2) return; crewStep.t = 0;
+  if (!S.battery) { S.battery = true; return; }
+  if (!S.gtc.cmd) { S.gtc.cmd = true; return; }
+  if (S.gtc.N < 0.95 && !S.eng.some(e => e.run)) return;
+  for (const k of START_ORDER) { const e = S.eng[k]; if (e.run && e.N > 0.94) continue; if (e.start > 0) return; if (e.cond !== 'run') { S.setCond(k, 'run'); return; } S.startEngine(k); return; }
+  if (S.gtc.cmd) { S.gtc.cmd = false; S.bleedValve = false; return; }
+  if (S.flapSel !== 0.5) { S.flapSel = 0.5; return; }
+  crewStart = false;
+}
 function reset(mode = START) {
-  if (mode === 'runway') { S.resetGround(0, 0, 40, 0); S.fuel = 10000; S.payload = 2000; S.flapSel = S.flap = 0.5; ctl.lever.fill(18); brakes = 1; }
+  if (mode === 'cold') { S.resetGround(0, 0, 40, 0, { running: false }); S.fuel = 10000; S.payload = 2000; ctl.lever.fill(18); brakes = 1; crewStart = false; }
+  else if (mode === 'runway') { S.resetGround(0, 0, 40, 0); S.fuel = 10000; S.payload = 2000; S.flapSel = S.flap = 0.5; ctl.lever.fill(18); brakes = 1; }
   else {
     const drop = mode === 'drop', rho = 4.9 * Math.exp(-(drop ? 220 : 400) / 6000), kias = drop ? 180 : 200;
     S.reset(new THREE.Vector3(0, drop ? 220 : 400, drop ? DZ.z + 2000 : 0), 0, kias / KT * Math.sqrt(1.225 / rho), { flap: 0, gear: 0, lever: 62 }); S.fuel = 9000; S.payload = 1500; ctl.lever.fill(62);
@@ -57,6 +78,7 @@ function onKey(e) {
   if (e.code === 'KeyN') S.setCond(0, S.eng[0].cond === 'airstart' ? 'run' : 'airstart');
   if (e.code === 'KeyB') brakes = brakes ? 0 : 1;
   if (e.code === 'Backspace') reset();
+  if (e.code === 'KeyK') { crewStart = !crewStart; }   // the flight engineer runs the start checklist
 }
 // free look + switch clicks
 const head = { yaw: 0, pitch: 0 }, ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), c0 = new THREE.Vector2();
@@ -84,6 +106,9 @@ export function click(id, alt = false) {
   else if (id === 'flap') S.flapSel = S.flapSel >= 1 ? 0 : S.flapSel + 0.5;
   else if (id === 'ap' || id === 'apAlt') { ap = !ap; apHold = { track: S.heading, alt: S.pos.y, kias: S.kias }; }
   else if (id === 'af') S.autoFeatherArm = !S.autoFeatherArm;
+  else if (id === 'bat') S.battery = !S.battery;
+  else if (id === 'gtc') S.gtc.cmd = !S.gtc.cmd;
+  else if (id === 'bleed') S.bleedValve = !S.bleedValve;
   else if (id === 'jump') jumpSwitch = { off: 'red', red: 'green', green: 'off' }[jumpSwitch];
   else if (id === 'doorL') S.doorCmd[0] = S.doorCmd[0] ? 0 : 1;
   else if (id === 'doorR') S.doorCmd[1] = S.doorCmd[1] ? 0 : 1;
@@ -101,6 +126,7 @@ let last = performance.now(), time = 0, telT = 0, paused = false;
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
 function pad() { const p = navigator.getGamepads ? [...navigator.getGamepads()].find(g => g && g.axes.length >= 2) : null; return p; }
 function step(dt) {
+  crewStep(dt);
   // controls: keyboard (smoothed), a gamepad / stick, the autopilot
   const k = c => keys.has(c) ? 1 : 0, sm = 1 - Math.exp(-4 * dt);
   const gp = pad();
@@ -108,7 +134,7 @@ function step(dt) {
   if (gp) { roll += gp.axes[0]; pitch += gp.axes[1]; if (gp.axes.length > 3) yaw += gp.axes[3] * 0.6; }
   ctl.roll += (roll * 0.8 - ctl.roll) * sm; ctl.pitch += (pitch * 0.6 - ctl.pitch) * sm; ctl.yaw += (yaw - ctl.yaw) * sm;
   const dl = (k('ShiftLeft') + k('ShiftRight') - k('ControlLeft') - k('ControlRight')) * 30 * dt;
-  for (let i = 0; i < 4; i++) ctl.lever[i] = Math.max(keys.has('KeyR') && S.onGround ? 0 : 34, Math.min(90, ctl.lever[i] + dl));
+  for (let i = 0; i < 4; i++) ctl.lever[i] = Math.max(S.onGround ? (keys.has('KeyR') ? 0 : 18) : 34, Math.min(90, ctl.lever[i] + dl));   // on the ground the levers live in the beta range (ground idle 18 deg)
   if (keys.has('KeyR') && S.onGround) for (let i = 0; i < 4; i++) ctl.lever[i] = Math.max(0, ctl.lever[i] - 40 * dt);
   ctl.trimRate = k('BracketRight') - k('BracketLeft');
   ctl.tiller += ((k('Period') - k('Comma')) - ctl.tiller) * sm;
@@ -159,10 +185,10 @@ function frame(now) {
   const caut = { gear: S.gear > 0.01 && S.gear < 0.99, flapOs: S.kias > C130.V_FLAP(S.flap) && S.flap > 0.05, ramp: S.ramp > 0.02, door: S.door[0] > 0.02 || S.door[1] > 0.02,
     otq: S.eng.some(e => e.torque > 19600), tit: S.eng.some(e => e.tit > 1083), nts: S.eng.some(e => e.nts), eng: S.eng.some(e => !e.run), fuel: S.fuel < 1800, stall: S.buffet > 0.3, af: S.autoFeatherArm,
     doorOs: (S.ramp > 0.02 && S.kias > C130.V_RAMP) || ((S.door[0] > 0.02 || S.door[1] > 0.02) && S.kias > C130.V_DOORS) };
-  deck.update(S, { ap, jumpLight: jumpSwitch, jumpSwitch, dz: dzv, agl: S.pos.y - 2.62, cautions: caut, mcReset, time, ctl: ap ? { pitch: c.pitch, roll: c.roll, yaw: c.yaw } : ctl }, dt, hover);
+  deck.update(S, { ap, jumpLight: jumpSwitch, jumpSwitch, dz: dzv, agl: S.pos.y - 2.62, cautions: caut, mcReset, time, checklist: S.onGround ? startChecklist() : null, ctl: ap ? { pitch: c.pitch, roll: c.roll, yaw: c.yaw } : ctl }, dt, hover);
   if (!Object.values(caut).some(Boolean)) mcReset = false;
   // sound
-  snd.update({ eng: S.eng, tas: S.tas, inside, dist: camera.position.distanceTo(S.pos), vr: 0 });
+  snd.update({ eng: S.eng, tas: S.tas, inside, dist: camera.position.distanceTo(S.pos), vr: 0, gtc: S.gtc.N, bleed: S.bleed });
   // telemetry
   if ((telT -= dt) <= 0 && !S.dead) {
     telT = 0.1; const deg = r => (r * 180 / Math.PI).toFixed(1), E = S.eng;
@@ -179,5 +205,5 @@ ${E.map((e, i) => `${i + 1}    ${e.lever.toFixed(0).padStart(3)}°  ${e.cond.pad
   requestAnimationFrame(frame);
 }
 window.__C = { S, model, deck, scene, camera, renderer, THREE, ctl, head, click, reset, get view() { return view; }, set view(v) { view = v; }, get ap() { return ap; }, set ap(v) { ap = v; apHold = { track: S.heading, alt: S.pos.y, kias: S.kias }; },
-  get hover() { return hover; }, mouse, set paused(v) { paused = v; }, DZ, get jumpSwitch() { return jumpSwitch; }, setHold(h) { apHold = { ...apHold, ...h }; }, sfx, snd };
+  get hover() { return hover; }, mouse, set crewStart(v) { crewStart = v; }, get crewStart() { return crewStart; }, set paused(v) { paused = v; }, DZ, get jumpSwitch() { return jumpSwitch; }, setHold(h) { apHold = { ...apHold, ...h }; }, sfx, snd };
 requestAnimationFrame(frame);

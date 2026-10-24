@@ -3,8 +3,13 @@
 // worker for the wild lands and on the main thread for the control zone.
 //   near: full detail (windows, doors, chimneys, garden clutter, road markings, walls) - drawn within ~500 m
 //   far:  boxes and roofs, plain road ribbons, fields - drawn out to the jet's view distance
+//   detail (ngc/world-polish): street furniture, parked cars, garden and yard clutter, harbour gear - drawn within
+//         ~240 m only (small things cost triangles and say nothing further out)
+// Every building's vertex ranges in near and far come back in dyn.bld, so a building can be knocked down later
+// (world/damage.js): its ranges collapse and its ruin is drawn in their place.
 import { Geo, col, shade, mixc } from './kit.js';
 import * as MD from './models.js';
+import * as TK from './townkit.js';   // ngc/world-polish: pub, school, chapel, street furniture, cars, harbour, farmyard, ruins
 import { netState, BKT, settlementOf, cellReady, CELL, FARM_CELL, farmOf, roadById, ROAD } from './net.js';
 import { townItems, farmItems, polesOf, mastOf } from './layout.js';
 import { rng } from './rng.js';
@@ -110,10 +115,16 @@ function tree(g, x, y, z, s, r) {   // a round broadleaf: trunk and a lumpy crow
 
 // ------------------------------------------------------------------------------------------- items -> geometry
 const FARL = col(0x8c8a84);
+// what a building is in the damage model (world/damage.js): types whose vertex ranges are recorded
+export const BUILDINGS = new Set(['house', 'cottage', 'terrace', 'church', 'petrol', 'barn', 'boatshed', 'school', 'chapel', 'vhall', 'parlour', 'office', 'garage']);
+export const bldKey = it => it.t + ':' + (it.seed | 0) + ':' + Math.round(it.x * 10) + ':' + Math.round(it.z * 10);   // (rooms.js planOf's key)
+const DETAIL = new Set(['pots', 'memorial', 'bench', 'phone', 'post', 'shelter', 'lamp', 'sign', 'laundry', 'shed', 'woodpile', 'car', 'tractor', 'pcar', 'picnic', 'bin', 'psign', 'crane', 'fishbox', 'nets', 'fueltank', 'hboat', 'buoy', 'balestack', 'muck', 'trough', 'trailer', 'landrover', 'churns']);
 function itemGeo(G, it, hf, vh, dyn) {
-  const gN = G.sN, gF = G.sF;
+  const gD = DETAIL.has(it.t) ? G.sD : G.sN, gN = G.sN, gF = G.sF;
   const r = rng(it.seed | 0);
   if (it.ground) it.y = hf(it.x, it.z);   // small things stand on the finished ground (platforms included)
+  const bld = BUILDINGS.has(it.t), n0 = gN.count, f0 = gF.count;
+  if (it.t !== 'field') { gN.weather(it.y, 1.0, bld ? 0.34 : 0.22, 0.07); gD.weather(it.y, 0.6, 0.18, 0.05); }   // grime at the foot of the walls
   const P = (g, f) => { g.push(it.x, it.y, it.z, it.yaw); const res = f(g); g.pop(); return res; };
   const chim = tops => { if (tops) for (const [u, v, w] of tops) { const c = Math.cos(it.yaw), s = Math.sin(it.yaw); dyn.chimneys.push([it.x + c * u + s * w, it.y + v, it.z - s * u + c * w]); } };
   const far = (w, d, h, roofH, wall, roof) => P(gF, g => { g.box(0, -it.drop, 0, w, h + it.drop, d, col(wall), 1); g.gable(0, h, 0, w, d, roofH, col(roof), col(wall), 0.2); });
@@ -127,7 +138,7 @@ function itemGeo(G, it, hf, vh, dyn) {
     case 'barn': P(gN, g => MD.barn(g, r, it)); P(gF, g => { g.box(0, -it.drop, 0, it.w, 5.5 + it.drop, it.d, col(0x7a4a3a), 1); g.gable(0, 5.5, 0, it.w, it.d, it.d * 0.32, col(0x6a6a6a), col(0x7a4a3a), 0.2); }); break;
     case 'openshed': P(gN, g => MD.openShed(g, r, it)); P(gF, g => g.gable(0, 4.5, 0, it.w, it.d, 1.2, col(0x7a3a2a), null, 0.2)); break;
     case 'silo': P(gN, g => MD.silo(g, r, it)); P(gF, g => g.cyl(0, -it.drop, 0, 2.2, 12.6 + it.drop, 6, col(0x9aa0a6), 2)); break;
-    case 'tractor': P(gN, g => MD.tractor(g, r)); break;
+    case 'tractor': P(gD, g => MD.tractor(g, r)); break;
     case 'boatshed': P(gN, g => MD.boatShed(g, r, it)); far(6, 10, 3.6, 1.6, 0x5a3a2a, 0x3d424a); break;
     case 'lighthouse': { const o = P(gN, g => MD.lighthouse(g, r, it)); P(gF, g => { g.cyl(0, 0, 0, 2.2, (it.h || 18) + 2, 6, col(0xf0eee8), 2, 1.6); }); const c = Math.cos(it.yaw), s = Math.sin(it.yaw); dyn.lights.push([it.x, it.y + o.lamp[1], it.z]); break; }
     case 'mast': { const o = P(gN, g => MD.mast(g, r, it)); P(gF, g => { g.strut([0, 0, 0], [0, it.h, 0], 1.2, col(0xc0281e)); }); dyn.masts.push([it.x, it.y, it.z, it.h]); break; }
@@ -139,22 +150,47 @@ function itemGeo(G, it, hf, vh, dyn) {
       for (let k = 0; k < Math.floor(it.len / 9) + 1; k++) for (const side of [-1, 1]) { const u = side * 3.4, v = z0 + 5 + k * 9; if (v > z0 + it.len) continue; dyn.moorings.push([it.x + c * u + s * v, it.z - s * u + c * v, it.yaw + (side > 0 ? 0 : Math.PI)]); }
       break;
     }
-    case 'pots': P(gN, g => MD.lobsterPots(g, r, 10)); break;
-    case 'memorial': P(gN, g => MD.memorial(g, r)); break;
-    case 'bench': P(gN, g => MD.bench(g)); break;
-    case 'phone': P(gN, g => MD.phoneBox(g)); break;
-    case 'post': P(gN, g => MD.postBox(g)); break;
-    case 'shelter': P(gN, g => MD.busShelter(g)); break;
-    case 'lamp': P(gN, g => MD.lamp(g)); break;
-    case 'sign': P(gN, g => MD.roadSign(g, r)); break;
-    case 'laundry': P(gN, g => MD.laundry(g, r)); break;
-    case 'shed': P(gN, g => MD.shed(g, r, it)); break;
-    case 'woodpile': P(gN, g => MD.woodpile(g, r)); break;
+    case 'pots': P(gD, g => MD.lobsterPots(g, r, 10)); break;
+    case 'memorial': P(gD, g => MD.memorial(g, r)); break;
+    case 'bench': P(gD, g => MD.bench(g)); break;
+    case 'phone': P(gD, g => TK.phoneK6(g)); break;
+    case 'post': P(gD, g => TK.pillarBox(g)); break;
+    case 'shelter': P(gD, g => MD.busShelter(g)); break;
+    case 'lamp': P(gD, g => TK.lampColumn(g)); break;
+    case 'sign': P(gD, g => MD.roadSign(g, r)); break;
+    case 'laundry': P(gD, g => MD.laundry(g, r)); break;
+    case 'shed': P(gD, g => MD.shed(g, r, it)); break;
+    case 'woodpile': P(gD, g => MD.woodpile(g, r)); break;
     case 'garage': P(gN, g => MD.garageBox(g, r, it)); break;
-    case 'car': if (!isDrivableCar(it)) P(gN, g => MD.car(g, r, it.paint)); break;   // ngc/wheeledgame: the drivable ones are crafts
+    case 'car': if (!isDrivableCar(it)) P(gD, g => TK.car2(g, r, it.paint, ['saloon', 'hatch', 'estate', 'saloon', 'mini'][(it.seed >>> 3) % 5])); break;   // ngc/wheeledgame: the drivable ones are crafts
+    // ---- ngc/world-polish
+    case 'pcar': P(gD, g => TK.car2(g, r, it.paint, it.kind)); break;
+    case 'picnic': P(gD, g => TK.picnic(g, r)); break;
+    case 'bin': P(gD, g => TK.litterBin(g)); break;
+    case 'psign': P(gD, g => TK.postSign(g, r, it.kind)); break;
+    case 'school': P(gN, g => TK.school(g, r, it)); P(gF, g => { g.box(0, -it.drop, -it.d / 2 + 4, it.w, 4.2 + it.drop, 8, col(0x8f897c), 1); g.gable(0, 4.2, -it.d / 2 + 4, it.w, 8, 5, col(0x3d424a), col(0x8f897c), 0.3); }); door(); break;
+    case 'chapel': P(gN, g => TK.chapel(g, r, it)); P(gF, g => { g.box(0, -it.drop, -1, it.w, 6.2 + it.drop, it.d - 2, col(0xc9c0a8), 1); g.push(0, 0, -1, Math.PI / 2).gable(0, 6.2, 0, it.d - 2, it.w, it.w * 0.42, col(0x3d424a), col(0xc9c0a8), 0.2).pop(); }); door(); break;
+    case 'vhall': P(gN, g => MD.hall(g, r, it)); far(it.w, it.d, 3.6, it.d * 0.4, it.wall, it.roof); door(); break;
+    case 'parlour': P(gN, g => TK.parlour(g, r, it)); far(it.w, it.d, 3, 1.1, 0xb8b4a8, 0x9a9a92); break;
+    case 'office': P(gN, g => TK.harbourOffice(g, r, it)); far(3.6, 3, 2.6, 0.9, 0x2a4a6a, 0x3d424a); break;
+    case 'slip': P(gN, g => TK.slipway(g, r, it.len, it.depth)); break;
+    case 'crane': P(gD, g => TK.handCrane(g)); break;
+    case 'fishbox': P(gD, g => TK.fishBoxes(g, r)); break;
+    case 'nets': P(gD, g => TK.netHeap(g, r)); break;
+    case 'fueltank': P(gD, g => TK.fuelTank(g)); break;
+    case 'hboat': P(gD, g => { g.push(0, 0.15, 0, 0, 0, (r() - 0.5) * 0.3); TK.boat(g, r, it.L || 4.2, (it.L || 4.2) * 0.36, 0.66); g.pop(); }); break;
+    case 'buoy': P(gD, g => TK.buoy(g, r)); break;
+    case 'balestack': P(gD, g => TK.baleStack(g, r)); break;
+    case 'muck': P(gD, g => TK.muckHeap(g)); break;
+    case 'trough': P(gD, g => TK.trough(g)); break;
+    case 'trailer': P(gD, g => TK.trailer(g, r)); break;
+    case 'landrover': P(gD, g => TK.landRover(g, r)); break;
+    case 'churns': P(gD, g => TK.churnStand(g, r)); break;
     case 'tree': tree(gN, it.x, it.y, it.z, it.s || 1, r); gF.push(it.x, it.y, it.z).blob(0, 4.2 * (it.s || 1), 0, 2.4 * (it.s || 1), 2.3 * (it.s || 1), 2.4 * (it.s || 1), LEAF[0]).pop(); break;
     case 'field': field(G, it, hf, vh, dyn); break;
   }
+  gN.unweather(); gD.unweather();
+  if (bld) { const D = TK.bldDims(it); dyn.bld.push({ k: bldKey(it), t: it.t, x: it.x, y: it.y, z: it.z, yaw: it.yaw || 0, w: D.w, d: D.d, H: D.H + D.rh, dz: D.dz || 0, n: [n0, gN.count], f: [f0, gF.count], it: { t: it.t, w: it.w, d: it.d, floors: it.floors, wall: it.wall, drop: it.drop, h: it.h, seed: it.seed } }); }
 }
 // a utility pole: 9 m, cross-arm with three insulators; wires come back as line pairs
 function pole(g, x, y, z, yaw) { g.push(x, y, z, yaw); g.cyl(0, -0.4, 0, 0.13, 9.4, 5, col(0x5a4632), 0, 0.1); g.box(0, 8.3, 0, 2.2, 0.14, 0.14, col(0x5a4632), 0); for (const u of [-0.9, 0, 0.9]) g.box(u, 8.44, 0, 0.1, 0.2, 0.1, col(0xd8d4c8), 0); g.pop(); }
@@ -181,7 +217,7 @@ export function chunkContent(ci, cj, hf) {
   return { items, roads, discs, x0, z0, x1, z1 };
 }
 export function buildGeo(content, hf, opts = {}) {
-  const G = { sN: new Geo(), sF: new Geo(), gN: new Geo(), gF: new Geo() }, vh = visHeight(hf, opts.lat || 4), dyn = { doors: [], chimneys: [], moorings: [], pastures: [], lights: [], masts: [] }, wires = [];
+  const G = { sN: new Geo(), sF: new Geo(), gN: new Geo(), gF: new Geo(), sD: new Geo() }, vh = visHeight(hf, opts.lat || 4), dyn = { doors: [], chimneys: [], moorings: [], pastures: [], lights: [], masts: [], bld: [] }, wires = [];
   for (const [R, idx] of content.roads) {
     const sorted = [...idx].sort((a, b) => a - b);
     let a = sorted[0], prev = a;
@@ -196,6 +232,6 @@ export function buildGeo(content, hf, opts = {}) {
   }
   for (const d of content.discs) { const c = d.kind === 'yard' ? col(0x7a6a52) : d.kind === 'quay' ? col(0x8a857a) : col(0x76736c); disc(G.gN, d.ax, d.ay + 0.135, d.az, d.hw + 0.4, c); disc(G.gF, d.ax, d.ay + 0.135, d.az, d.hw + 0.4, c, 8); }
   for (const it of content.items) itemGeo(G, it, hf, vh, dyn);
-  return { near: G.sN.build(), far: G.sF.build(), gnear: G.gN.build(), gfar: G.gF.build(), wires: new Float32Array(wires), dyn };
+  return { near: G.sN.build(), far: G.sF.build(), gnear: G.gN.build(), gfar: G.gF.build(), detail: G.sD.build(), wires: new Float32Array(wires), dyn };
 }
 export function buildChunk(ci, cj, hf) { return buildGeo(chunkContent(ci, cj, hf), hf); }

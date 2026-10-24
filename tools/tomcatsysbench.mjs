@@ -124,6 +124,52 @@ console.log('--- TF30 start air and airstarts ---');
   fly(D, 20, (D) => { const c = hd(); c.throttle = [0, 0]; return c; }, sea, (D, t, ev) => { for (const e of ev) if (e.e === 'lightoff' && lit === null) lit = t; });
   check('windmill airstart: light-off and back to idle', lit !== null && D.eng.every(e => e.run && e.n > 0.6), `light-off at ${lit?.toFixed(1)} s, rpm ${D.eng.map(e => (e.n * 100).toFixed(0)).join('/')}`);
 }
+console.log('--- the start on the switches, generators ---');
+{
+  // a cold jet on the deck: ENG CRANK R, the throttle IDLE at 20%, light-off, crank out at 50%, generator on line
+  const deck = () => { const A = createTomcatSim(G, { seed: 2 }); A.reset(0, 0, 0, 0, { running: false }); A.fuel = 4000; for (const e of A.eng) { e.n = 0; e.run = false; } return A; };
+  const A = deck(), SS = S.createStart(false), log = { lit: null, out: null, gen: null, motor20: null, maxOff: 0 };
+  let thrMoved = false;
+  const run = (A, SS, secs, each) => { for (let t = 0; t < secs; t += DT) { const ev = S.startStep(SS, A, DT, { ext: true }); const e2 = A.step(DT, ctl({ thr: 0 }), land); S.startPost(SS, A); if (each) each(t, ev, e2); } };
+  S.startPress(SS, A, 'crankR');
+  run(A, SS, 60, (t, ev, e2) => {
+    if (SS.thrOff[1]) log.maxOff = Math.max(log.maxOff, A.eng[1].n);
+    if (!thrMoved && A.eng[1].n >= 0.2) { thrMoved = true; log.motor20 = t; S.startPress(SS, A, 'thrR'); }
+    for (const e of e2) if (e.e === 'lightoff' && log.lit === null) log.lit = t;
+    for (const [e] of ev) if (e === 'crankout' && log.out === null) log.out = t;
+    if (SS.gens[1] && log.gen === null) log.gen = t;
+  });
+  check('crank R: motored to 20% on the cart, no light-off on the starter alone', log.motor20 > 4 && log.motor20 < 10 && log.maxOff <= 0.251, `20% at ${log.motor20?.toFixed(1)} s, max ${(log.maxOff * 100).toFixed(0)}% with the throttle OFF`, '20% ~6 s (game), never lights OFF');
+  check('throttle IDLE: light-off, crank switch out at 50%, R GEN on line', log.lit !== null && log.out > log.lit && log.gen > log.out && A.eng[1].run && SS.crank === 'OFF' && !A.eng[0].run, `light-off ${log.lit?.toFixed(1)} s, crank out ${log.out?.toFixed(1)} s, gen ${log.gen?.toFixed(1)} s, rpm ${(A.eng[1].n * 100).toFixed(0)}%`);
+  check('one generator up: main bus on, the other GEN dark', SS.bus && SS.gens[1] && !SS.gens[0], `gens ${SS.gens}`);
+  // the left engine (the cart still connected)
+  S.startPress(SS, A, 'crankL'); let lit2 = null; let moved = false;
+  run(A, SS, 40, (t, ev, e2) => { if (!moved && SS.cn[0] >= 0.2) { moved = true; S.startPress(SS, A, 'thrL'); } for (const e of e2) if (e.e === 'lightoff') lit2 = t; });
+  check('left engine on the cart: both at idle, both generators', lit2 !== null && A.eng.every(e => e.run && e.n > 0.62) && SS.gens.every(Boolean), `rpm ${A.eng.map(e => (e.n * 100).toFixed(0)).join('/')}`);
+  // throttle OFF: shutdown; GEN switch OFF drops it off line
+  S.startPress(SS, A, 'genL'); S.startStep(SS, A, DT, { ext: false });
+  check('L GEN OFF: off line (the right one carries the bus)', !SS.gens[0] && SS.bus, `gens ${SS.gens}`);
+  S.startPress(SS, A, 'genL'); S.startPress(SS, A, 'thrL'); run(A, SS, 1);
+  check('L throttle OFF: the engine shuts down', !A.eng[0].run && SS.thrOff[0], `run ${A.eng[0].run}`);
+  // a wet start: the throttle at IDLE before the crank
+  const B = deck(), SB = S.createStart(false); S.startPress(SB, B, 'thrR'); S.startPress(SB, B, 'crankR'); S.startStep(SB, B, DT, { ext: true });
+  check('throttle IDLE before the crank: a wet start', SB.wet[1], `wet ${SB.wet}`);
+  // no air: crank on deck without the cart (not on the carrier), in flight slow with both out
+  const Cn = deck(), SC = S.createStart(false); Cn.onGround = false; Cn.eas = 50; S.startPress(SC, Cn, 'crankR'); S.startStep(SC, Cn, DT, {});
+  check('both out, slow, airborne: crank finds no air', SC.cranking[1] === null && SC.crank === 'R', `air ${SC.cranking[1]}`);
+  // the auto start (I): right then left, both running, crank off, throttles IDLE
+  const Dd = deck(), SD = S.createStart(false); S.startAuto(SD, Dd); const order = [];
+  run(Dd, SD, 90, (t, ev) => { for (const [e, k] of ev) if (e === 'autocrank') order.push(k ? 'R' : 'L'); });
+  check('auto start: R then L, both at idle, generators on, crank OFF', order.join('') === 'RL' && Dd.eng.every(e => e.run && e.n > 0.62) && SD.gens.every(Boolean) && SD.crank === 'OFF' && !SD.auto, `order ${order.join(' ')}  rpm ${Dd.eng.map(e => (e.n * 100).toFixed(0)).join('/')}`);
+  // no generators in flight: the emergency generator keeps the essential bus
+  const E = air(250, 800), SE = S.createStart(true); SE.gen = [false, false]; fly(E, 0.1, ctl()); S.startStep(SE, E, DT, {});
+  check('both GENs off in flight: EMERG GEN carries the essential bus', !SE.bus && SE.emerg && SE.ess, `bus ${SE.bus} emerg ${SE.emerg}`);
+  // an airstart on the switches: the left engine flamed out at 270 KEAS, crank L (cross-bleed off the right), throttle at IDLE
+  const W = air(140, 1500); W.eng[0].run = false; W.eng[0].n = 0.1; const SW2 = S.createStart(true); fly(W, 0.1, ctl());
+  S.startPress(SW2, W, 'crankL'); let wl = null; const hw = holder(W, 1500, 140);
+  for (let t = 0; t < 20; t += DT) { S.startStep(SW2, W, DT, {}); const ev = W.step(DT, hw(), sea); S.startPost(SW2, W); for (const e of ev) if (e.e === 'lightoff' && wl === null) wl = t; }
+  check('airstart on the crank switch (cross-bleed): lit, crank out', SW2.cranking[0] === null && wl !== null && W.eng[0].run && SW2.crank === 'OFF', `light-off ${wl?.toFixed(1)} s, rpm ${(W.eng[0].n * 100).toFixed(0)}%, wet ${SW2.wet[0]}`);
+}
 console.log('--- compressor stall procedure ---');
 {
   // holding the pull and the power keeps it stalled into a flame-out; idle and nose down recovers (tomcatbench has the clear time)

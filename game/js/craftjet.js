@@ -23,10 +23,22 @@ export function createJetCraft(ctx) {
   D.frame = out => { out.x = J.pos.x; out.y = J.pos.y; out.z = J.pos.z; out.yaw = yawOf(); return out; };
   D.bounds = () => D.present() && J.onGround ? (D._b ||= {}, Object.assign(D._b, (() => { const y = yawOf(), c = Math.cos(y), s = Math.sin(y), ox = 1.2; return { x: J.pos.x + ox * s, z: J.pos.z + ox * c, yaw: y, hl: 8.2, hw: 1.5, y0: J.pos.y - 1.7, y1: J.pos.y + 3, def: D }; })())) : null;
   // ---------------------------------------------------------------- taking a jet (5 on the ALBATROSS deck, in the helicopter)
-  D.launch = () => {
-    if (G.mode !== 'zarch') { say('CLIMB OUT OF THE CAVE FIRST', 1.6); return; }
-    const c = war.carrier; if (!c || c.sinking !== undefined) { say('NO CARRIER  -  NO JETS', 1.6); return; }
+  // COMMANDER (o.command): the commander takes a Hornet out from any unit - the reserve was already counted by the
+  // caller (units/commander/); the Huey, if it sits on the deck, goes down to the hangar; the unit you leave carries on
+  D.launch = (o = {}) => {
+    if (G.mode !== 'zarch') { say('CLIMB OUT OF THE CAVE FIRST', 1.6); return false; }
+    const c = war.carrier; if (!c || c.sinking !== undefined) { say('NO CARRIER  -  NO JETS', 1.6); return false; }
+    if (o.command) {
+      if (D.present()) return false;
+      if (ctx.catBusy && ctx.catBusy(D)) { say(ctx.catBusy(D), 2); return false; }
+      const stowed = ctx.heliOnDeck() && !ctx.heliStowed(); if (stowed) ctx.stowHeli();
+      if (!JP.launch()) { if (stowed) ctx.unstowHeli(); return false; }
+      park.on = false; D.wing = null;
+      if (!crafts.control('jet', 0, 'command')) return false;
+      JP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return true;
+    }
     if (G.craft === 'jet') { if (JP.stoppedOnDeck() || J.cat) { JP.respot(); ctx.turnIntoClear(); } else say('TRAP ON THE ALBATROSS FIRST: GEAR, FLAPS FULL, HOOK DOWN', 2); return; }
+    if (D.present() && !park.on) { crafts.control('jet', 0, 'command'); return; }   // COMMANDER: she is out with the wingman - take her where she is
     if (G.craft !== 'heli') { say(D.present() && park.on ? 'WALK TO THE PARKED HORNET AND GET IN (Y)' : 'LAND THE HELICOPTER ON THE ALBATROSS TO TAKE A JET', 1.8); return; }
     if (!ctx.heliOnDeck()) { say('LAND ON THE ALBATROSS TO TAKE A JET', 1.8); return; }
     if (D.present() && park.on) {   // a Hornet is already parked on deck: that one goes to the cat
@@ -41,14 +53,33 @@ export function createJetCraft(ctx) {
   // ---------------------------------------------------------------- in and out
   D.enter = (seat, from) => {
     if (!D.present()) return false;
+    if (D.wing) {   // COMMANDER: back from another unit - the wingman hands over where he is (throttle where he had it)
+      JP.thr = clamp(D.wing.FD.thr, 0, 1); JP.thrSrc = 'kb'; JP.kb.pitch = JP.kb.roll = JP.kb.yaw = 0; JP.pbrake = false; D.wing = null;
+      say(J.onGround ? 'YOU HAVE THE HORNET' : `YOU HAVE THE HORNET  -  ${Math.round(J.pos.y * 3.28)} FT  ${Math.round(J.eas * 1.944)} KT`, 2);
+    }
     if (from === 'foot') { say('IN THE HORNET  -  I ENGINES  ·  5 TO THE CATAPULT  ·  Y GET OUT', 2.5); head.yaw = head.pitch = 0; J.canopyCmd = 0; }
+    if (from === 'command') { head.yaw = head.pitch = 0; JP.snapChase(); if (park.on) { J.canopyCmd = 0; JP.pbrake = true; for (const e of J.eng) if (!e.run && e.n < 0.5) e.start = 0.01; } }   // the deck crew has her turning again
     park.on = false; return true;
   };
   D.canExit = () => (JP.stoppedOnDeck() || (J.cat && J.cat.state === 'hold')) ? '' : 'STOP ON THE ALBATROSS DECK FIRST';
   D.exitSpots = () => { const w = crafts.toWorld(D, D.seats[0].exit), w2 = crafts.toWorld(D, [2.3, -1.92, -3.4]), w3 = crafts.toWorld(D, [0, -1.92, -11]); return [w, w2, w3].filter(Boolean).map(p => ({ x: p.x, y: p.y, z: p.z, yaw: yawOf() })); };
+  // COMMANDER: the commander switches away while she flies (or rolls, or is being shot off the cat): the wingman flies
+  // her (units/commander/wingman.js) - CAP over the ALBATROSS, home at bingo or on recall, a trap, then she parks
+  D.flying = () => D.present() && (!J.onGround || (J.cat && J.cat.state !== 'hold') || (!J.cat && !JP.stoppedOnDeck()));
+  D.wing = null;
+  D.exit = next => {
+    if (D.present() && D.flying() && next && next !== D) {
+      D.wing = ctx.createWingman(J, 'HORNET', 'HORNET'); JP.firing = false; sfx.jetGun?.(false); sfx.seeker?.(0); J.canopyCmd = 0;
+      feed(J.onGround ? 'HORNET: THE DECK CREW HAS HER' : 'HORNET: WINGMAN HAS THE JET  -  CAP OVER THE ALBATROSS', 'info'); return;
+    }
+    parkHere();
+  };
+  D.recall = () => { if (D.wing) D.wing.recall(); };
+  D.status = () => !D.present() ? '' : D.wing ? (D.wing.state === 'cap' || D.wing.state === 'climb' ? 'CAP' : D.wing.state === 'trapped' ? 'RECOVERING' : D.wing.state === 'cat' ? 'LAUNCHING' : 'RETURNING') : park.on ? 'PARKED ON DECK' : 'FLYING';
   // the pilot climbs down: engines off, canopy open, parking brake on; the Hornet stays where it stopped and rides the deck
-  D.exit = () => {
-    if (J.cat) { J.cat = null; J.launchBar = false; }
+  function parkHere() {
+    D.wing = null;
+    if (J.cat) { J.cat = null; J.launchBar = false; park.cat = true; } else park.cat = false;
     for (const e of J.eng) { e.run = false; e.start = 0; }
     J.canopyCmd = 1; JP.pbrake = true; JP.firing = false; sfx.jetGun?.(false); sfx.seeker?.(0);
     park.x = J.pos.x; park.y = J.pos.y - 1.92; park.z = J.pos.z; park.yaw = yawOf(); park.plat = null; park.loc = null;
@@ -57,6 +88,12 @@ export function createJetCraft(ctx) {
   };
   // parked on deck: carried with the ship, kept exactly on its spot (kinematic), engines spooling down
   D.idle = dt => {
+    if (D.wing) {   // COMMANDER: the wingman flies her; once trapped and stopped she parks where the wire left her
+      if (!D.present()) { D.wing = null; return; }
+      JP.wingman(dt, D.wing, ctx.aiEnv);
+      if (D.wing && D.wing.recovered && J.onGround && !J.wire) { feed('HORNET RECOVERED ABOARD THE ALBATROSS', 'good'); parkHere(); }
+      return;
+    }
     if (!park.on || !D.present()) return;
     for (const e of J.eng) { e.n = Math.max(0, e.n - 0.12 * dt); e.ab = 0; }
     J.canopy = Math.min(1, J.canopy + dt * 0.25); park.dt = dt;
@@ -81,11 +118,14 @@ export function createJetCraft(ctx) {
     }
   };
   D.lost = (why, ejected) => {   // jetplay's onLost: ejected (pilot rescued) or crashed (pilot lost: that costs a life too)
-    G.jetDownT = ejected ? 0.5 : 3; park.on = false; feed(ejected ? 'HORNET LOST  -  PILOT RECOVERED' : 'HORNET AND PILOT LOST', 'bad');
-    if (ejected) say(why, 2.5);
-    else { G.lives--; if (G.lives < 0) ctx.gameOver(); }
+    // COMMANDER: a lost airframe is the fleet's loss (units/commander/fleet.js); with the wingman flying it the commander
+    // hears it in the feed, and only the unit you are in hands you on (jetDownT -> the next unit)
+    const mine = crafts.active === D; park.on = false; D.wing = null;
+    feed(ejected ? 'HORNET LOST  -  PILOT RECOVERED' : 'HORNET AND PILOT LOST', 'bad');
+    if (mine) { G.jetDownT = ejected ? 0.5 : 3; if (ejected) say(why, 2.5); }
+    ctx.onUnitLost?.('jet', why, mine);
   };
-  D.writeOff = () => { JP.stow(); park.on = false; G.jetDownT = 0; };
+  D.writeOff = () => { JP.stow(); park.on = false; G.jetDownT = 0; D.wing = null; };
   D.key = code => {
     if (code === 'KeyJ') { CTL.toggle(); return true; }
     if (JP.key(code)) return true;

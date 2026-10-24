@@ -15,12 +15,17 @@
 //   MAN / EMER / OVER window), flap and slat indicator, TF30 RPM / TIT / fuel flow / nozzle pairs, oil pressure, fuel
 //   quantity (feed tapes, totaliser, BINGO bug), clock, ALR-45 radar warning scope, gear indicator with barber poles.
 // - Lights: MASTER CAUTION, WHEELS, ALT LOW, L / R FIRE (push to discharge the bottle), LAUNCH (RWR), the AoA indexer
-//   on the glare shield, the caution / advisory panel (24 captions) on the right knee panel.
-// - Controls you can click: gear handle, hook handle, flap handle, master arm, weapon select, HUD mode buttons, FIRE
-//   lights, ACM jettison, engine crank (L / R), throttles' sweep switch (FWD / AFT / AUTO), the emergency wing sweep
-//   handle (raise the guard: EMER mode; aft past 68° on deck: OVERSWEEP), AFCS (stability augmentation, autopilot
-//   ATT / ALT hold), canopy, lights, parking brake, the ejection face curtain over your head and the lower handle.
-// - The stick, the two throttles (MIL and afterburner detents), the rudder pedals and toe brakes move.
+//   on the glare shield, the caution / advisory panel (28 captions: amber cautions, green advisories) on the right knee
+//   panel. Everything goes dark without the essential bus (tomcatsys.js electrics).
+// - Controls you can click (hover: a frame round it and its placard + position on the hint line): gear handle, hook
+//   handle, flap handle, master arm, weapon select, HUD mode buttons, FIRE lights, ACM jettison; left console: the
+//   throttles' OFF / IDLE finger lifts, their sweep switch (FWD / AFT / AUTO), FUEL DUMP, STAB AUG PITCH / ROLL / YAW,
+//   autopilot ENGAGE / ALT; the emergency wing sweep handle on the sill (the guard up: EMER; the handle fore / aft in
+//   5° steps, past 68° on deck: OVERSWEEP); right console: L / R GEN, the 3-way ENG CRANK switch (L - OFF - R, it
+//   drops out at 50% rpm), exterior lights, the canopy and parking brake handles; the ejection face curtain over your
+//   head and the lower handle.
+// - The stick, the two throttles (OFF behind the IDLE stop, MIL and afterburner detents), the rudder pedals and toe
+//   brakes move. The RIO sits behind you (seen over either shoulder), working his TID, now and then checking six.
 // RIO (back): the TID (round tactical information display: tracks, the hooked track's data, range scales), the DDD
 // (detail data display: the AWG-9's pulse-doppler range / azimuth scope, the STT lock gate), the RWR repeat, the
 // armament panel (PH / SP / SW, LAUNCH), standby airspeed / altimeter / clock, the hand control unit, his own
@@ -37,11 +42,14 @@ const GRN = '#7dff8a';
 const deg = r => r * 180 / Math.PI;
 const units = a => clamp(deg(a) * 1.43, -2, 32);   // AoA units (15 = on speed = ~10.5°; tomcatbench / NATOPS chart, INFERRED)
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _iq = new THREE.Quaternion(), _eye = new THREE.Vector3();
+// the caution / advisory panel, 7 rows of 4 (amber cautions; the green ADVISORIES do not light the MASTER CAUTION)
 export const CAUTS = [
-  'L GEN', 'R GEN', 'L OIL HOT', 'R OIL HOT', 'L FUEL PRESS', 'R FUEL PRESS', 'L INLET', 'R INLET',
-  'HYD PRESS', 'WING SWEEP', 'CADC', 'AUTO PILOT', 'PITCH STAB', 'ROLL STAB', 'YAW STAB', 'FUEL LEAK',
-  'FUEL LOW', 'BINGO', 'CANOPY', 'LADDER', 'SPD BRK', 'LAUNCH BAR', 'HOOK', 'START VALVE',
+  'L GEN', 'R GEN', 'L OIL PRESS', 'R OIL PRESS', 'L OIL HOT', 'R OIL HOT', 'L FUEL PRESS', 'R FUEL PRESS',
+  'L INLET', 'R INLET', 'HYD PRESS', 'EMERG GEN', 'TRANS/RECT', 'WING SWEEP', 'CADC', 'AUTO PILOT',
+  'PITCH STAB', 'ROLL STAB', 'YAW STAB', 'FUEL LEAK', 'FUEL LOW', 'BINGO', 'CANOPY', 'HOOK',
+  'START VALVE', 'LADDER', 'SPD BRK', 'LAUNCH BAR',
 ];
+export const ADVS = ['START VALVE', 'LADDER', 'SPD BRK', 'LAUNCH BAR'];
 
 export function buildTomcatCockpit() {
   const g = new THREE.Group(); g.visible = false; g.name = 'tomcatCockpit';
@@ -88,10 +96,10 @@ export function buildTomcatCockpit() {
   box(0.6, 0.08, 0.06, frameM, 0, 1.6, -4.9, cvv);                              // canopy bow handgrip bar
   // pilot's seat (GRU-7A) with the face-curtain handle over the headbox
   const seat = (z, y0) => {
-    const s = new THREE.Group(); s.position.set(0, y0, z); g.add(s);
+    const s = new THREE.Group(); s.position.set(0, y0, z); s.name = 'seat'; g.add(s);
     box(0.5, 0.1, 0.5, seatM, 0, 0.18, -0.22, s); box(0.44, 0.06, 0.44, cushion, 0, 0.25, -0.22, s);
     box(0.52, 1.0, 0.12, seatM, 0, 0.7, 0.08, s, -0.16); box(0.44, 0.84, 0.04, cushion, 0, 0.68, 0.0, s, -0.16);
-    box(0.42, 0.34, 0.26, seatM, 0, 1.32, 0.24, s, -0.16);                     // headbox (parachute)
+    box(0.38, 0.3, 0.24, seatM, 0, 1.3, 0.24, s, -0.16);                     // headbox (parachute)
     for (const k of [-1, 1]) box(0.05, 1.15, 0.1, metal, k * 0.27, 0.65, 0.14, s, -0.16);   // rails
     const fc = new THREE.Group(); fc.position.set(0, 1.5, 0.22); s.add(fc);       // face curtain handle: yellow / black loop
     for (let i = 0; i < 7; i++) box(0.03, 0.025, 0.025, i % 2 ? black : yellow, -0.09 + i * 0.03, 0.02, -0.12, fc);
@@ -176,17 +184,17 @@ export function buildTomcatCockpit() {
   box(0.026, 0.066, 0.012, black, -0.185, 0.93, -6.136);
   // caution / advisory panel on the right knee panel (a slanted face right of the main panel)
   const KP = new THREE.Group(); KP.position.set(0.525, 0.56, -5.72); KP.rotation.set(0, -Math.PI / 2 + 0.25, 0); g.add(KP);
-  box(0.24, 0.2, 0.03, dark, 0, 0, -0.016, KP);
-  const caut = canvasTex(480, 400); plane(0.22, 0.183, new THREE.MeshBasicMaterial({ map: caut.tex, toneMapped: false }), 0, 0, 0.001, KP);
+  box(0.24, 0.232, 0.03, dark, 0, 0, -0.016, KP);
+  const caut = canvasTex(480, 462); plane(0.22, 0.212, new THREE.MeshBasicMaterial({ map: caut.tex, toneMapped: false }), 0, 0, 0.001, KP);
 
   // ================================================================ switches, handles and their hit boxes
   const hitM = new THREE.MeshBasicMaterial({ visible: false }), hitsP = [], hitsR = [], sw = {};
   const hit = (id, w, h, d, x, y, z, p, label, list = hitsP) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), hitM); o.position.set(x, y, z); o.userData.sw = id; o.userData.label = label; p.add(o); list.push(o); return o; };
-  const toggle = (id, p, x, y, label, list = hitsP, flat = false) => {   // a bat on a panel (local z = out of the face)
+  const toggle = (id, p, x, y, label, list = hitsP, hw = 0.045) => {   // a bat on a panel (local z = out of the face)
     cyl(0.009, 0.009, 0.006, metal, x, y, 0.003, p, Math.PI / 2);
     const piv = new THREE.Group(); piv.position.set(x, y, 0.005); p.add(piv);
     cyl(0.0035, 0.005, 0.03, batM, 0, 0, 0.015, piv, Math.PI / 2);
-    hit(id, 0.045, 0.05, 0.05, x, y, 0.02, p, label, list); sw[id] = piv; void flat; return piv;
+    hit(id, hw, 0.05, 0.05, x, y, 0.02, p, label, list); sw[id] = piv; return piv;
   };
   const button = (id, p, x, y, w, h, mat, label, list = hitsP) => { const b = box(w, h, 0.012, mat, x, y, 0.006, p); hit(id, w + 0.012, h + 0.012, 0.04, x, y, 0.015, p, label, list); return b; };
   // panel: gear handle (wheel knob, red light in it), hook handle, master arm, weapon select, HUD mode buttons, ACM jett
@@ -206,7 +214,7 @@ export function buildTomcatCockpit() {
   const jettB = cyl(0.016, 0.016, 0.012, redM, -0.47, -0.27, 0.008, P, Math.PI / 2, 0, 12); hit('jett', 0.05, 0.05, 0.03, -0.47, -0.27, 0.01, P, 'ACM JETTISON (STORES)');
   hit('fireL', 0.08, 0.05, 0.04, -0.38, 0.875, -6.15, g, 'L FIRE  -  PUSH TO DISCHARGE'); hit('fireR', 0.08, 0.05, 0.04, 0.38, 0.875, -6.15, g, 'R FIRE  -  PUSH TO DISCHARGE');
   // left console (flat, facing up; canvas top = forward): throttle quadrant, sweep handle, flaps, AFCS, crank
-  const conL = canvasTex(220, 760), conR = canvasTex(220, 760);
+  const conL = canvasTex(440, 1520), conR = canvasTex(440, 1520); conL.ctx.scale(2, 2); conR.ctx.scale(2, 2);   // drawn in 220 x 760 units at 2x for legible placards
   const LC = new THREE.Group(); LC.position.set(-0.44, 0.432, -5.5); LC.rotation.x = -Math.PI / 2; g.add(LC);
   const RC = new THREE.Group(); RC.position.set(0.44, 0.432, -5.5); RC.rotation.x = -Math.PI / 2; g.add(RC);
   plane(0.2, 0.69, new THREE.MeshLambertMaterial({ map: conL.tex, emissive: 0xffffff, emissiveMap: conL.tex, emissiveIntensity: 0.55 }), 0, 0, 0.001, LC);
@@ -224,20 +232,43 @@ export function buildTomcatCockpit() {
   const sweepSw = box(0.012, 0.016, 0.012, M(0xd0d0c8), -0.04, 0.0, 0.16, thr[0]);   // thumb switch on the outboard grip
   hit('sweepFwd', 0.05, 0.035, 0.05, -0.035, 0.035, 0.15, LC, 'WING SWEEP  FWD (MAN)'); hit('sweepAft', 0.05, 0.035, 0.05, -0.035, -0.035, 0.15, LC, 'WING SWEEP  AFT (MAN)');
   hit('sweepAuto', 0.04, 0.03, 0.04, 0.03, 0.0, 0.17, LC, 'WING SWEEP  AUTO');
-  // emergency wing sweep handle: outboard on the sill, quadrant 20 .. 68 .. OVER, red guard
+  // the throttles' OFF / IDLE finger lifts (lift and the lever comes back over the IDLE stop to OFF, or forward to IDLE
+  // for the start), on the outboard side of each lever's base: they ride with the levers
+  thr.forEach((t, i) => { box(0.018, 0.014, 0.012, M(0xe8e8e0), i ? 0.014 : -0.014, -0.03, 0.03, t); hit(i ? 'thrR' : 'thrL', 0.03, 0.045, 0.06, i ? 0.016 : -0.016, -0.03, 0.04, t, `${i ? 'RIGHT' : 'LEFT'} THROTTLE  OFF / IDLE  (FINGER LIFT)`); });
+  box(0.012, 0.006, 0.014, M(0xb03020), -0.045, -0.11, 0.008, LC); box(0.012, 0.006, 0.014, M(0xb03020), 0.045, -0.11, 0.008, LC);   // the IDLE stop (OFF is behind it)
+  // emergency wing sweep handle: outboard on the sill, quadrant 20 (forward) .. 68 .. OVER (aft), a red guard over the
+  // slot's forward end holds it stowed at 20° (guard up = EMER: the wings follow the handle; aft past 68° on deck = OVERSWEEP)
   const EH = new THREE.Group(); EH.position.set(-0.505, 0.6, -5.5); g.add(EH);
   box(0.03, 0.02, 0.36, dark, 0, 0, 0, EH);
+  for (let v = 20; v <= 76; v += 8) box(0.034, 0.003, 0.004, M(0xe6e2cf), 0, 0.011, -0.15 + 0.3 * (Math.min(v, 75) - 20) / 55, EH);   // quadrant marks
   const ehLever = new THREE.Group(); EH.add(ehLever); box(0.012, 0.1, 0.012, metal, 0, 0.05, 0, ehLever); box(0.06, 0.02, 0.025, M(0xe8e8e0), 0, 0.1, 0, ehLever);
-  const ehGuard = new THREE.Group(); ehGuard.position.set(0, 0.012, 0.15); EH.add(ehGuard); box(0.035, 0.008, 0.08, redM, 0, 0, -0.04, ehGuard);
-  hit('emer', 0.06, 0.13, 0.38, -0.505, 0.65, -5.5, g, 'EMERGENCY WING SWEEP HANDLE  (GUARD UP = EMER)');
-  // flap handle forward on the left console, AFCS panel aft
+  const ehGuard = new THREE.Group(); ehGuard.position.set(0, 0.012, -0.19); EH.add(ehGuard); box(0.04, 0.008, 0.09, redM, 0, 0, 0.045, ehGuard);
+  hit('emer', 0.06, 0.06, 0.1, -0.505, 0.63, -5.64, g, 'EMERGENCY WING SWEEP  -  GUARD (UP = EMER, DOWN = AUTO)');
+  hit('emerFwd', 0.06, 0.13, 0.11, -0.505, 0.65, -5.535, g, 'EMERGENCY WING SWEEP HANDLE  -  FORWARD 5°');
+  hit('emerAft', 0.06, 0.13, 0.15, -0.505, 0.65, -5.405, g, 'EMERGENCY WING SWEEP HANDLE  -  AFT 5°');
+  // flap handle forward on the left console; FUEL MGMT (DUMP) beside it; AFCS panel aft (three STAB AUG channels, the
+  // autopilot's ENGAGE and ALT)
   const flapH = new THREE.Group(); flapH.position.set(-0.05, 0.27, 0.0); LC.add(flapH); box(0.01, 0.01, 0.07, metal, 0, 0, 0.035, flapH); box(0.04, 0.02, 0.02, M(0xe8e8e0), 0, 0, 0.075, flapH);
   hit('flaps', 0.06, 0.06, 0.1, -0.05, 0.27, 0.05, LC, 'FLAPS  UP / DN');
-  toggle('sas', LC, -0.06, -0.2, 'STAB AUG  PITCH / ROLL / YAW');
-  toggle('afcs', LC, 0.0, -0.2, 'AUTOPILOT ENGAGE  (ATTITUDE HOLD, CONTROL STICK STEERING)');
-  toggle('alt', LC, 0.055, -0.2, 'AUTOPILOT  ALTITUDE HOLD');
-  toggle('engL', RC, -0.045, 0.2, 'ENGINE CRANK  L'); toggle('engR', RC, 0.03, 0.2, 'ENGINE CRANK  R');
-  toggle('lights', RC, -0.05, 0.02, 'EXT LIGHTS'); toggle('canopy', RC, 0.03, 0.02, 'CANOPY  OPEN / CLOSE'); toggle('pbrake', RC, -0.01, -0.18, 'PARKING BRAKE');
+  toggle('dump', LC, 0.05, 0.27, 'FUEL DUMP', hitsP, 0.04);
+  toggle('sasP', LC, -0.07, -0.215, 'STAB AUG  PITCH', hitsP, 0.032); toggle('sasR', LC, -0.035, -0.215, 'STAB AUG  ROLL', hitsP, 0.032); toggle('sasY', LC, 0.0, -0.215, 'STAB AUG  YAW', hitsP, 0.032);
+  toggle('afcs', LC, -0.05, -0.29, 'AUTOPILOT ENGAGE  (ATTITUDE HOLD, CONTROL STICK STEERING)', hitsP, 0.04);
+  toggle('alt', LC, -0.005, -0.29, 'AUTOPILOT  ALTITUDE HOLD', hitsP, 0.04);
+  // right console: ELEC POWER (L / R GEN, the EMERG GEN guard), ENG START (the 3-way ENG CRANK switch: L - OFF - R), EXT
+  // LIGHTS, the canopy handle, the parking brake handle; ECS and OXYGEN aft (placards)
+  toggle('genL', RC, -0.055, 0.29, 'L GENERATOR  NORM / OFF', hitsP, 0.04); toggle('genR', RC, -0.015, 0.29, 'R GENERATOR  NORM / OFF', hitsP, 0.04);
+  box(0.024, 0.03, 0.012, redM, 0.045, 0.29, 0.012, RC);   // emergency generator switch under its red guard
+  cyl(0.011, 0.011, 0.006, metal, -0.02, 0.165, 0.003, RC, Math.PI / 2);
+  const crankSw = new THREE.Group(); crankSw.position.set(-0.02, 0.165, 0.005); RC.add(crankSw); cyl(0.004, 0.006, 0.034, batM, 0, 0, 0.017, crankSw, Math.PI / 2);
+  hit('crankL', 0.04, 0.05, 0.05, -0.045, 0.165, 0.02, RC, 'ENG CRANK  L  (HELD IN TO 50% RPM)'); hit('crankR', 0.04, 0.05, 0.05, 0.005, 0.165, 0.02, RC, 'ENG CRANK  R  (HELD IN TO 50% RPM)');
+  box(0.022, 0.022, 0.016, black, 0.06, 0.165, 0.008, RC);   // the AIR SOURCE knob
+  toggle('lights', RC, -0.05, 0.04, 'EXT LIGHTS  MASTER');
+  const canH = new THREE.Group(); canH.position.set(0.04, 0.02, 0.0); RC.add(canH);   // the canopy T-handle
+  box(0.008, 0.008, 0.05, metal, 0, 0, 0.025, canH); box(0.05, 0.014, 0.014, yellow, 0, 0, 0.055, canH);
+  hit('canopy', 0.06, 0.05, 0.08, 0.04, 0.02, 0.04, RC, 'CANOPY HANDLE  OPEN / CLOSE');
+  const pbH = new THREE.Group(); pbH.position.set(-0.02, -0.11, 0.0); RC.add(pbH);   // parking brake T-handle
+  box(0.008, 0.008, 0.035, metal, 0, 0, 0.018, pbH); box(0.04, 0.012, 0.012, M(0xd04020), 0, 0, 0.04, pbH);
+  hit('pbrake', 0.05, 0.04, 0.07, -0.02, -0.11, 0.035, RC, 'PARKING BRAKE');
   hit('eject', 0.24, 0.1, 0.12, 0, 1.58, -5.05, g, 'EJECT  -  FACE CURTAIN (CLICK TWICE)'); hit('eject', 0.16, 0.06, 0.1, 0, 0.3, -5.67, g, 'EJECT  -  LOWER HANDLE (CLICK TWICE)');
 
   // ================================================================ stick, pedals, the pilot's legs and hands
@@ -280,12 +311,31 @@ export function buildTomcatCockpit() {
   button('rio:next', RP, 0.18, -0.25, 0.04, 0.025, M(0x50565c), 'HOOK NEXT TRACK', hitsR);
   button('rio:rng+', RP, -0.18, -0.25, 0.04, 0.025, M(0x50565c), 'TID RANGE UP', hitsR); button('rio:rng-', RP, -0.12, -0.25, 0.04, 0.025, M(0x50565c), 'TID RANGE DOWN', hitsR);
   hit('mc', 0.08, 0.04, 0.03, -0.36, -0.1, 0.01, RP, 'MASTER CAUTION RESET', hitsR);
+  const allLamps = [...Object.values(L), ...Object.values(rLamps), idx.hi, idx.on, idx.lo];
   hit('eject', 0.24, 0.1, 0.12, 0, 1.68, -3.8, g, 'EJECT  -  FACE CURTAIN (CLICK TWICE)', hitsR);
   const cmdSel = toggle('rio:cmd', RP, -0.25, -0.2, 'COMMAND EJECT SELECTOR  MCO / RIO ONLY', hitsR);
   // the RIO's side consoles: radios, IFF, the TACAN, ECM, the data link (flat panels, canvas top = forward)
   const rcon = [-1, 1].map(s => { const t = canvasTex(220, 640), p = new THREE.Group(); p.position.set(s * 0.44, 0.472, -3.95); p.rotation.x = -Math.PI / 2; g.add(p); plane(0.2, 0.58, new THREE.MeshLambertMaterial({ map: t.tex, emissive: 0xffffff, emissiveMap: t.tex, emissiveIntensity: 0.55 }), 0, 0, 0.001, p); return t; });
   // hand control unit (the radar stick) between the RIO's knees, his legs
   const hcu = new THREE.Group(); hcu.position.set(0, 0.35, -4.2); g.add(hcu); box(0.12, 0.05, 0.16, grey, 0, 0, 0, hcu); box(0.04, 0.09, 0.05, black, 0, 0.06, -0.02, hcu, 0.25);
+  // the RIO as the pilot sees him over his shoulder (hidden in the back seat: that is you): torso in the harness, the
+  // white helmet with the visor down and the oxygen mask, the right hand on the hand control unit, the left on the
+  // console; his head works the TID, then checks six
+  const rioFig = new THREE.Group(); rioFig.name = 'rioFig'; g.add(rioFig);
+  const harn = M(0x2a2c22), maskM = M(0x3a3d40), visM = new THREE.MeshLambertMaterial({ color: 0x1a2430, emissive: 0x0a1018 });
+  box(0.42, 0.46, 0.26, suit, 0, 0.78, -3.97, rioFig); box(0.44, 0.1, 0.26, suit, 0, 0.98, -3.97, rioFig);   // torso, shoulders
+  for (const s of [-1, 1]) box(0.05, 0.47, 0.012, harn, s * 0.1, 0.8, -4.105, rioFig);   // harness straps
+  box(0.3, 0.06, 0.012, harn, 0, 0.66, -4.105, rioFig); box(0.12, 0.08, 0.06, M(0x6b6f60), 0.13, 0.84, -4.12, rioFig);   // lap belt, survival vest pocket
+  limb(V3(0, 1.0, -3.98), V3(0, 1.06, -4.04), 0.055, suit, rioFig);   // neck
+  const rioHead = new THREE.Group(); rioHead.position.set(0, 1.1, -4.06); rioFig.add(rioHead);
+  { const hm = new THREE.Mesh(new THREE.SphereGeometry(0.135, 14, 10), helmW); hm.scale.set(1, 1.05, 1.12); rioHead.add(hm);
+    const vz = new THREE.Mesh(new THREE.SphereGeometry(0.138, 14, 8, -Math.PI * 0.42 - Math.PI / 2, Math.PI * 0.84, Math.PI * 0.32, Math.PI * 0.26), visM); vz.scale.set(1, 1.05, 1.12); rioHead.add(vz);
+    box(0.03, 0.02, 0.2, M(0xc8a020), 0, 0.13, 0.0, rioHead);   // the squadron stripe over the helmet
+    cyl(0.04, 0.055, 0.08, maskM, 0, -0.06, -0.12, rioHead, -1.2); limb(V3(0, -0.09, -0.14), V3(0.06, -0.3, -0.06), 0.014, maskM, rioHead); }   // oxygen mask and hose
+  for (const s of [-1, 1]) {   // arms: right to the hand control unit, left onto the console
+    const sh = V3(s * 0.23, 0.96, -3.98), el = V3(s * 0.27, 0.66, -4.12), hd = s > 0 ? V3(0.04, 0.45, -4.24) : V3(-0.34, 0.52, -4.18);
+    limb(sh, el, 0.045, suit, rioFig); limb(el, hd, 0.038, suit, rioFig); const gl = box(0.06, 0.05, 0.08, glove, hd.x, hd.y, hd.z, rioFig); gl.rotation.y = s * 0.3;
+  }
   for (const s of [-1, 1]) { const hip = V3(s * 0.12, 0.43, -3.86), knee = V3(s * 0.16, 0.5, -4.4), ank = V3(s * 0.17, -0.08, -4.62); limb(hip, knee, 0.075, suit); limb(knee, ank, 0.058, suit); box(0.1, 0.09, 0.24, black, s * 0.17, -0.12, -4.68).rotation.x = -0.35; }
 
   // ================================================================ hover marker
@@ -311,13 +361,31 @@ export function buildTomcatCockpit() {
     MODES.forEach((m, i) => lab(m, -0.1 + i * 0.05, 0.3, 9));
     c.fillStyle = '#2a2e32'; c.fillRect(px(-0.545), py(-0.3), 120, 26); lab('F-14A', -0.485, -0.315, 13, '#cfd0c8');
     art.tex.needsUpdate = true;
-    for (const [cv, items] of [[conL, [['FLAPS', 'UP  DN', 0.27], ['THROTTLES', 'OFF IDLE MIL MAX', 0.06], ['SWEEP', 'FWD AFT AUTO', -0.04], ['AFCS', 'SAS  ENG  ALT', -0.2]]],
-      [conR, [['ENG CRANK', 'L   R', 0.2], ['LIGHTS  CANOPY', '', 0.02], ['PARK BRK', '', -0.18], ['ECS', 'CABIN PRESS', -0.3]]]]) {
-      const x = cv.ctx; x.fillStyle = '#30353a'; x.fillRect(0, 0, 220, 760); x.strokeStyle = '#555'; x.lineWidth = 3; x.strokeRect(2, 2, 216, 756);
-      x.textAlign = 'center';
-      for (const [t, s, yy] of items) { const y = (0.345 - yy) / 0.69 * 760; x.fillStyle = '#e6e2cf'; x.font = `bold 18px ${SANS}`; x.fillText(t, 110, y - 34); x.font = `13px ${SANS}`; x.fillText(s, 110, y + 40); }
+    // the side consoles: grey Dzus panels (console-local metres: x across, y forward), white placards by each control
+    const cx = x => (x + 0.1) / 0.2 * 220, cy = y => (0.345 - y) / 0.69 * 760;
+    const consoleArt = (cv, panels, labels) => {
+      const x = cv.ctx; x.fillStyle = '#2a2e32'; x.fillRect(0, 0, 220, 760);
+      for (const [y1, y0, title] of panels) {
+        const a = cy(y1), b = cy(y0); x.fillStyle = '#3a4046'; x.fillRect(6, a + 3, 208, b - a - 6); x.strokeStyle = '#1c2024'; x.lineWidth = 3; x.strokeRect(6, a + 3, 208, b - a - 6);
+        x.fillStyle = '#80868c'; for (const [sx, sy] of [[13, a + 10], [207, a + 10], [13, b - 10], [207, b - 10]]) { x.beginPath(); x.arc(sx, sy, 3, 0, TAU); x.fill(); }
+        if (title) { x.fillStyle = '#e6e2cf'; x.font = `bold 14px ${SANS}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(title, 110, a + 16); }
+      }
+      for (const [t, lx, ly, s = 11] of labels) { x.fillStyle = '#e6e2cf'; x.font = `bold ${s}px ${SANS}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(t, cx(lx), cy(ly)); }
       cv.tex.needsUpdate = true;
-    }
+    };
+    consoleArt(conL, [[0.345, 0.2, ''], [0.2, -0.165, ''], [-0.165, -0.345, 'AFCS']], [
+      ['FLAPS', -0.05, 0.325, 12], ['UP', -0.08, 0.27], ['DN', -0.08, 0.235], ['FUEL', 0.05, 0.325, 12], ['DUMP', 0.05, 0.305, 10], ['OFF', 0.05, 0.235],
+      ['THROTTLES', 0, 0.185, 12], ['MAX', -0.075, 0.135, 9], ['MIL', -0.075, 0.082, 9], ['IDLE', -0.075, -0.11, 9], ['OFF', -0.075, -0.14, 9],
+      ['L', -0.032, -0.155, 10], ['R', 0.026, -0.155, 10],
+      ['PITCH', -0.07, -0.185, 9], ['ROLL', -0.035, -0.185, 9], ['YAW', 0.0, -0.185, 9], ['STAB AUG', -0.035, -0.248, 9], ['AUTOPILOT', -0.05, -0.322, 9], ['ALT', -0.005, -0.322, 9],
+      ['VEC/PCD', 0.06, -0.215, 8], ['ACL', 0.06, -0.29, 8]]);
+    consoleArt(conR, [[0.345, 0.225, 'ELEC POWER'], [0.225, 0.105, 'ENG START'], [0.105, -0.165, ''], [-0.165, -0.345, 'ECS']], [
+      ['L GEN', -0.055, 0.25, 9], ['R GEN', -0.015, 0.25, 9], ['EMERG', 0.045, 0.255, 9], ['NORM', -0.035, 0.315, 9],
+      ['ENG CRANK', -0.02, 0.2, 10], ['L', -0.05, 0.135, 11], ['OFF', -0.02, 0.13, 9], ['R', 0.01, 0.135, 11], ['AIR', 0.06, 0.2, 9], ['SOURCE', 0.06, 0.188, 8],
+      ['EXT LTS', -0.05, 0.085, 10], ['CANOPY', 0.04, 0.085, 10], ['OPEN', 0.04, -0.015, 9], ['PARK BRAKE', -0.02, -0.07, 10],
+      ['CABIN TEMP', -0.04, -0.21, 9], ['OXYGEN', 0.04, -0.21, 9], ['ON', 0.04, -0.3, 9], ['RAM AIR', -0.04, -0.3, 9]]);
+    { const x = conR.ctx; for (const [kx, ky] of [[-0.04, -0.255], [0.04, -0.255]]) { x.fillStyle = '#16181a'; x.beginPath(); x.arc(cx(kx), cy(ky), 15, 0, TAU); x.fill(); x.strokeStyle = '#6a7076'; x.lineWidth = 2; x.stroke(); x.strokeStyle = '#e6e2cf'; x.beginPath(); x.moveTo(cx(kx), cy(ky)); x.lineTo(cx(kx) + 8, cy(ky) - 10); x.stroke(); } conR.tex.needsUpdate = true; }
+    { const x = conL.ctx; for (const kx of [0.06]) for (const ky of [-0.235, -0.31]) { x.fillStyle = '#d6d6ce'; x.fillRect(cx(kx) - 7, cy(ky) - 5, 14, 10); } conL.tex.needsUpdate = true; }
     // RIO panel art
     const r = rart.ctx, rpx = x => (x + 0.46) * 1000, rpy = y => (0.3 - y) * 1000; r.fillStyle = '#353b40'; r.fillRect(0, 0, 920, 600);
     r.strokeStyle = '#22272b'; r.lineWidth = 3; r.strokeRect(4, 4, 912, 592);
@@ -542,8 +610,8 @@ export function buildTomcatCockpit() {
     ddd.tex.needsUpdate = true;
   }
   function drawCaut(S) {
-    const c = caut.ctx, W = 480, H = 400; c.fillStyle = '#0a0b0c'; c.fillRect(0, 0, W, H); const on = new Set(S.cautions || []);
-    CAUTS.forEach((t, i) => { const x = (i % 4) * 120 + 3, y = Math.floor(i / 4) * 66 + 3, l = on.has(t) && S.power !== false; c.fillStyle = l ? '#e8a010' : '#1d1f1c'; c.fillRect(x, y, 114, 60); txt(c, t, x + 57, y + 31, l ? '#111' : '#55584f', t.length > 9 ? 15 : 18); });
+    const c = caut.ctx, W = 480, H = 462; c.fillStyle = '#0a0b0c'; c.fillRect(0, 0, W, H); const on = new Set(S.cautions || []);
+    CAUTS.forEach((t, i) => { const x = (i % 4) * 120 + 3, y = Math.floor(i / 4) * 66 + 3, l = on.has(t) && S.ess !== false, adv = ADVS.includes(t); c.fillStyle = l ? (adv ? '#40d050' : '#e8a010') : '#1d1f1c'; c.fillRect(x, y, 114, 60); txt(c, t, x + 57, y + 31, l ? '#111' : '#55584f', t.length > 9 ? 15 : 18); });
     caut.tex.needsUpdate = true;
   }
 
@@ -623,33 +691,63 @@ export function buildTomcatCockpit() {
   }
 
   // ================================================================ per frame
-  let t = 0, slot = 0, mcFlash = 0, seatNow = 0;
+  let t = 0, slot = 0, mcFlash = 0, seatNow = 0, lastS = null, lastA = null;
+  function stateOf(id, S, A) {
+    const ss = S.ss, k = id.endsWith('R') ? 1 : 0, onOff = v => v ? 'ON' : 'OFF';
+    if (ss && (id === 'genL' || id === 'genR')) return `${ss.gen[k] ? 'NORM' : 'OFF'}${ss.gens[k] ? '  -  ON LINE' : ''}`;
+    if (ss && (id === 'crankL' || id === 'crankR')) return `${ss.crank}${ss.cranking && ss.cranking[k] ? '  -  ' + ss.cranking[k] + ' AIR' : ''}`;
+    if (ss && (id === 'thrL' || id === 'thrR')) return `${ss.thrOff[k] ? 'OFF' : 'IDLE'}  -  RPM ${Math.round(A.eng[k].n * 100)}%`;
+    if (id === 'sasP' || id === 'sasR' || id === 'sasY') return onOff((S.sasCh || [])['PRY'.indexOf(id[3])]);
+    const sw0 = S.sweep || {};
+    switch (id) {
+      case 'afcs': return S.afcs && S.afcs !== 'OFF' ? 'ENGAGED' : 'OFF';
+      case 'alt': return S.afcs === 'ALT' ? 'ALT HOLD' : 'OFF';
+      case 'dump': return onOff(S.dump); case 'lights': return onOff(S.lights); case 'arm': return S.arm ? 'ARM' : 'SAFE';
+      case 'canopy': return A.canopyCmd ? 'OPEN' : 'CLOSED'; case 'pbrake': return S.pbrake ? 'SET' : 'OFF';
+      case 'gear': return A.gearCmd ? 'DOWN' : 'UP'; case 'hook': return A.hookCmd ? 'DOWN' : 'UP'; case 'flaps': return A.flapSel ? 'DN' : 'UP';
+      case 'emer': case 'emerFwd': case 'emerAft': return `${sw0.mode || 'AUTO'}  ${Math.round(sw0.mode === 'EMER' || sw0.mode === 'OVER' ? sw0.handle : A.sweep)}°`;
+      case 'sweepFwd': case 'sweepAft': case 'sweepAuto': return `${sw0.mode || 'AUTO'}  ${Math.round(A.sweep)}°`;
+      case 'wpn': case 'rio:wpn': return S.wpn; case 'hsdmode': return S.hsdMode; case 'rio:stt': return S.lock ? 'STT' : 'TWS';
+      case 'fireL': case 'fireR': return S.fire && S.fire[k] ? 'FIRE' : '';
+    }
+    if (id.startsWith('hud:')) return S.mode === id.slice(4) ? 'SELECTED' : '';
+    return '';
+  }
   const ease = (o, k, v, r) => { o[k] += (v - o[k]) * r; };
   const C = {
     group: g, TEYE, MODES,
     get hitBoxes() { return seatNow ? hitsR : hitsP; },
-    labelOf(id) { const h = [...hitsP, ...hitsR].find(o => o.userData.sw === id); return h ? h.userData.label : id; },
+    // the hint line's text for the control under the cursor: its placard plus where it is now ("[NORM]", "[OFF]" ...)
+    labelOf(id) { const h = [...hitsP, ...hitsR].find(o => o.userData.sw === id), st = lastS && lastA ? stateOf(id, lastS, lastA) : ''; return (h ? h.userData.label : id) + (st ? `  [${st}]` : ''); },
     press(id) { if (id === 'mc') mcFlash = 0.2; if (id === 'rio:rng+') tidRange = Math.min(16000, tidRange * 2); if (id === 'rio:rng-') tidRange = Math.max(1000, tidRange / 2); },
     get tidRange() { return tidRange; }, set tidRange(v) { tidRange = v; },
     // A = the airframe sim, ctl = pilot inputs { pitch, roll, yaw, throttle:[l,r], brakeL, brakeR }, S = everything else (tomcatplay.js)
     update(A, ctl, dt, S) {
-      t += dt; seatNow = S.seat || 0;
+      t += dt; seatNow = S.seat || 0; lastS = S; lastA = A;
       const E = TEYE[0]; _eye.copy(E).applyQuaternion(A.q).add(A.pos); _iq.copy(A.q).invert();
-      pilotFig.visible = seatNow === 1;
+      pilotFig.visible = seatNow === 1; rioFig.visible = seatNow === 0;
+      if (seatNow === 0) {   // the RIO's head: mostly down on the TID, a look out to either side now and then, braced under g
+        const ph = t % 14, look = ph < 6 ? 0 : ph < 8 ? Math.sin((ph - 6) / 2 * Math.PI) * 0.9 : ph < 10 ? 0 : ph < 12 ? -Math.sin((ph - 10) / 2 * Math.PI) * 0.8 : 0;
+        rioHead.rotation.set(look ? 0.08 : -0.32 + clamp((A.nz - 1) * 0.04, 0, 0.25), look, 0, 'YXZ');
+      }
       // moving parts
       stickP.rotation.set((ctl.pitch || 0) * 0.26, 0, -(ctl.roll || 0) * 0.26);
-      thr.forEach((o, i) => { const v = clamp(ctl.throttle ? ctl.throttle[i] : 0, 0, 1); o.position.y = -0.11 + 0.24 * v; });
+      const ss = S.ss || { thrOff: [false, false], crank: 'OFF', gen: [true, true] };
+      thr.forEach((o, i) => { const v = clamp(ctl.throttle ? ctl.throttle[i] : 0, 0, 1); o.position.y = ss.thrOff[i] ? -0.138 : -0.11 + 0.24 * v; });
       pedals[0].p.position.z = -6.35 + (ctl.yaw || 0) * 0.07; pedals[1].p.position.z = -6.35 - (ctl.yaw || 0) * 0.07;
       pedals[0].pl.rotation.x = -0.35 - (ctl.brakeL || 0) * 0.25; pedals[1].pl.rotation.x = -0.35 - (ctl.brakeR || 0) * 0.25;
       if (S.shaker > 0.05) { const k = S.shaker * 0.004; pedals[0].p.position.x = -0.17 + (Math.random() - 0.5) * k; pedals[1].p.position.x = 0.17 + (Math.random() - 0.5) * k; }
       canopyG.rotation.x = A.canopy * TCAT.CANOPY_OPEN;
       gearH.rotation.x = A.gearCmd ? 0.0 : 0.5; gearH.position.y = A.gearCmd ? -0.19 : -0.15; hookH.position.y = A.hookCmd ? -0.19 : -0.15;
       flapH.rotation.x = A.flapSel ? -0.6 : 0.3;
-      const sw0 = S.sweep || {}; ehGuard.rotation.x = sw0.mode === 'EMER' || sw0.mode === 'OVER' ? -1.4 : 0; ehLever.position.z = 0.15 - 0.3 * clamp(((sw0.handle ?? 20) - 20) / 55, 0, 1);
+      const sw0 = S.sweep || {}; ehGuard.rotation.x = sw0.mode === 'EMER' || sw0.mode === 'OVER' ? -1.4 : 0; ehLever.position.z = -0.15 + 0.3 * clamp(((sw0.handle ?? 20) - 20) / 55, 0, 1);
       sweepSw.position.y = sw0.thumb ? sw0.thumb * 0.006 : 0;
-      const flip = (id, on) => { if (sw[id]) sw[id].rotation.x = on ? -0.5 : 0.5; };
-      flip('arm', S.arm); flip('sas', S.sas); flip('afcs', S.afcs && S.afcs !== 'OFF'); flip('alt', S.afcs === 'ALT'); flip('engL', A.eng[0].run || A.eng[0].start > 0); flip('engR', A.eng[1].run || A.eng[1].start > 0);
-      flip('lights', S.lights); flip('canopy', A.canopyCmd); flip('pbrake', S.pbrake); flip('rio:cmd', S.cmdSel !== 'RIO');
+      const flip = (id, on) => { if (sw[id]) sw[id].rotation.x = on ? -0.5 : 0.5; }, sc = S.sasCh || [S.sas, S.sas, S.sas];
+      flip('arm', S.arm); flip('sasP', sc[0]); flip('sasR', sc[1]); flip('sasY', sc[2]); flip('afcs', S.afcs && S.afcs !== 'OFF'); flip('alt', S.afcs === 'ALT');
+      flip('genL', ss.gen[0]); flip('genR', ss.gen[1]); flip('dump', S.dump);
+      crankSw.rotation.y = ss.crank === 'L' ? -0.5 : ss.crank === 'R' ? 0.5 : 0;
+      flip('lights', S.lights); flip('rio:cmd', S.cmdSel !== 'RIO');
+      canH.position.z = A.canopyCmd ? 0.025 : 0; pbH.position.z = S.pbrake ? 0.022 : 0;
       for (const m of MODES) modeB[m].position.z = 0.006 - (S.mode === m ? 0.005 : 0);
       void hsdB; void jettB;
       // lamps
@@ -661,7 +759,8 @@ export function buildTomcatCockpit() {
       setLamp(L.fireL, S.fire && S.fire[0] && blink); setLamp(L.fireR, S.fire && S.fire[1] && blink);
       setLamp(rLamps.mc, (S.masterCaution && blink) || mcFlash > 0); setLamp(rLamps.launch, S.rwrLaunch && blink);
       setLamp(rLamps.ph, S.wpn === 'PH'); setLamp(rLamps.sp, S.wpn === 'SP'); setLamp(rLamps.sw, S.wpn === 'SW'); setLamp(rLamps.stt, S.lock); setLamp(rLamps.tws, !S.lock && S.power);
-      gearRed.material.color.setHex(A.gear > 0.01 && A.gear < 0.99 ? 0xff2010 : 0x300808);
+      gearRed.material.color.setHex(A.gear > 0.01 && A.gear < 0.99 && S.ess !== false ? 0xff2010 : 0x300808);
+      if (S.ess === false) for (const o of allLamps) setLamp(o, false);   // no essential bus: every light in the cockpit dark
       // hover marker
       hov.visible = false;
       if (S.hover) { const h = C.hitBoxes.find(o => o.userData.sw === S.hover); if (h) { h.updateWorldMatrix(true, false); g.updateWorldMatrix(true, false); hov.visible = true; h.geometry.computeBoundingBox(); const bb = h.geometry.boundingBox; hov.matrix.copy(g.matrixWorld).invert().multiply(h.matrixWorld).multiply(new THREE.Matrix4().makeScale(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z)); } }

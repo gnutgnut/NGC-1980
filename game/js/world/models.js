@@ -3,6 +3,8 @@
 // plinth below it down to the lowest ground under the footprint. Sizes are real: a two-storey house is ~6 m to the
 // eaves, a parish church tower ~16-22 m, a 1980 saloon 4.3 x 1.7 m.
 import { col, shade, mixc } from './kit.js';
+import { doorU, shopUnit } from '../interiors/rooms.js';   // ngc/interiors: the rooms behind the front door agree where it is
+import { pubFront } from './townkit.js';   // ngc/world-polish: the pub's front (an import cycle: used inside terrace() only)
 
 export const PAL = {
   walls: [0xe9e5da, 0xe8e0c8, 0xe6d6a8, 0xdcc0a8, 0xc9d3d6, 0xb4ada0, 0xd8d2c4, 0xefe9de, 0xd9c79a],
@@ -59,7 +61,7 @@ export function house(g, r, o) {
   g.box(0, 0, 0, w, H, d, wall, 1);
   const rh = o.roofType === 'hip' ? d * 0.42 : d * (o.steep ? 0.62 : 0.48);
   if (o.roofType === 'hip') g.hip(0, H, 0, w, d, rh, roof); else g.gable(0, H, 0, w, d, rh, roof, wall);
-  const dx = (r() - 0.5) * (w - 2.4);
+  r(); const dx = doorU(o);   // ngc/interiors (was (r() - 0.5) * (w - 2.4): the same spread, from the item's seed)
   door(g, dx, d / 2, col(o.door));
   windowsAround(g, w, d, fl, fh, { skip: dx, box: r() < 0.4 ? col(r.pick([0xb03a2a, 0xd8a83a, 0xc85a8a, 0x3a7a3a])) : null });
   if (r() < 0.35) { g.box(dx, 2.25, d / 2 + 0.5, 1.8, 0.12, 1.0, roof, 0); g.strut([dx - 0.8, 0, d / 2 + 0.95], [dx - 0.8, 2.25, d / 2 + 0.95], 0.1, FRAME); g.strut([dx + 0.8, 0, d / 2 + 0.95], [dx + 0.8, 2.25, d / 2 + 0.95], 0.1, FRAME); }   // porch hood
@@ -78,7 +80,10 @@ export function terrace(g, r, o) {
     const x = -o.w / 2 + uw * (i + 0.5), wall = col(r.pick(PAL.walls)), hh = H + (r() < 0.3 ? 0.4 : 0);
     g.push(x, 0, 0);
     g.box(0, 0, 0, uw, hh, d, wall, 1);
-    if (o.shops && r() < 0.85) {   // shopfront: big window, fascia board with the shop colour, door, maybe an awning
+    if ((r(), shopUnit(o, i)) && o.pub && i === 0) {   // ngc/world-polish: the pub (rooms.js fits it out as the bar)
+      pubFront(g, r, uw, d, fh);
+      windowsZ(g, -uw / 2 + 0.4, uw / 2 - 0.4, d / 2, fl - 1, fh, { sill: fh + 0.9, spacing: 2.4 });
+    } else if (shopUnit(o, i)) {   // ngc/interiors: which units are shops, from the seed (the rooms fit them out)   // shopfront: big window, fascia board with the shop colour, door, maybe an awning
       const sc = col(r.pick(PAL.shops));
       g.quad([-uw / 2 + 0.3, 0.5, d / 2 + 0.06], [uw / 2 - 1.5, 0.5, d / 2 + 0.06], [uw / 2 - 1.5, 2.5, d / 2 + 0.06], [-uw / 2 + 0.3, 2.5, d / 2 + 0.06], GLASS2);
       g.box(0, 2.6, d / 2 + 0.1, uw - 0.2, 0.6, 0.2, sc, 1);
@@ -106,7 +111,7 @@ export function cottage(g, r, o) {   // single storey with a steep roof (loft), 
   plinth(g, w, d, o.drop, col(r.pick(PAL.stone)));
   g.box(0, 0, 0, w, H, d, wall, 1);
   g.gable(0, H, 0, w, d, d * 0.72, roof, wall, 0.3);
-  const dx = (r() - 0.5) * (w - 2.4); door(g, dx, d / 2, col(o.door), 0.9, 1.95);
+  r(); const dx = doorU(o); door(g, dx, d / 2, col(o.door), 0.9, 1.95);   // ngc/interiors
   windowsAround(g, w, d, 1, 2.6, { skip: dx, w: 0.8, h: 0.95, sill: 0.9, spacing: 2.3, sides: false });
   const cx = (r() < 0.5 ? -1 : 1) * (w / 2 - 0.45); chimney(g, cx, H + d * 0.2, 0, wall, 1);
   return [[cx, H + d * 0.2 + 1.9, 0]];

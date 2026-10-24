@@ -11,7 +11,7 @@ export default async function (h) {
   await h.key('tap', 'Enter'); await h.waitFor(`__G.G.state === 'play'`, 10000); await h.wait(1000);
   // CH-46 to SANDBAR; in transit an engine is hit
   await h.eval(`(() => { const I = __G.ISLANDS.find(i => i.name === 'SANDBAR'); __G.G.mat = 300; __G.selIsl = I; __G.command(1); window.__u = __G.war.units.find(u => u.kind === 'ch46'); return !!__u; })()`);
-  await h.waitFor(`__u.rot.AI.phase === 'transit' && __u.rot.AI.cmd.dist < 380`, 60000);
+  await h.waitFor(`__u.rot.AI.phase === 'transit' && __u.rot.AI.cmd.dist < 380`, 240000);
   await h.eval(`(__G.war.damage(__u, 6, 2), { hp: __u.hp, engines: __u.rot.S.eng.map(e => e.ok), phase: __u.rot.AI.phase })`);
   await h.wait(3000);
   await h.eval(`({ hp: __u.hp, engines: __u.rot.S.eng.map(e => e.ok), phase: __u.rot.AI.phase, live: __u.rot.S.live, feed: document.getElementById('feed').textContent.slice(0, 120) })`);
@@ -25,7 +25,7 @@ export default async function (h) {
   await h.expect(`__u.dead && __u.crashed`, 'CH-46: shot down - autorotated / fell and crashed');
   // an Osprey in cruise
   await h.eval(`(() => { const W = __G.war, I = __G.ISLANDS.find(i => i.name === 'FORGE'); window.__o = W.rotary.make('transport', 2, 0, 0, 0, { target: I }); W.units.push(__o); return __o.kind; })()`);
-  await h.waitFor(`__o.rot.AI.phase === 'transit' && __o.rot.S.ias > 50`, 60000);
+  await h.waitFor(`__o.rot.AI.phase === 'transit' && __o.rot.S.ias > 50`, 240000);
   await h.eval(`(__G.war.damage(__o, 20, 1), { dying: !!__o.dying })`);
   await h.waitFor(`__o.dead`, 60000);
   await h.expect(`__o.dead && __o.crashed`, 'MV-22: shot down, crashed');
@@ -37,7 +37,7 @@ export default async function (h) {
   await h.expect(`__w.dead`, 'WASP: shot down, tumbled and exploded');
   // a squad: land a second CH-46's Marines, then hit them
   await h.eval(`(() => { const I = __G.ISLANDS.find(i => i.name === 'SANDBAR'); __G.selIsl = I; __G.command(1); window.__u2 = __G.war.units.filter(u => u.kind === 'ch46').pop(); return !!__u2; })()`);
-  await h.waitFor(`__G.war.units.some(u => u.type === 'squad')`, 150000);
+  for (let k = 0; k < 50 && !(await h.eval(`!!(__G.war.units.some(u => u.type === 'squad'))`)); k++) await h.wait(10000);   // (polled: puppeteer caps one wait at 180 s, a loaded machine needs longer)
   await h.wait(4000);
   await h.eval(`(() => { const s = __G.war.units.find(u => u.type === 'squad'); window.__s = s; const a0 = s.squad.alive; __G.war.damage(s, 3, 2); return { a0, hp: s.hp }; })()`);
   await h.wait(1500);

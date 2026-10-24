@@ -163,7 +163,7 @@ const COND = ['feather', 'airstart', 'stop', 'run'];          // condition lever
 function newEngine(running) {
   return { cond: running ? 'run' : 'stop', run: running, N: running ? 1 : 0, beta: running ? P.BETA_LPS + 10 : P.BETA_FEATHER, shp: running ? 1500 : 0,
     tit: running ? 760 : 20, ff: 0, torque: 0, thrust: 0, Qa: 0, vi: [10, 10, 10], start: 0, fire: false, hp: 1, nts: false, autoFeathered: false,
-    lever: 50, light: false };
+    lever: 50, light: false, starter: false };
 }
 
 export function createC130Sim(GRAV = 9.80665) {
@@ -174,6 +174,10 @@ export function createC130Sim(GRAV = 9.80665) {
     autoFeatherArm: true, steer: 0, wow: [0, 0, 0, 0, 0], slip: [0, 0, 0, 0, 0], onGround: false, events: [], dead: false,
     alpha: 0, beta: 0, tas: 0, eas: 0, kias: 0, mach: 0, qbar: 0, nz: 1, ny: 0, sep: 0, buffet: 0, rho: ATM.RHO0, sigma: 1, Tc: 0,
     wind: null, tSim: 0, apState: { I: 0, It: 0, Ir: 0, thr: 0.5, lastT: 0 },
+    // electrics and air for starting: battery, the GTC (gas turbine compressor, the C-130H's APU) and the bleed air
+    // manifold (fed by the GTC or by any running engine); engines start on bleed air, fuel and ignition at 16 %
+    battery: true, gtc: { cmd: false, N: 0 }, bleedValve: true,
+    get bleed() { return A.bleedValve && (A.gtc.N > 0.95 || A.eng.some(e => e.run && e.N > 0.9)) ? 1 : 0; },
     // ---------------------------------------------------------------- helpers
     get mass() { return P.EMPTY + A.fuel + A.payload; },
     forward(out = new THREE.Vector3()) { return out.set(0, 0, -1).applyQuaternion(A.q); },
@@ -206,7 +210,7 @@ export function createC130Sim(GRAV = 9.80665) {
     resetGround(x, gy, z, yaw, o = {}) {
       A.reset(new THREE.Vector3(x, gy + 2.62, z), yaw, 0, { ...o, gear: 1, lever: o.running === false ? P.Q_GI : P.Q_GI });
       A.onGround = true; for (const e of A.eng) e.lever = P.Q_GI;
-      if (o.running === false) for (const e of A.eng) Object.assign(e, newEngine(false));
+      if (o.running === false) { for (const e of A.eng) Object.assign(e, newEngine(false)); A.battery = false; A.gtc.cmd = false; A.gtc.N = 0; }
       return A;
     },
     // ctl: { pitch (+aft), roll (+right), yaw (+right pedal) -1..1, lever: [4] power lever degrees 0..90 or
@@ -219,7 +223,16 @@ export function createC130Sim(GRAV = 9.80665) {
       return A.events;
     },
     setCond(k, c) { if (COND.includes(c)) A.eng[k].cond = c; },
-    startEngine(k) { const e = A.eng[k]; if (!e.run && e.cond === 'run' && e.start === 0) { e.start = 0.001; ev('starter', { k }); } },
+    // engine start (T.O. 1C-130H-1 normal start, OPS card limits): condition lever RUN, the start button engages the
+    // air turbine starter on bleed air; fuel and ignition at 16 %; light-off; TIT peaks under 830 C (normal start
+    // 750-830); the starter drops out at 60 %; the fuel control accelerates it to ground idle (94-102 %)
+    startEngine(k) {
+      const e = A.eng[k];
+      if (e.run || e.cond !== 'run' || e.start > 0) return false;
+      if (!A.battery) { ev('nopower', { k }); return false; }
+      if (!A.bleed) { ev('nobleed', { k }); return false; }
+      e.start = 0.001; e.starter = true; e.peakTit = 0; ev('starter', { k }); return true;
+    },
   };
   const ev = (e, extra) => { A.events.push(extra ? { e, ...extra } : { e }); };
 
@@ -238,13 +251,19 @@ export function createC130Sim(GRAV = 9.80665) {
       const fuelOK = A.fuel > 0 && e.hp > 0.05;
       // condition lever: FEATHER = fuel off + feather pump; GND STOP = fuel off; AIR START = unfeather + ignition
       const wantFuel = (e.cond === 'run' || e.cond === 'airstart') && fuelOK;
-      if (e.run && (!wantFuel || e.fire === 'out')) { e.run = false; ev(e.cond === 'feather' ? 'shutdown' : 'flameout', { k }); }
-      // starting: the starter turns the engine to 60 %, fuel and ignition from 16 %, light-off, starter out at 60 %
-      if (!e.run && wantFuel) {
-        if (e.cond === 'airstart' && e.N > 0.16) { e.run = true; e.start = 0; ev('lightoff', { k }); }
-        else if (e.start > 0) { e.start += h; if (e.N > 0.16 && !e.light) { e.light = true; } if (e.light && e.N > 0.35) { e.run = true; e.start = 0; e.light = false; ev('lightoff', { k }); } if (e.start > 60) e.start = 0; }
+      if (e.run && (!wantFuel || e.fire === 'out')) { e.run = false; e.starter = false; ev(e.cond === 'feather' ? 'shutdown' : 'flameout', { k }); }
+      // starting: the starter turns it, fuel and ignition at 16 % (light-off), starter out at 60 %; a start that has not
+      // reached 60 % in 60 s is a hung start and is aborted
+      if (!e.run && wantFuel && e.cond === 'airstart' && e.N > 0.16) { e.run = true; e.start = 0; ev('lightoff', { k, N: e.N }); }
+      if (e.start > 0) {
+        e.start += h;
+        if (!e.run && wantFuel && A.battery && e.N >= 0.16) { e.run = true; ev('lightoff', { k, N: e.N }); }
+        if (e.starter && e.N >= 0.6) { e.starter = false; ev('starterout', { k, N: e.N }); }
+        if (e.run) e.peakTit = Math.max(e.peakTit || 0, e.tit);
+        if (e.run && e.N > 0.94 && !e.starter) { ev('onspeed', { k, t: e.start, peakTit: e.peakTit }); e.start = 0; }
+        if (e.start > 60 || !wantFuel) { if (e.start > 60) ev('hungstart', { k }); e.start = 0; e.starter = false; if (e.N < 0.6) e.run = false; }
       }
-      if (e.start > 0 && !wantFuel) e.start = 0;
+      const accel = e.run && e.start > 0 && e.N < 0.94;   // accelerating after light-off: the fuel control's acceleration schedule
       const omega = Math.max(0, e.N * omega0);
       // ---- engine power (shaft hp at the prop)
       const feathering = e.cond === 'feather' || e.autoFeathered;
@@ -259,6 +278,7 @@ export function createC130Sim(GRAV = 9.80665) {
           e.shpGov = clamp((e.shpGov ?? 800) + ((1.0 - e.N) * 60000 - (e.Ndot || 0) * 20000) * h, 0, shpTop);
           shpCmd = clamp(e.shpGov + (1.0 - e.N) * 20000, 0, shpTop);
         }
+        if (accel) { const lim = 40 + 700 * ((e.N - 0.16) / 0.78) ** 2; shpCmd = Math.min(shpCmd, lim); e.shpGov = Math.min(e.shpGov ?? lim, lim); }
         shpCmd *= Math.max(0.3, e.hp);
         // the T56 is a constant-speed engine: power follows the fuel in ~0.4 s, slew limited (idle -> max ~1.5 s)
         e.shpCmd = shpCmd;
@@ -268,9 +288,10 @@ export function createC130Sim(GRAV = 9.80665) {
       }
       // starter (air turbine) and the dead engine's drag (compressor windmilling, ~2,200 hp at 100 %: INFERRED)
       let Qeng = e.run ? e.shp * 745.7 / Math.max(omega, omega0 * 0.3) : -15400 * e.N * e.N - 300 * Math.sign(e.N);
-      if (e.start > 0 && !e.run) Qeng = 9000 * (1 - e.N / 0.7) * (e.N < 0.6 ? 1 : 0.2) + (e.light ? 6000 : 0);
+      if (!e.run && e.start > 0) Qeng = -1500 * e.N * e.N;   // cranking: the compressor's drag is small at low rpm
       e.torque = (Qeng * omega) / 745.7 * 63025 / Math.max(1, e.N * P.ENG_RPM);   // engine-side in-lb (torquemeter)
-      if (e.start > 0 && !e.run) e.torque = 0;
+      if (e.start > 0 && e.N < 0.6) e.torque = Math.max(0, e.torque);
+      if (e.starter) Qeng += 1700 * A.bleed * Math.max(0, 1 - e.N / 0.8);   // the air turbine starter (~95 N m at the engine, x13.54 through the reduction gear: INFERRED)
       // ---- blade angle
       // pitch change: feather pump ~18 deg/s, governor / beta ~14-25 deg/s (INFERRED: 23 -> 92.5 deg in ~4 s)
       let bRate = 0;
@@ -302,8 +323,8 @@ export function createC130Sim(GRAV = 9.80665) {
       if (feathering && e.beta > 85 && e.N < 0.02) e.N = 0;
       e.Qa = Qa; e.thrust = _pf.T + (e.run ? P.EXHAUST_N * e.shp / P.SHP_MAX : 0);
       // ---- gauges: TIT, fuel flow
-      const titT = e.run ? 560 + 523 * Math.pow(clamp(e.shp / shpTop, 0, 1.2), 0.9) + (e.fire ? 300 : 0) + (1 - e.hp) * 150
-        : e.light ? 780 : 20 + 120 * e.N;
+      const titT = e.run ? (accel ? 690 + 120 * clamp(1 - (e.N - 0.16) / 0.7, 0, 1) : 560 + 523 * Math.pow(clamp(e.shp / shpTop, 0, 1.2), 0.9)) + (e.fire ? 300 : 0) + (1 - e.hp) * 150
+        : 20 + 120 * e.N;
       e.tit += (titT - e.tit) * Math.min(1, h * 1.5);
       e.ff = e.run ? 600 * e.N + 0.36 * e.shp : 0;   // lb/h: ~2,150 at take-off torque (INFERRED from T56 sfc ~0.5)
       A.fuel = Math.max(0, A.fuel - e.ff / LB / 3600 * h);
@@ -315,6 +336,7 @@ export function createC130Sim(GRAV = 9.80665) {
   function sub(h, ctl, env) {
     const m = A.mass, km = m / 60000, I = [P.I60[0] * (0.6 + 0.4 * km), P.I60[1] * (0.6 + 0.4 * km), P.I60[2] * (0.6 + 0.4 * km)];
     A.rho = rhoAt(A.pos.y); A.sigma = A.rho / ATM.RHO0;
+    const G = A.gtc; G.N = clamp(G.N + (G.cmd && A.battery && A.fuel > 0 ? h / 22 : -h / 12), 0, 1);   // GTC: ~20 s to on-speed
     // air velocity in FRD body axes (wind: env.wind = {x, z} world m/s)
     _v.copy(A.vel); const wnd = env.wind || A.wind; if (wnd) { _v.x -= wnd.x; _v.z -= wnd.z; }
     _iq.copy(A.q).invert(); _v.applyQuaternion(_iq); toF(_v, _vb);

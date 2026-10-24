@@ -38,10 +38,13 @@ export class Sfx {
     this.hWh2 = c.createOscillator(); this.hWh2.type = 'sine'; this.hWh2G = c.createGain(); this.hWh2G.gain.value = 0; this.hWh2.connect(this.hWh2G);
     this.hExF = noise('lowpass', 400); this.hExG = c.createGain(); this.hExG.gain.value = 0; this.hExF.connect(this.hExG);
     this.hWiF = noise('highpass', 900); this.hWiG = c.createGain(); this.hWiG.gain.value = 0; this.hWiF.connect(this.hWiG);
+    // ngc/hornethuey: the tail rotor's buzz, 2 blades x 5.123 x rotor speed = 55 Hz at 324 rpm, a sawtooth (its harmonics)
+    this.hTr = c.createOscillator(); this.hTr.type = 'sawtooth'; this.hTrF = c.createBiquadFilter(); this.hTrF.type = 'lowpass'; this.hTrF.frequency.value = 420; this.hTrG = c.createGain(); this.hTrG.gain.value = 0;
+    this.hTr.connect(this.hTrF); this.hTrF.connect(this.hTrG); this.hTr.start();
     this.hHorn = c.createOscillator(); this.hHorn.type = 'square'; this.hHornG = c.createGain(); this.hHornG.gain.value = 0; this.hHorn.connect(this.hHornG);
     this.hMuff = c.createBiquadFilter(); this.hMuff.type = 'lowpass'; this.hMuff.frequency.value = 18000;
     this.hG = c.createGain(); this.hG.gain.value = 0;
-    for (const n of [this.hSlapG, this.hThG, this.hWhG, this.hWh2G, this.hExG, this.hWiG]) n.connect(this.hMuff);
+    for (const n of [this.hSlapG, this.hThG, this.hWhG, this.hWh2G, this.hExG, this.hWiG, this.hTrG]) n.connect(this.hMuff);
     this.hMuff.connect(this.hG); this.hHornG.connect(this.hG); this.hG.connect(this.master);
     for (const o of [this.hSlapL, this.hWh, this.hWh2, this.hHorn]) o.start();
   }
@@ -60,6 +63,7 @@ export class Sfx {
     sp(this.hWh2.frequency, 2600 + 4200 * n1); sp(this.hWh2G.gain, 0.008 * Math.min(1, n1 * 1.6));
     sp(this.hExG.gain, 0.06 * Math.max(0, n1 - 0.4) * (0.6 + o.torque / 60)); sp(this.hExF.frequency, 250 + 300 * Math.min(1, o.torque / 50));
     sp(this.hWiG.gain, Math.min(0.12, (o.spd / 60) ** 2 * 0.12)); sp(this.hWiF.frequency, 700 + o.spd * 12);
+    sp(this.hTr.frequency, Math.max(1, 2 * 5.123 * 5.4 * nr)); sp(this.hTrG.gain, rot * rot * 0.028 * (0.6 + 0.5 * Math.min(1.4, ld)) * (o.inside ? 0.5 : 1));   // tail rotor buzz
     // low rotor rpm warning: the UH-1H's pulsing horn in the headset
     const hornOn = o.horn && (t % 0.5) < 0.32; sp(this.hHornG.gain, hornOn ? 0.05 : 0, 0.01); sp(this.hHorn.frequency, (t % 1) < 0.5 ? 640 : 560, 0.01);
     sp(this.hMuff.frequency, o.inside ? 2400 : 18000); sp(this.hG.gain, typeof o.on === 'number' ? o.on : o.on ? 1 : 0, 0.1);   // FOUNDATION: on may be a volume (a parked Huey heard from outside)

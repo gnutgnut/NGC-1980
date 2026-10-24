@@ -84,6 +84,7 @@ export function townItems(s, hf, extra = {}) {
     items.push({ t: 'memorial', x: s.x + 2, z: s.z - 1, yaw: r() * 6, y: 0, ground: true, drop: 0.3, seed: 1 });
     for (let k = 0; k < 3; k++) { const a = r() * 6.28, x = s.x + Math.cos(a) * (PR - 1.5), z = s.z + Math.sin(a) * (PR - 1.5); items.push({ t: 'bench', x, z, yaw: Math.atan2(s.x - x, s.z - z), y: 0, ground: true, drop: 0, seed: 0 }); }
   }
+  civic(s, r, lines, pt, tryLot, add, occ, block, PR, items);   // ngc/world-polish: the pub, the school, the chapel, the hall
   // the houses along each street, densest near the square
   for (const L of lines) for (const side of [-1, 1]) {
     let sd = PR + 3 + r() * 4;
@@ -129,6 +130,7 @@ export function townItems(s, hf, extra = {}) {
       const L = lines[0]; for (let k = 0; k < 6; k++) if (tryLot(L, s.R * (0.7 + k * 0.08), k % 2 ? 1 : -1, 16, 12, 1.5, f => ({ t: 'petrol', ...f, w: 16, d: 12, seed: r() * 1e9 | 0 }))) break;
     }
   }
+  streetLife(s, r, lines, pt, occ, PR, items);   // ngc/world-polish: signs at the way in, bins, cars parked round the square
   // the harbour: stone quay, a timber pier out into the water, boat sheds, pots; boats moor along the pier
   const q = lay.quay;
   if (q) {
@@ -138,6 +140,7 @@ export function townItems(s, hf, extra = {}) {
     items.push({ t: 'quay', x: q.x, z: q.z, y: q.y, yaw, drop: q.y - Math.min(0, sea), len, seed: r() * 1e9 | 0, harbour: true });
     for (const sd of [-1, 1]) { const [x, z] = toW(q.x, q.z, yaw, sd * 13, -3); if (!occ.free(x, z, 6) || !clearOfRoads(x, z, yaw, 6, 10, 0.5)) continue; const f = footing(x, z, yaw, 6, 10, hf); if (f) add({ t: 'boatshed', x, z, yaw, ...f, seed: r() * 1e9 | 0 }, 6); }
     const [lx, lz] = toW(q.x, q.z, yaw, 6, -5); items.push({ t: 'pots', x: lx, z: lz, yaw, y: q.y, drop: 0, seed: r() * 1e9 | 0 });
+    harbour(s, r, q, yaw, len, occ, hf, block, items);   // ngc/world-polish: slip, crane, boxes, nets, office, boats on the hard, buoys
     // a lighthouse on the most seaward point near the harbour
     if (!s.zone && s.size !== 'hamlet') {
       let best = null;
@@ -151,6 +154,106 @@ export function townItems(s, hf, extra = {}) {
     }
   }
   cacheT.set(key, items); return items;
+}
+// ------------------------------------------------------------------------------------------- ngc/world-polish
+const CARK = ['saloon', 'saloon', 'hatch', 'hatch', 'estate', 'mini', 'van'];
+// the village's institutions: the pub on the square (a hamlet's pub sometimes), the school with its playground on a
+// street out of the centre and the warning sign in front, the chapel and the village hall in the bigger places
+function civic(s, r, lines, pt, tryLot, add, occ, block, PR, items) {
+  const hf = E.hf;
+  const along = (w, d, back, mk, from = 0.3, to = 0.8) => {   // the first lot that takes a w x d building along the streets
+    for (let k = 0; k < 24 && lines.length; k++) { const L = lines[k % lines.length], sd = Math.max(PR + 12, s.R * (from + (to - from) * ((k * 0.37) % 1))); if (sd > L.max - w / 2 - 2) continue; const it = tryLot(L, sd, k % 2 ? 1 : -1, w, d, back, mk); if (it) return it; }
+    return null;
+  };
+  if (s.size !== 'hamlet' || r() < 0.45) {
+    const w = r.range(9, 12), d = r.range(8, 9.5), rad = Math.hypot(w, d) / 2, mkPub = f => ({ t: 'terrace', pub: true, shops: true, ...f, w, d, units: 1, floors: 2, roof: r.pick(PAL.roofs), seed: r() * 1e9 | 0 });
+    let placed = false;
+    for (let k = 0; k < 14; k++) {
+      const a = k * 2.05 + 0.7 + r() * 0.3, dist = PR + 2.6 + rad + (k > 7 ? 5 : 0), x = s.x + Math.cos(a) * dist, z = s.z + Math.sin(a) * dist, yaw = Math.atan2(s.x - x, s.z - z);
+      if (!occ.free(x, z, rad) || block(x, z, rad) || !clearOfRoads(x, z, yaw, w + 1, d + 1, 1.0)) continue;
+      const f = footing(x, z, yaw, w, d, hf); if (!f) continue;
+      add(mkPub({ x, z, yaw, ...f }), rad); placed = true;
+      for (const [u, v, t, rr] of [[w / 2 + 2.2, 1.2, 'picnic', 1.3], [w / 2 + 2.2, -1.6, 'picnic', 1.3], [-w / 2 - 2.4, -0.5, 'pcar', 2.3]]) {   // tables at the side, the landlord's car
+        const [px, pz] = toW(x, z, yaw, u, v); if (!occ.free(px, pz, rr) || block(px, pz, rr) || E.edge(px, pz) < rr || hf(px, pz) < 1.2) continue;
+        occ.add(px, pz, rr); items.push({ t, x: px, z: pz, y: 0, ground: true, yaw, drop: 0, seed: r() * 1e9 | 0, kind: r.pick(CARK), paint: r.pick(PAL.cars) });
+      }
+      break;
+    }
+    if (!placed && s.size !== 'hamlet') along(w, d, 2.0, mkPub, 0.1, 0.5);   // no room on the square: on the main street
+  }
+  if (s.size === 'hamlet' || !lines.length) return;
+  const sw = r.range(16, 20), sdp = 15;
+  const sch = along(sw, sdp, 2.0, f => ({ t: 'school', ...f, w: sw, d: sdp, seed: r() * 1e9 | 0 }), 0.25, 0.7);
+  if (sch) { const [x, z] = toW(sch.x, sch.z, sch.yaw, sw / 2 + 2.5, sdp / 2 + 0.9); if (occ.free(x, z, 0.6)) items.push({ t: 'psign', kind: 'school', x, z, y: 0, ground: true, yaw: sch.yaw + Math.PI / 2, drop: 0, seed: 0 }); }
+  if (s.size === 'town' || r() < 0.4) along(9, 13, 2.0, f => ({ t: 'chapel', ...f, w: 9, d: 13, seed: r() * 1e9 | 0 }), 0.2, 0.6);
+  if (s.size === 'town' || r() < 0.55) along(14, 8, 2.5, f => ({ t: 'vhall', ...f, w: 14, d: 8, wall: r.pick(PAL.walls), roof: r.pick(PAL.roofs), door: r.pick(PAL.doors), seed: r() * 1e9 | 0 }), 0.3, 0.9);
+}
+// signs at the way in (the 30 limit and the name board on the link roads; a fingerpost in a hamlet), litter bins and
+// a bus stop flag, cars parked round the square nose-in between the roads
+function streetLife(s, r, lines, pt, occ, PR, items) {
+  const gi = (t, x, z, yaw, extra = {}) => items.push({ t, x, z, y: 0, ground: true, yaw, drop: 0, seed: r() * 1e9 | 0, ...extra });
+  const clear = (x, z, m) => { for (const L of lines) for (let sd = 0; sd < PR + 8; sd += 2) { const p = pt(L.R, L.end, sd); if (Math.hypot(p.x - x, p.z - z) < L.R.hw + m) return false; } return true; };
+  if (s.size === 'hamlet') {
+    for (let k = 0; k < 8; k++) { const a = k * 0.785 + r() * 0.3, x = s.x + Math.cos(a) * (PR + 1.5), z = s.z + Math.sin(a) * (PR + 1.5); if (E.edge(x, z) > 0.4 && occ.free(x, z, 0.8)) { occ.add(x, z, 0.8); gi('psign', x, z, r() * 6, { kind: 'finger' }); break; } }
+    return;
+  }
+  lines.forEach((L, i) => {
+    if (L.R.kind !== 'link') return;
+    const p = pt(L.R, L.end, Math.min(L.max - 6, s.R * 0.95)); if (p.br) return;
+    const yaw = Math.atan2(p.dx, p.dz), nx = -p.dz, nz = p.dx;
+    for (const [side, kind, back] of [[1, 'limit', 0], [-1, 'limit', 0], [1, 'name', 4]]) { const x = p.x + nx * side * (L.R.hw + 1.3) + p.dx * back, z = p.z + nz * side * (L.R.hw + 1.3) + p.dz * back; if (occ.free(x, z, 0.8) && E.edge(x, z) > 0.5) gi('psign', x, z, yaw, { kind }); }
+    if (i % 2 === 1) { const q = pt(L.R, L.end, Math.min(L.max - 8, s.R * 0.6)); const x = q.x - q.dz * (L.R.hw + 1.0), z = q.z + q.dx * (L.R.hw + 1.0); if (!q.br && occ.free(x, z, 1) && E.edge(x, z) > 0.4) gi('psign', x, z, Math.atan2(q.dz, -q.dx), { kind: 'bus' }); }
+  });
+  for (let k = 0; k < 2; k++) { const a = r() * 6.283, x = s.x + Math.cos(a) * (PR - 0.6), z = s.z + Math.sin(a) * (PR - 0.6); if (clear(x, z, 0.6)) gi('bin', x, z, 0); }
+  if (PR < 12) return;
+  const benches = items.filter(o => o.t === 'bench');
+  const want = s.size === 'town' ? 7 : 3, ring = PR - 2.7, a0 = r() * 6.283;
+  for (let k = 0, n = 0; k < 22 && n < want; k++) {
+    const a = a0 + k * 0.52, x = s.x + Math.cos(a) * ring, z = s.z + Math.sin(a) * ring;
+    if (r() < 0.25 || !clear(x, z, 2.6) || benches.some(b => Math.hypot(b.x - x, b.z - z) < 2.8)) continue;
+    gi('pcar', x, z, Math.atan2(s.x - x, s.z - z) + (r() - 0.5) * 0.15, { kind: r.pick(CARK), paint: r.pick(PAL.cars) }); n++;
+  }
+}
+// the working harbour: a slipway beside the pier with a boat at its head, the hand crane on the quay edge, fish boxes,
+// a heap of nets, the fuel tank, the harbour office ashore, boats hauled up on the hard, mooring buoys in the bay
+function harbour(s, r, q, yaw, len, occ, hf, block, items) {
+  const at = (u, v) => toW(q.x, q.z, yaw, u, v), sd = r() < 0.5 ? 1 : -1;
+  const on = (t, u, v, yo = 0, extra = {}) => { const [x, z] = at(u, v); items.push({ t, x, z, y: q.y, yaw: yaw + yo, drop: 0, seed: r() * 1e9 | 0, ...extra }); };
+  on('crane', sd * 3.6, 6.2, sd * -0.6); on('fishbox', -sd * 4, 2.6, 0.3); on('nets', -sd * 5, -1.2, r());
+  if (s.size !== 'hamlet') on('fueltank', sd * 5.6, -2.4, Math.PI / 2);
+  // the slip: from the quay's edge straight down into the water until it is 2.5 m deep
+  let sl = 8; for (; sl < 34; sl += 2) { const [x, z] = at(-sd * 7.5, 5 + sl); if (rawH(x, z) < -2.5) break; }
+  { const [x, z] = at(-sd * 7.5, 5); if (occ.free(x, z, 2) && !block(x, z, 2)) { items.push({ t: 'slip', x, z, y: q.y - 0.15, yaw, drop: 0, len: sl, depth: q.y + 2.5, seed: 0 }); on('hboat', -sd * 7.5, 3.0, Math.PI + 0.1, { L: 4.2 }); } }
+  for (const u of [10, -10, 13, -13]) {   // the harbour office ashore
+    const [x, z] = at(u, -5), y0 = yaw + Math.PI;
+    if (!occ.free(x, z, 3) || block(x, z, 3) || !clearOfRoads(x, z, y0, 4.5, 4, 0.8)) continue;
+    const f = footing(x, z, y0, 3.6, 3.0, hf); if (f) { occ.add(x, z, 3); items.push({ t: 'office', x, z, yaw: y0, ...f, w: 3.6, d: 3.0, seed: r() * 1e9 | 0 }); break; }
+  }
+  for (let k = 0, n = 0; k < 16 && n < 3; k++) {   // boats hauled up on the hard: where the beach is 0.3-2 m above the sea
+    const u = (k % 2 ? 1 : -1) * (12 + Math.floor(k / 2) * 3.2), v = 2 - r() * 6, [x, z] = at(u, v), h = rawH(x, z);
+    if (h < 0.3 || h > 2.0 || !occ.free(x, z, 2.6) || block(x, z, 2.6) || E.edge(x, z) < 2.5) continue;
+    occ.add(x, z, 2.6); items.push({ t: 'hboat', x, z, y: 0, ground: true, yaw: yaw + Math.PI + (r() - 0.5) * 0.6, drop: 0, seed: r() * 1e9 | 0, L: 3.6 + r() * 1.6 }); n++;
+  }
+  for (let k = 0, n = 0; k < 10 && n < 4; k++) {   // mooring buoys out in the bay
+    const u = (k % 2 ? 1 : -1) * (9 + r() * 12), v = len * (0.35 + r() * 0.7), [x, z] = at(u, v);
+    if (rawH(x, z) > -1.5) continue; items.push({ t: 'buoy', x, z, y: 0, yaw: 0, drop: 0, seed: r() * 1e9 | 0 }); n++;
+  }
+}
+// the farmyard: the milking parlour with its feed hopper, a bale stack, the muck heap, a water trough, the tipping
+// trailer, the farm Land Rover; the milk churn stand where the track meets the road
+function farmyard(f, r, put, at, yaw, items) {
+  const gi = (t, u, v, y0 = 0, extra = {}) => { const [x, z] = at(u, v); items.push({ t, x, z, y: 0, ground: true, yaw: yaw + y0, drop: 0, seed: r() * 1e9 | 0, ...extra }); };
+  if (r() < 0.65) put('parlour', -3, 15, r.range(13, 16), 6.5);
+  if (r() < 0.6) gi('balestack', 20, -10, r() * 0.5);
+  if (r() < 0.55) gi('muck', -18, -3);
+  if (r() < 0.6) gi('trough', 7, 11, Math.PI / 2);
+  if (r() < 0.5) gi('trailer', 3, -5, 1.2 + r());
+  if (r() < 0.55) gi('landrover', 2, 9, 0.4 + r() * 0.5);
+  const R = f.track != null ? roadById(f.track) : null;
+  if (R && R.xs.length > 4 && r() < 0.7) {
+    const n = R.xs.length, i = n - 3, dx = R.xs[i + 1] - R.xs[i - 1], dz = R.zs[i + 1] - R.zs[i - 1], l = Math.hypot(dx, dz) || 1, o = R.hw + 1.5;
+    items.push({ t: 'churns', x: R.xs[i] - dz / l * o, z: R.zs[i] + dx / l * o, y: 0, ground: true, yaw: Math.atan2(dz, -dx), drop: 0, seed: 0 });
+  }
 }
 // a house's garden: washing, a shed, a car on the drive, a tree, a woodpile
 function garden(h, r, items, occ, hf, block) {
@@ -178,6 +281,7 @@ export function farmItems(f) {
   if (r() < 0.6) { const [x, z] = at(2, -14); items.push({ t: 'tractor', x, z, y: 0, ground: true, yaw: yaw + r() * 6, drop: 0, seed: r() * 1e9 | 0 }); }
   if (r() < 0.5) { const [x, z] = at(-12, 10); items.push({ t: 'laundry', x, z, y: 0, ground: true, yaw, drop: 0.3, seed: r() * 1e9 | 0 }); }
   for (const F of f.fields) items.push({ t: 'field', x: F.x, z: F.z, y: 0, yaw: F.yaw, w: F.w, d: F.d, crop: F.crop, wall: f.style, seed: F.seed, drop: 0 });
+  farmyard(f, r, put, at, yaw, items);   // ngc/world-polish
   cacheF.set(f.id, items); return items;
 }
 

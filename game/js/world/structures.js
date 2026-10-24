@@ -95,6 +95,89 @@ function hexPlinth(g, x, z, r, h, c) { g.cyl(x, -1.5, z, r, h + 1.5, 6, c, 2, r 
 function seam(gl, a, b, w = 0.07) { gl.strut(a, b, w, WHITE); }
 function shard(g, x, z, h, w, lean, yaw, c) { g.push(x, 0, z, yaw, lean, 0); g.pyramid(0, -0.3, 0, w, w * 0.5, h, c); g.pop(); }
 
+// ------------------------------------------------------------------------------------------- ngc/world-polish
+// the ground under a site (main.js terrainH, set by world/life.js): fences and AA revetments follow the slope
+const GROUND = { fn: null };
+export function setStructGround(fn) { GROUND.fn = fn; }
+// war.js's AA slots round a pad (aaSlots: repeated here, keep in step)
+const aaSlotsOf = I => { const p = I.pad, r = I.cave ? 15 : 22; return p ? [0, 1, 2, 3].map(k => { const a = k * Math.PI / 2 + Math.PI / 4; return [p.x + Math.cos(a) * r, p.z + Math.sin(a) * r]; }) : []; };
+function sentryBox(g, x, z, r) {   // a sentry box with a sandbag skirt and a red-and-white barrier pole leaning on it
+  g.push(x, 0, z, Math.PI / 2); g.box(0, 0, 0, 1.4, 2.3, 1.4, OD2, 1); g.box(0, 2.3, 0, 1.6, 0.12, 1.6, DARK, 0);
+  g.quad([-0.45, 1.2, 0.71], [0.45, 1.2, 0.71], [0.45, 1.8, 0.71], [-0.45, 1.8, 0.71], col(0x2b3846));
+  sandbags(g, -1.2, 1.0, 1.2, 1.0, 2, r);
+  for (let i = 0; i < 6; i++) g.push(1.0, 0.95, -0.4 - i * 0.55).box(0, 0, 0, 0.12, 0.12, 0.55, i % 2 ? RED_ : WHITE, 0).pop();
+  g.pop();
+}
+const RED_ = col(0xb02a22);
+// the perimeter fence: concrete posts every 3 m, chain-link (its four line wires: the mesh itself would not read),
+// three strands of barbed wire on cranked arms; round the back and sides (the front stays open to the pad), stepping
+// round the pad, the AA slots and the other sites on the island
+function buildFence(g, I, half) {
+  const G = new Geo(), gx = g.position.x, gy = g.position.y, gz = g.position.z, yaw = g.rotation.y, c = Math.cos(yaw), s = Math.sin(yaw);
+  const W = (u, v) => [gx + c * u + s * v, gz - s * u + c * v], slots = aaSlotsOf(I), pad = I.pad;
+  const blocked = (u, v) => {
+    const [x, z] = W(u, v);
+    if (pad && Math.hypot(x - pad.x, z - pad.z) < (pad.r || 8.5) + 5) return true;
+    if (slots.some(([sx, sz]) => Math.hypot(x - sx, z - sz) < 7)) return true;
+    for (const o of I.structs || []) { if (o.kind === 'aa' || o.mesh === g) continue; if (Math.hypot(x - o.x, z - o.z) < (o.r || 8) + 2.5) return true; }
+    return false;
+  };
+  const hAt = (u, v) => { const [x, z] = W(u, v); return GROUND.fn(x, z) - gy; };
+  const runs = [[[-half, half * 0.45], [-half, -half]], [[-half, -half], [half, -half]], [[half, -half], [half, half * 0.45]]];
+  const POST = CONC2, WIRE = col(0x8a9094);
+  let n = 0;
+  for (const [[u0, v0], [u1, v1]] of runs) {
+    const L = Math.hypot(u1 - u0, v1 - v0), k = Math.max(1, Math.round(L / 3));
+    let prev = null;
+    for (let i = 0; i <= k; i++) {
+      const u = u0 + (u1 - u0) * i / k, v = v0 + (v1 - v0) * i / k;
+      if (blocked(u, v)) { prev = null; continue; }
+      const y = hAt(u, v);
+      G.box(u, y - 0.3, v, 0.14, 2.75, 0.14, POST, 1); n++;
+      const ou = -(v1 - v0) / L, ov = (u1 - u0) / L;   // outward (left of the run, which goes round clockwise)
+      G.strut([u, y + 2.4, v], [u - ou * 0.4, y + 2.75, v - ov * 0.4], 0.05, POST);
+      if (prev) {
+        for (const h of [0.1, 0.8, 1.5, 2.2]) G.strut([prev.u, prev.y + h, prev.v], [u, y + h, v], 0.025, WIRE);
+        for (const q of [0.15, 0.27, 0.39]) G.strut([prev.u - ou * q, prev.y + 2.4 + q * 0.85, prev.v - ov * q], [u - ou * q, y + 2.4 + q * 0.85, v - ov * q], 0.018, DARK);
+      }
+      prev = { u, v, y };
+    }
+  }
+  return n ? mesh(G) : null;
+}
+// the AA emplacements on an island's slots, [[x, z, gapA]...] (world/life.js places them; side 1: dug in, side 2:
+// machine plates), merged: two meshes an island
+export function buildAASite(hf, slots) {
+  const g = new THREE.Group(), X0 = slots[0][0], Z0 = slots[0][1], Y0 = hf(X0, Z0); g.position.set(X0, Y0, Z0);
+  const HU = new Geo(), RW = new Geo(), GL = new Geo(), r = rng(((X0 * 7) | 0) ^ ((Z0 * 13) | 0));
+  for (const [x, z, gapA] of slots) {
+  HU.push(x - X0, 0, z - Z0); RW.push(x - X0, 0, z - Z0); GL.push(x - X0, 0, z - Z0);
+  const R0 = 4.4, R1 = 6.2, n = 16, h = (a, R) => hf(x + Math.cos(a) * R, z + Math.sin(a) * R) - Y0;
+  for (let i = 0; i < n; i++) {
+    const a0 = i / n * Math.PI * 2, a1 = (i + 1) / n * Math.PI * 2, am = (a0 + a1) / 2;
+    if (Math.abs(Math.atan2(Math.sin(am - gapA), Math.cos(am - gapA))) < 0.5) continue;   // the way in, from the pad side
+    const P = (a, R, dy) => [Math.cos(a) * R, h(a, R) + dy, Math.sin(a) * R];
+    const i0 = P(a0, R0, 1.0), i1 = P(a1, R0, 1.0), b0 = P(a0, R0, -0.3), b1 = P(a1, R0, -0.3), t0 = P(a0, R0 + 0.7, 1.05), t1 = P(a1, R0 + 0.7, 1.05), o0 = P(a0, R1, -0.15), o1 = P(a1, R1, -0.15);
+    HU.faceW(b0, b1, i1, i0, EARTH, -Math.cos(am), 0, -Math.sin(am));
+    HU.faceW(i0, i1, t1, t0, GRASS, 0, 1, 0); HU.faceW(t0, t1, o1, o0, i % 2 ? GRASS : EARTH, Math.cos(am), 0.8, Math.sin(am));
+    const m0 = P(am, R0 + 0.35, 1.0);   // a row of sandbags along the lip
+    HU.push(m0[0], m0[1], m0[2], -am - Math.PI / 2); for (let k = 0; k < 3; k++) HU.box(-0.85 + k * 0.6, 0, 0, 0.56, 0.28, 0.4, k % 2 ? SAND : SAND2, 1); HU.pop();
+    // RUNAWAY: a ring of leaning ceramic plates
+    if (i % 2 === 0) { const p = P(am, R0 + 0.4, -0.2); RW.push(p[0], p[1], p[2], -am + Math.PI / 2, -0.25, 0); RW.box(0, 0, 0, 2.2, 1.6, 0.25, i % 4 ? CER : CER2, 1); RW.pop(); const q = P(am, R0 + 0.25, 1.35); GL.strut([q[0] - Math.sin(am) * 0.9, q[1], q[2] + Math.cos(am) * 0.9], [q[0] + Math.sin(am) * 0.9, q[1], q[2] - Math.cos(am) * 0.9], 0.06, WHITE); }
+  }
+  // ready-use ammunition and a camouflage-netted crew shelter outside the ring, away from the pad
+  const ba = gapA + Math.PI, bx = Math.cos(ba) * (R1 + 2.2), bz = Math.sin(ba) * (R1 + 2.2), by = h(ba, R1 + 2.2);
+  HU.push(bx, by, bz, -ba); for (let k = 0; k < 5; k++) HU.box(-1.2 + (k % 3) * 0.9, Math.floor(k / 3) * 0.32, 0, 0.8, 0.3, 0.45, k % 2 ? OD : OD2, 1); HU.pop();
+  const ca = gapA + Math.PI * 0.6, cx = Math.cos(ca) * (R1 + 3.5), cz = Math.sin(ca) * (R1 + 3.5), cy = h(ca, R1 + 3.5);
+  HU.push(cx, cy, cz, -ca); camoNet(HU, 0, 0, 3.2, 3.2, 2.0, r); HU.box(0, 0, 0, 2.2, 0.9, 1.8, OD2, 1); HU.pop();
+  HU.pop(); RW.pop(); GL.pop();
+  }
+  HU.weatherAll(-1, 1.6, 0.22, 0.08);
+  const hu = mesh(HU), glowMat = mats().glow.clone(), rw = new THREE.Group(); rw.add(mesh(RW), new THREE.Mesh(geoFrom(GL.build()), glowMat));
+  g.add(hu, rw); hu.visible = false; rw.visible = false;
+  g.userData = { setSide(side) { hu.visible = side === 1; rw.visible = side === 2; } };
+  return g;
+}
 // ------------------------------------------------------------------------------------------- the four kinds
 // each returns { human: { solid: Geo, mil: Geo, civ: Geo, parts }, rw: { solid, glow, parts }, ruinH: Geo, ruinR: Geo,
 //                shards: Geo, damageH: Geo, h, r, stackTops }
@@ -266,6 +349,11 @@ const BUILD = { hq: buildHQ, fuel: buildFuel, factory: buildDepot, radar: buildR
 let siteSeed = 1;
 export function buildFactionStructure(kind, side) {
   const M = mats(), r = rng((siteSeed++) * 7919), B = BUILD[kind](r);
+  // ngc/world-polish: a sentry box by the way in, weathering (grime up the walls, every face a shade off), and the
+  // perimeter fence once the site knows where it stands (tick)
+  sentryBox(B.mil, -(B.r + 4.5), B.r * 0.7 + 1, r);
+  for (const k of ['H', 'mil', 'civ', 'ruin', 'dmg']) if (B[k]) B[k].weatherAll(0, 1.2, 0.3, 0.06);
+  if (B.rw && B.rw.S) B.rw.S.weatherAll(0, 0.9, 0.12, 0.03);
   const g = new THREE.Group();
   const team = new THREE.MeshLambertMaterial({ color: TEAMC[side] ?? 0x888888 });
   // ---- 1980
@@ -326,8 +414,10 @@ export function buildFactionStructure(kind, side) {
     else { st.cond = 'intact'; st.hp = 1; if (st.smoke) { st.smoke.smoulder = 20; st.smoke = null; } if (st.style === 'rw') st.grow = 0; }
     apply();
   };
+  let fenced = false;
   ud.tick = (dt, t) => {
     st.t = t;
+    if (!fenced && GROUND.fn && st.s && st.s.I) { fenced = true; const f = buildFence(g, st.s.I, B.r + 4); if (f) hIntact.add(f); }   // ngc/world-polish
     if (flag && flag.visible) { flag.rotation.y = Math.sin(t * 2.1 + g.position.x) * 0.35 - 0.3; flag.children[0].rotation.y = Math.sin(t * 5 + g.position.z) * 0.08; }
     if (beam && hIntact.visible && st.cond !== 'destroyed') beam.rotation.x = Math.sin(t * 1.4 + g.position.x) * 0.28;
     if (ant && hIntact.visible && st.cond !== 'damaged') ant.rotation.y += dt * 1.25;   // ~12 rpm

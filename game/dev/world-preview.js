@@ -7,9 +7,12 @@ import * as THREE from 'three';
 import { islandH, ISLANDS } from '../js/world.js';
 import { ensure, settlementsNear, netState, farmsIn } from '../js/world/net.js';
 import { buildChunk, CHUNK, buildGeo } from '../js/world/chunkgen.js';
-import { zoneItems } from '../js/world/layout.js';
+import { zoneItems, townItems } from '../js/world/layout.js';
 import { worldMaterial, groundMaterial, geoFrom } from '../js/world/gfx.js';
-import { buildFactionStructure, buildPadDressing, buildShaftCollar, buildRWPylon } from '../js/world/structures.js';
+import { buildFactionStructure, buildPadDressing, buildShaftCollar, buildRWPylon, buildAASite, setStructGround } from '../js/world/structures.js';
+import { Geo } from '../js/world/kit.js';
+import { rng } from '../js/world/rng.js';
+import { ruin, damageOverlay } from '../js/world/townkit.js';
 
 const P = new URLSearchParams(location.search), num = (k, d) => P.has(k) ? +P.get(k) : d;
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -41,6 +44,11 @@ if (['town', 'village', 'hamlet'].includes(focus)) {
   for (let k = 0; k < 25; k++) ensure(cx + (k % 5 - 2) * 1600, cz + (Math.floor(k / 5) - 2) * 1600);
   const bs = []; for (const R of netState.roads) for (let i = 1; i < R.br.length; i++) if (R.br[i] && !R.br[i - 1]) bs.push([R.xs[i + 1] || R.xs[i], R.zs[i + 1] || R.zs[i]]);
   bs.sort((a, b) => Math.hypot(a[0] - cx, a[1] - cz) - Math.hypot(b[0] - cx, b[1] - cz)); if (bs[n]) target = bs[n];
+} else if (['pub', 'school', 'chapel', 'vhall', 'pcar', 'psign'].includes(focus)) {   // ngc/world-polish: the n-th such item near x, z
+  for (let k = 0; k < 9; k++) ensure(cx + (k % 3 - 1) * 1600, cz + (Math.floor(k / 3) - 1) * 1600);
+  const its = []; for (const s of settlementsNear(cx, cz, 3000)) for (const it of townItems(s, null)) if (focus === 'pub' ? it.pub : it.t === focus) its.push(it);
+  its.sort((a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz));
+  const it = its[n % Math.max(1, its.length)]; if (it) { target = [it.x, it.z]; if (!P.has('yaw')) P.set('yaw', String(it.yaw * 180 / Math.PI)); }
 } else if (focus === 'zone') {
   const I = ISLANDS.find(I => I.name === (P.get('island') || 'HOME ISLAND')) || ISLANDS[0]; target = [I.x, I.z];
 }
@@ -51,6 +59,7 @@ const [tx, tz] = target, ty = Math.max(0, islandH(tx, tz));
 // ---- faction structures: rows hq / fuel / depot / radar; columns: neutral, ours, ours damaged, ours destroyed,
 //      RUNAWAY, RUNAWAY damaged, RUNAWAY destroyed, retaken by us (shards round it)
 const STRUCTS = P.has('structs');
+setStructGround(() => 0);
 const structs = [];
 if (STRUCTS) {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 400).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x3f8a32 })); scene.add(ground);
@@ -59,11 +68,12 @@ if (STRUCTS) {
   const collar = buildShaftCollar(); collar.position.set(-110, 0, 90); collar.userData.setSide(2); scene.add(collar);
   const collar2 = buildShaftCollar(); collar2.position.set(-70, 0, 90); collar2.userData.setSide(1); scene.add(collar2);
   for (let k = 0; k < 4; k++) { const p = buildRWPylon(); p.position.set(-30 + k * 18, 0, 90); scene.add(p); }
+  for (const [x, side] of [[60, 1], [90, 2]]) { const a = buildAASite(() => 0, [[x, 90, Math.PI / 2]]); a.userData.setSide(side); scene.add(a); }   // ngc/world-polish: AA emplacements
   ['hq', 'fuel', 'factory', 'radar'].forEach((kind, row) => {
     const cols = [[0, 'intact'], [1, 'intact'], [1, 'damaged'], [1, 'destroyed'], [2, 'intact'], [2, 'damaged'], [2, 'destroyed'], ['retaken', 'intact']];
     cols.forEach(([side, cond], c) => {
       const g = buildFactionStructure(kind, side === 'retaken' ? 2 : side); g.position.set(-150 + c * 40, 0, -75 + row * 42); scene.add(g); structs.push(g);
-      const ud = g.userData; ud.state.grow = 1;
+      const ud = g.userData; ud.state.grow = 1; ud.attach({ fx: null, s: { I: { pad: null, structs: [] } } });   // (the fence goes up on the first tick)
       if (side === 'retaken') ud.setSide(1);
       if (cond === 'damaged') ud.onHp(0.4); if (cond === 'destroyed') ud.setState('destroyed');
     });
@@ -95,14 +105,25 @@ if (focus === 'zone') {
     // zone roads
     const road = new Map(); for (const R of netState.roads) if (R.kind === 'zone') road.set(R, new Set(R.xs.map((_, i) => i).slice(0, -1)));
     const gr = buildGeo({ items: [], roads: road, discs: [], x0: -1e9, z0: -1e9, x1: 1e9, z1: 1e9 }, islandH);
-    for (const d of [g[lod], gr[lod]]) { const mesh = new THREE.Mesh(geoFrom(d), mat); scene.add(mesh); tris += d.tris; }
+    for (const d of [g[lod], gr[lod], ...(lod === 'near' ? [g.detail] : [])]) { if (!d.tris) continue; const mesh = new THREE.Mesh(geoFrom(d), mat); scene.add(mesh); tris += d.tris; }
     for (const d of [g[glod], gr[glod]]) { const mesh = new THREE.Mesh(geoFrom(d), gmat); scene.add(mesh); tris += d.tris; }
   }
 } else if (!STRUCTS) {
   const c0 = Math.floor((tx - SIZE / 2) / CHUNK), c1 = Math.floor((tx + SIZE / 2) / CHUNK), d0 = Math.floor((tz - SIZE / 2) / CHUNK), d1 = Math.floor((tz + SIZE / 2) / CHUNK);
   for (let j = d0; j <= d1; j++) for (let i = c0; i <= c1; i++) {
     const c = buildChunk(i, j, islandH), d = c[lod];
+    // ngc/world-polish: &damage=1 knocks every third building about (damaged / destroyed, as world/life.js does)
+    if (P.has('damage')) {
+      const g = new Geo();
+      c.dyn.bld.forEach((b, k) => {
+        if (k % 3) return; const dead = k % 2 === 0, r = rng((b.it.seed | 0) ^ 0x5eed);
+        if (dead) { const [a, e] = lod === 'far' ? b.f : b.n, A = d.pos; for (let v = a; v < e; v++) { A[v * 3] = A[a * 3]; A[v * 3 + 1] = A[a * 3 + 1]; A[v * 3 + 2] = A[a * 3 + 2]; } }
+        g.weather(b.y, 1.0, 0.3, 0.08); g.push(b.x, b.y, b.z, b.yaw); (dead ? ruin : damageOverlay)(g, r, b.it); g.pop(); g.unweather();
+      });
+      const rd = g.build(); if (rd.tris) { scene.add(new THREE.Mesh(geoFrom(rd), mat)); tris += rd.tris; }
+    }
     scene.add(new THREE.Mesh(geoFrom(d), mat)); scene.add(new THREE.Mesh(geoFrom(c[glod]), gmat)); tris += d.tris + c[glod].tris; chunks++;
+    if (lod === 'near' && c.detail.tris) { scene.add(new THREE.Mesh(geoFrom(c.detail), mat)); tris += c.detail.tris; }   // ngc/world-polish: the detail layer
     if (c.wires.length && lod === 'near') { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(c.wires, 3)); scene.add(new THREE.LineSegments(g, wireMat)); }
   }
 }

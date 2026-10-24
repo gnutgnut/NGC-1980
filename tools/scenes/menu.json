@@ -33,8 +33,8 @@
     "log resume and P toggle",
     "key tap KeyP", "wait 100", "key tap KeyP", "wait 100",
     "expect __G.G.state === 'play'",
-    "log abandoning the last helicopter loses the war",
-    "eval (__G.G.lives = 0, __G.openMenu(), __G.menu.sel=2, __G.menuPick(), __G.menuPick(), __G.G.over)",
+    "log COMMANDER: abandoning the last Huey with nothing else in reserve or out loses the war (the fleet is spent)",
+    "eval (__G.fleet.types.forEach(t => __G.fleet.n[t.id] = 0), __G.m60C.stow(), __G.m113C.stow(), __G.pool.list.forEach(V => V.stow()), __G.openMenu(), __G.menu.sel=2, __G.menuPick(), __G.menuPick(), __G.G.over)",
     "waitFor 6000 __G.G.state === 'title'",
     "expect document.querySelector('#title h1').textContent === 'DEFEAT'",
     "shot 05-defeat"

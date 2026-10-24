@@ -195,7 +195,8 @@ export function createSoldier(o = {}) {
     let slope = 0;
     if (env.groundY && moving) { const h0 = env.groundY(S.pos.x, S.pos.z), h1 = env.groundY(S.pos.x + wx * 0.6, S.pos.z + wz * 0.6); slope = (h1 - h0) / 0.6; }
     S.grade = slope;
-    if (moving) vmax *= clamp(tobler(slope), 0.15, 1.05) * (slope > 0.9 ? 0 : 1);   // > ~42 deg: can't climb it
+    if (moving && env.onStair && env.onStair()) vmax *= 0.55;   // ngc/interiors: stairs and a ship's inclined ladders - step by step, not a hillside
+    else if (moving) vmax *= clamp(tobler(slope), 0.15, 1.05) * (slope > 0.9 ? 0 : 1);   // > ~42 deg: can't climb it
     // water
     const depth = env.waterDepth ? env.waterDepth(S.pos.x, S.pos.z) : 0;
     if (depth > 1.35 && !S.swimming) { S.swimming = true; if (S.stance !== 'stand') { S.stance = S.stanceTo = 'stand'; S.stanceT = 1; } ev('swim', { on: true }); }

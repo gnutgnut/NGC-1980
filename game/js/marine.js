@@ -347,6 +347,7 @@ export function createMarine(ctx) {
     if (Mr.care.interact()) return;   // ngc/infdepth: a wounded Marine (treat him), a man you carry next to the Huey
     const t = nearestLoot();
     if (t) { openScreen('gear', t.c); say(`SEARCHING ${t.name}`, 1.5); return; }
+    if (ctx.use && ctx.use(W.x, W.y, W.z, S.camYaw ?? W.yaw)) return;   // ngc/interiors: a door, a gate, a hatch in front of you
     const svc = ctx.serviceAt(W.x, W.z);
     if (svc) { const got = MS.resupply(); say(got.length ? `${svc.name}: ${got.join(', ')}` : `${svc.name}: YOU ARE FULLY STOCKED`, 2.2); A()?.mech('magIn'); return; }
     say('NOTHING HERE  -  F BY A CRATE, A BODY OR ON A FRIENDLY PAD', 1.6);
@@ -693,7 +694,7 @@ export function createMarine(ctx) {
     const posture = W.swim ? 'SWIMMING' : W.ladder ? 'ON A LADDER' : S.stance === 'prone' ? 'PRONE' : S.stance === 'crouch' ? 'KNEELING' : S.sprinting ? 'SPRINTING' : walkMode ? 'WALKING' : 'STANDING';
     const deck = W.plat ? (W.plat.type === 'carrier' ? (W.plat.side === 1 ? 'ALBATROSS' : 'KRAKEN') : W.plat.type.toUpperCase()) + '  ·  ' : '';
     const line = `${posture}${S.bipod ? ' (BIPOD)' : S.rested ? ` (RESTED${MS.restKind ? ' ON ' + ({ ledge: 'A LEDGE', wall: 'A WALL', left: 'A WALL, LEFT', right: 'A WALL, RIGHT' })[MS.restKind] : ''})` : ''}  ·  ${deck}${S.load.toFixed(0)} kg  ·  HR ${Math.round(S.hr)}${mods.unconscious ? '  ·  UNCONSCIOUS' : ''}`;
-    let hint = '', tip = false;
+    let hint = '', tip = false, uh = '';
     const lt = !MS.dead && nearestLoot(), thr = throwHint();
     if (MS.dead) hint = MS.cause || 'KILLED';
     else if (Mr.ui === 'patient') hint = 'BUDDY AID: DRAG AN ITEM FROM YOUR KIT ONTO HIM  ·  ESC CLOSE';
@@ -701,6 +702,7 @@ export function createMarine(ctx) {
     else if (Mr.care.hint()) hint = Mr.care.hint();   // ngc/infdepth: casualties, carrying, a corpsman on you
     else if (thr) hint = thr;
     else if (lt) hint = `F: SEARCH ${lt.name}`;
+    else if (ctx.useHint && (uh = ctx.useHint(W.x, W.y, W.z, S.camYaw ?? W.yaw))) hint = uh;   // ngc/interiors: F opens / shuts the door in front of you
     else if (ctx.serviceAt(W.x, W.z) && (I.countRounds(MS.inv, '556') < 200 || !MS.inv.slots.secondary)) hint = 'F: REARM AND RESUPPLY HERE';
     else if (W.ladder) hint = `${W.ladder.name}  -  W / S TO CLIMB, SPACE TO LET GO`;
     else if (W.swim) hint = W.y < -2 ? `UNDER WATER  -  BREATH ${Math.ceil(W.breath)} S  ·  LET GO OF C TO SURFACE` : 'SWIMMING  -  HOLD C TO DIVE  ·  MAKE FOR A BEACH OR THE ALBATROSS STERN LADDER';   // (ngc/waterfish)

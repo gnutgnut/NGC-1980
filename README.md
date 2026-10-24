@@ -20,7 +20,7 @@ The enemy carrier KRAKEN is out there doing the same, and whoever controls the m
 - **Economy.** Islands produce fuel and materiel. Spend materiel on Sea Knight landings, AA guns, spare helicopters and escort fighters.
 - **An enemy commander.** It sends RUNAWAY MV-22 Ospreys full of machine troopers to take islands, swarms of RW-3 WASP ducted-fan drones to hunt you, fortifies, raids your carrier, ships supplies in autonomous container ships, and builds the LEVIATHAN railgun monitor in its factories to hunt the ALBATROSS. Bomb the factories to slow it down.
 - **HORNET carrier jet.** Land on the ALBATROSS and press 5: an F/A-18-style fighter on the catapult. Full 6-DOF flight model with a Hornet-like flight computer, a 3D cockpit with a conformal HUD and working displays, catapult launches, arrested landings, gun, AIM-9s and CCIP bombs, ejection. Built for a T.Flight HOTAS 4 and rudder pedals with toe brakes (any stick, pad or keyboard works).
-- **Fly the TOMCAT.** Land on the ALBATROSS and press 8: an F-14A on cat 1 (two in the hangar). The AI escorts' real flight model (swing wings on the CADC, TF30s that stall at high AoA, a mechanical stick with stability augmentation and no limiter) with a 1980 analog cockpit: the AVG-12 HUD, the VDI and HSD CRTs, steam gauges (AoA in units, airspeed / Mach, altimeter, VSI, accelerometer, the wing sweep indicator, TF30 RPM / TIT / fuel flow / nozzles, fuel), the caution panel, the throttles' sweep switch and the emergency sweep handle (OVERSWEEP on deck), pitch trim and the autopilot. Change to the RIO's seat for the AWG-9's TID and DDD (hook, lock, launch Phoenix and Sparrow) while the pilot flies where you tell him. Warnings are 1980 tones and lights, not a voice. Ejection takes both of you.
+- **Fly the TOMCAT.** Land on the ALBATROSS and press 8: an F-14A on cat 1 (two in the hangar). The AI escorts' real flight model (swing wings on the CADC, TF30s that stall at high AoA, a mechanical stick with stability augmentation and no limiter) with a 1980 analog cockpit: the AVG-12 HUD, the VDI and HSD CRTs, steam gauges (AoA in units, airspeed / Mach, altimeter, VSI, accelerometer, the wing sweep indicator, TF30 RPM / TIT / fuel flow / nozzles, fuel), the caution panel, the throttles' sweep switch and the emergency sweep handle (OVERSWEEP on deck), pitch trim and the autopilot; every switch clickable, and a cold start on them (ENG CRANK, the throttles OFF -> IDLE at 20%, generators, a wet start if you rush it). The RIO sits behind you. Change to the RIO's seat for the AWG-9's TID and DDD (hook, lock, launch Phoenix and Sparrow) while the pilot flies where you tell him. Warnings are 1980 tones and lights, not a voice. Ejection takes both of you.
 - **Tomcat escorts and the RUNAWAY air arm.** Press 4: an F-14A Tomcat goes to the ALBATROSS's bow catapult and an AI pilot flies its real flight model (swing wings, TF30s, mechanical stick) through stick, pedals and throttle: catapult shot, CAP over the ship or the island you selected, intercepts and dogfights with game-level missiles and the gun, bingo, the carrier pattern and an arrested landing (with wave-offs and bolters). The enemy answers with RW-4 SHRIKE fighter drones off the KRAKEN, an MQ-9 REAPER that hunts for the ALBATROSS and SHAHED drone salvos. Watch them alone on `game/dev/air.html`.
 - **Para-drop repair team.** Downed on land? Press L and home base sends a steel dropship from over the horizon. You fly it in from the flight deck with a real fixed-wing flight model (or let the autopilot), line up the jump run against the wind, jump on the green light, then steer the canopies down; whoever lands on dry ground runs over with fuel and fixes the helicopter. Enemy flak can bring the dropship down.
 - **Para-drop repair team: the KC-130 Hercules.** Downed on land? Press L and home base sends a Marine KC-130R from over the horizon with a repair team. Fly it in from a full 1980 flight deck (or let the crew and autopilot do it) on a real C-130H flight model: four T56 turboprops with governed propellers, beta, feathering and engine-out handling, Fowler flaps, the blown wing. Slow to 130 KIAS with 50% flaps, call the green light, and the stick goes out of both para doors under MC1-1 canopies that you steer down. Whoever lands on dry ground runs over with fuel and fixes the helicopter. Flak knocks out engines and can bring the Hercules down.
@@ -30,7 +30,7 @@ The enemy carrier KRAKEN is out there doing the same, and whoever controls the m
 - **Air defences you can read.** Our islands are guarded by the Soviet contingent's ZSU-23-4s, and command 2 builds M163 Vulcans; the ALBATROSS carries two white-domed close-in guns and two box missile launchers. The RUNAWAY field seized 8x8 gun-missile trucks and, on their strongholds, the RW-5 LANCE laser; their ships carry the same TALON gun-missile modules and LANCE turrets on deck. Every one of them has to see you (terrain blocks it) and lock on before it fires, and shows it: radars stop and point, barrels spin up, lamps blink faster, the LANCE glows and paints you with an aiming line, and a lock and missile warning sounds in the cockpit. Missiles steer but turn at a capped rate and go dumb if you drop behind a hill; smoke stops the laser. Stay low.
 - **Get out and walk.** Land the Huey (or stop a Hornet on deck), press Y and climb out: walk the carrier's deck while she sails and turns (you stay where you stand), climb the island ladder to its roof, go over the side and swim to the stern ladder, walk onto an island pad and hold it. Villages are solid: houses, churches, field walls and hedges stop you, piers and bridges carry you. A placeholder Marine with an M16 for now; the real infantry, weapons, medical and inventory plug into slots (see [docs/ngc1980/FOUNDATION.md](docs/ngc1980/FOUNDATION.md)).
 - **Drive.** M151A2 MUTTs and M35A2 trucks wait at every friendly island's motor pool and on the ALBATROSS's deck park; walk up to a door and press Y. The real wheeled sim (tyres, suspension, gearbox, fording, rollovers) on the roads, bridges and fields of the lived-in world, through fords and on a carrier deck that sails and turns under you. Man the M151's pedestal M60 or the M35's ring-mount M2 and fire on the RUNAWAY; their fire punctures tyres, holes radiators and fuel tanks, sets the truck alight and wounds the Marine riding in it. Board six Marines into an M35 at a pad (B) and they take the next pad with you. Commandeer the 1980 Land Rovers, Hilux pickups, Beetles and Ladas parked in the towns (the traffic on the roads is the same cars). More from the motor pool: 7 then 1 = an M151 slung in under a CH-46 (10 materiel), 7 then 2 = an M35 landed on the island's beach by an LCM-8 (20). They stand cold: start them in the cab (ignition / ENGINE switch, START; every switch and lever clicks: blackout lights, wipers, parking brake, extinguisher), and they stall, overheat, get flat tyres (T: the spare) and burn. Keyboard, gamepad, HOTAS or a racing wheel and pedals (paddles shift, clutch pedal for the manual box).
-- **AI rotorcraft that really fly.** The CH-46E Sea Knight (tandem rotors, differential collective, longitudinal cyclic trim), the RUNAWAY's seized MV-22B Osprey (tiltrotor: nacelles convert from helicopter to airplane mode inside the conversion corridor) and the RW-3 WASP (ducted fan) each have a physical flight model checked against published data, and an AI pilot that flies it through stick, collective, pedals and nacelles: deck launches from a moving carrier, terrain-following transits, decelerating approaches, touchdowns beside the pad. Marines run off the Sea Knight's ramp and take the pad; the Osprey's machine troopers march out in lock-step. WASPs strafe, snipe from a hover, lie in ambush behind hills and circle in eerie swarms. Watch them on `game/dev/rotary.html`.
+- **AI rotorcraft that really fly.** The CH-46E Sea Knight (tandem rotors, differential collective, longitudinal cyclic trim), the RUNAWAY's seized MV-22B Osprey (tiltrotor: nacelles convert from helicopter to airplane mode inside the conversion corridor) and the RW-3 WASP (ducted fan) each have a physical flight model checked against published data, and an AI pilot that flies it through stick, collective, pedals and nacelles: deck launches from a moving carrier, terrain-following transits, decelerating approaches, touchdowns beside the pad. On deck the stick waits in two files clear of the rotors and files up the ramp, the blue shirts pull the chocks and chains and the LSE (yellow; cyan on the KRAKEN) signals the lift; approaches are flown down a glide path with a real flare, with a wave-off when too high, too fast or the zone is fouled. Marines run off the Sea Knight's ramp and take the pad; the Osprey's machine troopers march out in lock-step. WASPs strafe, snipe from a hover, lie in ambush behind hills and circle in eerie swarms. Watch them on `game/dev/rotary.html`.
 - **Armour: M60A3 TTS and M113A2** (on their test ground for now, `dev/tank.html`; they join the war in the next wave). A tracked-vehicle simulation with torsion-bar roadwheels, track-soil shear and sinkage on road, grass, sand, mud and bog, a real drivetrain (diesel, torque converter, cross-drive with pivot turns / controlled differential), steps, trenches, slopes, fording, and the M113 swims on its tracks. The tank has a stabilised turret, laser rangefinder and ballistic computer, day and thermal (TTS) sights, a loader, coax and .50; both have full crew interiors (driver's periscopes and gauges, gunner's station, commander's cupola, the M113's troop compartment) and synthesised engine, track and gun sound.
 - **Wheeled vehicles (NGC-1980).** M151A2 MUTT, M35A2 6x6 "deuce", Land Rover 109, Toyota Hilux, VW Beetle and Lada 2101, all drivable on one shared vehicle model: real tyres, suspension, gearboxes, transfer cases and diffs, engines that stall and drown, fording, rollovers, damage that punctures tyres and sets fuel tanks alight, 3D cabs with live gauges and synthesised engine sound. Test drive them on `game/dev/vehicle.html`.
 - **The ground war.** The islands are fought over on the ground. The Osprey's machine troopers come off the ramp as RW-1 STRIDERs (balancing bipeds that stumble when hit, fall, get up) in squads of four that bound, flank and suppress, take the pad and hold the islands the machines own; from four minutes in the enemy sends RW-7 hover tanks across the sea from the KRAKEN, and from nine a seized LCAC runs a seized M1A2 or T-90M (on the TANK track sim) up a beach. Your CH-46 lands a reinforced Marine squad (SL, three fire teams, an attached M60: M16s, an automatic rifleman, M203s and M72 LAWs, the INFANTRY agent's soldier model) that moves, gets down under fire, bounds by fire teams round the flank with more cover, aims for the STRIDERs' legs and sensor heads, and takes casualties (killed and wounded). Command 1 can now also send Marines to reinforce one of your islands the machines have landed on. The machines shoot back at you, your Huey, your AA sites and your Marines; your door gun, rockets, bombs and the Hornet's cannon hurt them, and a helicopter overhead decides a fight. Clear the LZ first: a Sea Knight landing next to a TALON or a squad of STRIDERs gets shot up.
@@ -68,7 +68,7 @@ update it. The launcher lives in `%LOCALAPPDATA%\ThrustZarch` (log: `launcher.lo
 | W A S D or arrows | cyclic |
 | Q / E | pedals (anti-torque; the Huey needs some left pedal in the hover) |
 | F / G / B | gun / rockets / bombs |
-| Insert or ; / Delete or ' | M130 dispenser: a pair of flares (decoys a missile) / chaff (breaks a radar lock); HOTAS: bind FLARES / CHAFF in the J panel |
+| Insert or ; / Delete or ' | M130 dispenser: a pair of flares (decoys a missile) / chaff (breaks a radar lock); HOTAS 4: throttle rocker right / left |
 | R | winch (pick up the pod in a cave) |
 | M | command map: click the sea to sail the carrier, click an island to select it |
 | 1-4, 6 | send drone, build AA gun, spare helicopter, Tomcat escort (CAP over the selected island, else over the ALBATROSS), SKY CARRIER refit |
@@ -90,6 +90,44 @@ while anything tracks you. Flares and chaff rearm on the carrier and friendly pa
 
 The Huey spawns hot at flight idle and rolls the throttle on by itself. With `?cold` it starts cold and dark: BAT and MAIN FUEL on, throttle to the idle detent (PgUp), hold the starter (Home) to 40% N1 (light-off at ~12%), let it reach idle (~70% N1), then throttle full open to 6600 rpm. The cockpit switches (battery, generator, inverter, main fuel, governor AUTO/EMER, hydraulic control, force trim, low rpm audio, starter, master caution) are clickable. To autorotate: collective down to keep 324 rpm, 70 kt, flare at ~100 ft, cushion with the collective.
 
+### HOTAS 4 + T-Rudder defaults (both aircraft)
+
+With nothing bound, a Thrustmaster T.Flight HOTAS 4 and T-Rudder pedals work as below (J opens the panel: every row
+shows what the button does in the jets and, after the dot, in the Huey; BIND / DEF / CLR change it per device).
+Stick X / Y = stick / cyclic, throttle lever = throttles / collective, pedals (else the stick twist) = rudder /
+anti-torque, toe brakes = wheel brakes, hat = look around (Huey: door gun aim), throttle rocker right / left = flares / chaff.
+
+| Button | HORNET (and Tomcat) | UH-1H |
+|---|---|---|
+| 1 (trigger) | gun | door gun |
+| 2 | weapon release | hoist |
+| 3 | missile (press again to fire) | rockets |
+| 4 | speed brake (hold) | hoist |
+| 5 | bombs | bombs |
+| 6 | landing gear | stability assist |
+| 7 | flaps (AUTO / HALF / FULL) | force trim |
+| 8 | tail hook | landing light |
+| 9 | cockpit / chase view | cockpit / outside view |
+| 10 | zoom (hold) | - |
+| 11 | wheel brakes (hold) | starter (hold to 40% N1; the trigger under the real collective grip) |
+| 12 | eject (hold 1 s) | - |
+### COMMAND (you command the task force)
+
+You are TASK FORCE ALBATROSS's commander, not one helicopter crew. **\\** opens the command board (the war keeps
+running while it is open): every unit type of the fleet - UH-1H Huey, F/A-18A Hornet, F-14A Tomcat, M60A3, M113A2,
+M151A2 jeep, M35A2 truck, a Marine rifleman - with how many are in reserve and the one that is out (where it is, what
+it is doing). Pick the base with LEFT / RIGHT (the ALBATROSS, or any friendly island: jets only from the carrier's cat 1),
+ENTER (or 1-8) takes a unit out there and puts you in it, or switches you to the one already out; with none left in
+reserve the board buys one for materiel. **/** jumps straight to the next unit that is out. On the board, R recalls a
+jet on CAP, X stands a parked unit down into reserve, N takes another jeep or truck out (several can be out). **5** / **8** work from any unit (no need to land the Huey).
+
+The unit you leave carries on: a Huey in the air is flown home by her crew (to the nearest friendly pad or the
+ALBATROSS's aft spot, matching the deck's motion); a Hornet or Tomcat in the air goes to the escorts' AI pilot (CAP
+over the carrier, home at bingo or on recall, the pattern, the glideslope, a trap); vehicles park; a Marine you leave
+goes back to his platoon. Lives are the fleet: the HUD strip under the score shows each type's reserve (+1 = out in
+the war). A lost unit is a loss to the fleet; when the unit you are in is lost the board opens and, unless you pick,
+hands you on to the Huey. The war is lost when the fleet is spent - nothing in reserve and nothing left out there.
+
 ### HORNET (jet)
 
 | Key | Action |
@@ -101,7 +139,7 @@ The Huey spawns hot at flight idle and rolls the throttle on by itself. With `?c
 | . | wheel brakes (toe brakes on the pedals) |
 | F / X / mouse, R, B | gun, A/A missiles (press again to fire), A/G bombs with CCIP (press again to drop) |
 | , / I / U / N | master arm / engines / canopy / lights |
-| Insert or ; / Delete or ' | ALE-39: a pair of flares / two chaff (HOTAS: FLARES / CHAFF, default buttons 13 / 14 on a stick) |
+| Insert or ; / Delete or ' | ALE-39: a pair of flares / two chaff (HOTAS 4: rock the throttle rocker right / left) |
 | hold Backspace | eject |
 | V, mouse wheel, hat | cockpit or chase view, zoom, look around |
 | J | controls panel: live view of every axis and button, bind and calibrate HOTAS / pedals |
@@ -129,13 +167,14 @@ and roll; the ALBATROSS island has a ladder on its port face up to the top deck,
 | . | wheel brakes (toe brakes on the pedals) |
 | F / X / mouse | M61 gun |
 | R / Enter, C, B | A/A mode and launch, weapon select (SW, SP, PH, GUN), next radar track (the RIO hooks it) |
-| , / I / U / N | master arm / engines (crank: the deck's start cart, cross-bleed or a windmill airstart above 225 KEAS) / canopy / lights |
+| , / I / U / N | master arm / engines: I runs the whole start on the switches (or I shuts both down) / canopy / lights |
+| mouse (T: free look off) | click the cockpit: hover shows a frame and the control's placard and position on the hint line. Cold start on the deck (after Y out and back in): ENG CRANK R on the right console, the right throttle's finger lift (OFF -> IDLE) at 20% rpm, light-off, the crank switch drops out at 50%; then the left. Throttle IDLE before the crank = a wet / hot start. L / R GEN, STAB AUG PITCH / ROLL / YAW, autopilot, FUEL DUMP (1,500 lb/min, burns in the afterburner plume), the emergency sweep handle (guard, then fore / aft) |
 | hold Backspace | eject (both seats: the RIO goes first) |
 | [ / ] | PILOT / RIO. In the RIO's seat: B / Q / E hook a track, L STT lock, R launch, C weapon type, - / = TID range, and A D W S Shift Ctrl tell the pilot where to fly |
 | V, mouse wheel, hat, T | cockpit or chase view, zoom, look around, free look |
 | Y | stopped on deck: climb out (the boarding ladder is on the left side; Y there climbs back in) |
 
-Compressor stall (a bang, the RPM rolls back, TIT climbs, L / R INLET on the caution panel, the jet yaws): throttles to idle, nose down below 15 units, wait for it to clear, then power up slowly. Holding power and the pull flames it out; crank it again (I) for an airstart. HOTAS: bind WING SWEEP FWD / AFT / AUTO to buttons in the J panel.
+Compressor stall (a bang, the RPM rolls back, TIT climbs, L / R INLET on the caution panel, the jet yaws): throttles to idle, nose down below 15 units, wait for it to clear, then power up slowly. Holding power and the pull flames it out; airstart: ENG CRANK on that side (cross-bleed off the other engine, or windmill air above 225 KEAS) with its throttle at IDLE, or I. HOTAS: bind WING SWEEP FWD / AFT / AUTO to buttons in the J panel.
 
 ### On foot and in vehicles
 
@@ -180,7 +219,9 @@ Compressor stall (a bang, the RPM rolls back, TIT climbs, L / R INLET on the cau
 |---|---|
 | Y, [ / ] | get in at a hatch (walk up to the hull side) / out; change seat (M60: driver, gunner, commander, loader; M113: driver, commander, troops) |
 | W / S, A / D | drive (from any seat: orders to the driver). Steering narrows with speed; Right Shift = full steer. S brakes, then reverses. At a standstill A / D pivot (M60) |
-| Space, Z, I, H | brake; low / high range; engine; hatch (head out / buttoned up; troops stand in the cargo hatch) |
+| Space, Z, I, H | brake; low / high range; your station's power (driver: MASTER + START, or engine off; gunner: TURRET POWER; anyone else: tells the driver to start / stop); hatch (head out / buttoned up; troops stand in the cargo hatch) |
+| look + click | every station's controls work like the Huey's: put the crosshair on a switch, handle or rack (it is framed in yellow and named on the hint line) and click. Driver: MASTER, START, parking brake, range, fire pull, hatch (M113: RAMP, VANE, BILGE too). Gunner (E: look up from the sight): TURRET POWER, STAB, the computer panel (lase, dump, SABOT / HEAT / HEP), the TTS knobs. Loader: a round out of the ready rack, the breech, hatch, radio. Commander (E: look about the cupola): hatch, OVERRIDE (the turret slews onto the cupola's line), a new .50 can; the M113's commander also the ramp and the radio |
+| cold start | vehicles stand cold and dark. Get in at the driver's hatch and it is your start-up (I, or click MASTER then START); in any other seat the crew does it, each man his own part (driver: MASTER, START; gunner: TURRET POWER, then ~20 s for the stab to run up) |
 | V | the seat's view / chase (the mouse orbits; as gunner the turret lays on what the ring is on) |
 | mouse / arrows (Shift: fine) | gunner: lay the gun (the sight follows); commander: the .50 |
 | click / F, G, T, R | fire (main gun / .50), coax, lase, dump the computer |
@@ -210,7 +251,7 @@ Cockpit switches are clickable (gear and hook handles, flaps, master arm, FCS CA
 | R / G / [ ] | flaps 0-50-100 / gear / elevator trim (on a stick) |
 | A D, S (under canopy) | steer the lead canopy, rear-riser slip; hands off and he steers himself |
 
-The flight deck is clickable: the four condition levers on the overhead (click: RUN -> FEATHER -> AIR START -> RUN, right click GND STOP), fire T-handles, engine starts, autofeather, gear and flap levers, autopilot, and the paratroop panel left of the pilot (jump lights OFF / RED / GREEN, alarm bell = everyone out now, para doors, ramp). A flak hit can set an engine on fire: pull its fire handle. `game/dev/c130.html` flies the aeroplane alone (`?start=air|runway|drop`) with a chase camera and telemetry; `game/dev/c130-model.html` is the model turntable.
+The flight deck is clickable: the four condition levers on the overhead (click: RUN -> FEATHER -> AIR START -> RUN, right click GND STOP), fire T-handles, engine starts, battery / GTC / bleed air, autofeather, gear and flap levers, autopilot, and the paratroop panel left of the pilot (jump lights OFF / RED / GREEN, alarm bell = everyone out now, para doors, ramp). The copilot, flight engineer and navigator (radar scope, Doppler, chart) are at their stations; a checklist card by your knee ticks off what the crew is doing. On the run the jumpmaster calls the time warnings (GET READY .. HOOK UP .. SOUND OFF .. STAND BY .. GO), does his door check leaning out of the left door, pushes the door bundle (the tools: repairs go faster) and stands safety with the loadmaster while the stick goes. `game/dev/c130.html?start=cold`, K: the engineer runs the engine start (battery, GTC, bleed air, 3-4-2-1). A flak hit can set an engine on fire: pull its fire handle. `game/dev/c130.html` flies the aeroplane alone (`?start=air|runway|drop`) with a chase camera and telemetry; `game/dev/c130-model.html` is the model turntable.
 
 The in-game help screen has the full list.
 
@@ -249,13 +290,14 @@ sight line, time of flight, speed), reload and malfunction drills, stamina on th
 cd tools && npm install && node snap.mjs scenes/war.json
 node tools/jetbench.mjs             # the jet's flight model against published F/A-18C figures, in plain node
 node tools/c130bench.mjs            # the C-130H flight model against published C-130H data (spec box, ops limits card, FM 3-21.38)
-node tools/tomcatsysbench.mjs       # the flyable F-14A's systems: wing sweep AUTO / MAN / EMER / OVERSWEEP, dead CADC, AFCS, airstarts, stalls, damage
+node tools/tomcatsysbench.mjs       # the flyable F-14A's systems: wing sweep AUTO / MAN / EMER / OVERSWEEP, dead CADC, AFCS, the start on the switches (crank, throttles, wet start, auto start), generators / EMERG GEN, airstarts, stalls, damage
 node tools/hueybench.mjs            # the Huey's flight model against published UH-1H data (Heffley, Talbot, DCS / TM charts)
 node tools/medinvbench.mjs          # medical (ATLS shock timing, tourniquets, drugs, IV), kit weights, inventory grids
 node tools/ch46bench.mjs            # CH-46E tandem rotor: max speed, climb, hover ceilings, single engine, autorotation, SAS
 node tools/mv22bench.mjs            # MV-22B tiltrotor: hover / download / figure of merit, the conversion corridor, 275 kt, 412 / 333 rpm
 node tools/waspbench.mjs            # RW-3 WASP ducted fan against shrouded-fan momentum theory and wind-tunnel trends
 node tools/rotarymission.mjs        # CH-46 and MV-22 fly their whole missions (deck -> LZ -> deck) physically
+node tools/embarkbench.mjs          # deck ops: the stick boards by the ramp, chocks and chains off, the LSE signals the lift; chocked back on deck
 node tools/waspmission.mjs          # WASP swarm, strafing and ambush behaviours
 ```
 
