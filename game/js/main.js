@@ -328,11 +328,11 @@ sky.renderOrder = -10; zScene.add(sky);
 // per grid vertex (so the mesh matches terrainH exactly at every vertex), and a second small texture tells each pixel
 // which pad / shaft apron (if any) it is near, so the shader only ever shades one of them.
 // TERRAIN (wave 3): the heightmap is baked at the islands' own 1.25 m (HMC). The main grid (TG 2.5 m) reads every other
-// texel; a FINE grid at 1.25 m follows the camera out to 80 m (FINE_H) so near the ground you see (and stand on) the same
+// texel; a FINE grid at 1.25 m follows the camera out to 50 m (FINE_H; only while the camera is under ~70 m above the ground) so near the ground you see (and stand on) the same
 // relief the physics has: rocks, dune hummocks, the berm. A third texture holds the surface types (sand, rock, mud, dirt
 // weights; grass the rest), linearly filtered so the materials blend.
 const TG = 2.5, HMC = ZONE_C, TN = Math.ceil(DRAW * 2.1 / TG), HM_N = Math.round(2 * BOUND / HMC) + 1, DEC_C = 4, DEC_N = Math.ceil(2 * BOUND / DEC_C);
-const FINE_H = 80, FINE_N = Math.round(2 * FINE_H / HMC);
+const FINE_H = 50, FINE_N = Math.round(2 * FINE_H / HMC);
 const PROF_LOAD = {};
 const hmTex = (() => {
   zoneGrid(); PROF_LOAD.terrainBake = Math.round(TERRAIN_BAKE_MS());   // (the islands were baked on the first height query above)
@@ -449,25 +449,18 @@ const terrainFS = `
       #ifdef FAR
       if(max(abs(vW.x-uNear.x),abs(vW.z-uNear.y))<uNear.z) discard;   // the fine grid covers this
       #endif
-      #if !defined(FAR) && !defined(FINE)
-      if(max(abs(vW.x-uFine.x),abs(vW.z-uFine.y))<uFine.z) discard;   // TERRAIN: the 1.25 m grid covers this
-      #endif
       vec3 dc=texture2D(uDecor,(vW.xz+${BOUND.toFixed(1)})/${(2 * BOUND).toFixed(1)}).rgb*255.;
       int pi=int(dc.r+.5)-1, bi=int(dc.g+.5)-1, gi=int(dc.b+.5)-1;
       if(bi>=0 && length(vW.xz-uBases[bi].xy)<${HOLE_R.toFixed(1)}) discard;   // the shaft
       vec3 n=normalize(cross(dFdx(vW),dFdy(vW))); if(n.y<0.) n=-n;
       float l=max(dot(n,normalize(uSun)),0.)*.75+.4;
       vec2 g=floor(vW.xz/6.); float chk=mod(g.x+g.y,2.);
-      vec3 land=mix(vec3(.17,.5,.15),vec3(.25,.6,.19),chk);
-      vec3 rock=mix(vec3(.45,.37,.27),vec3(.52,.43,.32),chk);
       float wild=step(${BOUND.toFixed(1)},max(abs(vW.x),abs(vW.z)));
-      float rk=mix(smoothstep(24.,38.,vW.y),max(smoothstep(170.,300.,vW.y+18.*sin(vW.x*.013+vW.z*.009)),smoothstep(.8,.62,n.y)),wild);
-      vec3 c=mix(land*mix(1.,.8+.2*sin(vW.x*.0021)*sin(vW.z*.0017),wild),rock,rk);
-      c=mix(c,vec3(.93,.95,.98),wild*smoothstep(430.,500.,vW.y+30.*sin(vW.x*.011)*cos(vW.z*.009))*smoothstep(.45,.7,n.y));
-      c=mix(vec3(.78,.72,.45),c,smoothstep(0.,3.,vW.y));
+      vec3 c=vec3(0.);
+      if(vRaw>0.){   // (land colour only where there is land: the sea below paints its own)
       if(wild<.5){   // TERRAIN: the islands - what the ground is made of (the same table the sims read), in the island's own colours
         vec4 sw=texture2D(uSurf,((vW.xz+${BOUND.toFixed(1)})/${HMC.toFixed(2)}+.5)/${HM_N.toFixed(1)});
-        float n1=fract(sin(dot(floor(vW.xz/${HMC.toFixed(2)}),vec2(12.9898,78.233)))*43758.5453), n2=sin(vW.x*.071+sin(vW.z*.05))*sin(vW.z*.063+sin(vW.x*.043));
+        float n1=fract(sin(dot(floor(vW.xz/${HMC.toFixed(2)}),vec2(12.9898,78.233)))*43758.5453), n2=sin(vW.x*.071)*sin(vW.z*.063);
         vec3 sandC=gi>=0?uSandC[gi]:vec3(.86,.79,.6), rockC=gi>=0?uRockC[gi]:vec3(.55,.53,.5);
         vec3 grass=mix(vec3(.2,.43,.14),vec3(.29,.5,.17),chk*.35+n1*.3+n2*.25);
         grass=mix(grass,vec3(.44,.5,.24),smoothstep(5.,1.5,vW.y)*.4);                 // salt-burnt turf along the shore
@@ -477,6 +470,14 @@ const terrainFS = `
         vec3 md=vec3(.31,.27,.18)*(.88+.16*n1), dt=vec3(.47,.38,.26)*(.88+.16*n1);
         float wg=max(0.,1.-sw.r-sw.g-sw.b-sw.a);
         c=(grass*wg+sd*sw.r+rk2*sw.g+md*sw.b+dt*sw.a)/max(1.,sw.r+sw.g+sw.b+sw.a+wg);
+      } else {
+      vec3 land=mix(vec3(.17,.5,.15),vec3(.25,.6,.19),chk);
+      vec3 rock=mix(vec3(.45,.37,.27),vec3(.52,.43,.32),chk);
+      float rk=mix(smoothstep(24.,38.,vW.y),max(smoothstep(170.,300.,vW.y+18.*sin(vW.x*.013+vW.z*.009)),smoothstep(.8,.62,n.y)),wild);
+      c=mix(land*mix(1.,.8+.2*sin(vW.x*.0021)*sin(vW.z*.0017),wild),rock,rk);
+      c=mix(c,vec3(.93,.95,.98),wild*smoothstep(430.,500.,vW.y+30.*sin(vW.x*.011)*cos(vW.z*.009))*smoothstep(.45,.7,n.y));
+      c=mix(vec3(.78,.72,.45),c,smoothstep(0.,3.,vW.y));
+      }
       }
       c*=l;
       if(vRaw<=0.){   // sea: shallows to deep water, the swell (SEAWORLD: the live sea), whitecaps, surf, hull foam
@@ -507,6 +508,18 @@ const terrainFS = `
     }`;
 const terrain = new THREE.Mesh(terrainGeo, new THREE.ShaderMaterial({ uniforms: terrainUni, vertexShader: terrainVS, fragmentShader: terrainFS }));
 terrain.frustumCulled = false; zScene.add(terrain);
+// TERRAIN: the main grid has a hole where the fine grid lies (the same snapped centre, so the hole is fixed in the
+// grid's own frame): those cells are a separate mesh drawn only while the fine grid is off. (A discard would still pay
+// for every covered pixel twice in a software rasteriser.)
+const terrainHole = (() => {
+  const idx = terrainGeo.index.array, ring = [], inner = [], half = TG * TN / 2;
+  for (let iy = 0; iy < TN; iy++) for (let ix = 0; ix < TN; ix++) {
+    const cx = -half + (ix + 0.5) * TG, cz = -half + (iy + 0.5) * TG, k = (iy * TN + ix) * 6;
+    (Math.abs(cx) < FINE_H && Math.abs(cz) < FINE_H ? inner : ring).push(...idx.subarray(k, k + 6));
+  }
+  const g = terrainGeo.clone(); g.setIndex(inner); terrainGeo.setIndex(ring);
+  const m = new THREE.Mesh(g, terrain.material); m.frustumCulled = false; terrain.add(m); return m;
+})();
 // TERRAIN: the fine grid (1.25 m, the heightmap's own texels) round the camera, stitched into the main grid at its edge
 const fineTerrain = new THREE.Mesh(new THREE.PlaneGeometry(2 * FINE_H, 2 * FINE_H, FINE_N, FINE_N).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({ uniforms: terrainUni, vertexShader: terrainVS, fragmentShader: terrainFS, defines: { FINE: 1 } }));
 fineTerrain.frustumCulled = false; zScene.add(fineTerrain);
@@ -521,7 +534,7 @@ farTerrain.frustumCulled = false; farTerrain.visible = false; zScene.add(farTerr
 sky.frustumCulled = false;
 sky.onBeforeRender = (r, s, cam) => { sky.position.copy(cam.position); sky.updateMatrixWorld(); };
 const _snapTerrain = cam => { const x = Math.round(cam.position.x / TG) * TG, z = Math.round(cam.position.z / TG) * TG; terrainUni.uNear.value.set(x, z, TG * TN / 2 - 3);
-  const fine = fineTerrain.visible = cam.position.y < 260; terrainUni.uFine.value.set(x, z, fine ? FINE_H : 0); fineTerrain.position.set(x, 0, z); fineTerrain.updateMatrixWorld(); return [x, z]; };
+  const fine = fineTerrain.visible = cam.position.y - Math.max(0, terrainH(cam.position.x, cam.position.z)) < 70;   /* (higher up the 2.5 m grid shows as much) */ terrainUni.uFine.value.set(x, z, fine ? FINE_H : 0); terrainHole.visible = !fine; fineTerrain.position.set(x, 0, z); fineTerrain.updateMatrixWorld(); return [x, z]; };
 fineTerrain.onBeforeRender = (r, s, cam) => _snapTerrain(cam);
 terrain.onBeforeRender = (r, s, cam) => { const [x, z] = _snapTerrain(cam); terrain.position.set(x, 0, z); terrain.updateMatrixWorld(); };
 farTerrain.onBeforeRender = (r, s, cam) => { _snapTerrain(cam); farTerrain.position.set(Math.round(cam.position.x / FAR_C) * FAR_C, 0, Math.round(cam.position.z / FAR_C) * FAR_C); farTerrain.updateMatrixWorld(); };
@@ -2033,4 +2046,4 @@ function frame(now) {
 const PROF = { sim: 0, prep: 0, render: 0 };
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { PROF_LOAD, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, carC, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, carC, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
