@@ -1,6 +1,6 @@
 // Air defence sandbox: view each NGC-1980 AA unit and watch it engage target drones, with the game's own effects
 // (fx.js), sounds (audio.js) and the same engagement logic war.js uses (units/defence/brain.js).
-// Query: ?unit=vads|shilka|ciws|sparrow|talon|lance  &mode=fight|lineup|view  &drones=N  &player=1 (one drone counts
+// Query: ?unit=vads|vadst|shilka|zu23|ciws|sparrow|talon|lance  &mode=fight|lineup|view  &drones=N  &revet=1 (in its AA emplacement)  &player=1 (one drone counts
 // as the player: lock tone, hurtPlayer)  &smoke=1  &hill=0  &ui=0  &cam=yaw,pitch,dist,tx,ty,tz  &auto=1 (turntable)
 import * as THREE from 'three';
 import { createFx } from '../js/fx.js';
@@ -9,6 +9,7 @@ import { createDefence } from '../js/units/defence/brain.js';
 import { buildDefence } from '../js/units/defence/models.js';
 import { DEF } from '../js/units/defence/tune.js';
 import { buildGun } from '../js/ships.js';   // the old generic AA gun, for the 'legacy1' / 'legacy2' balance baseline
+import { buildAASite } from '../js/world/structures.js';   // defence polish: the AA emplacement the units sit in (&revet=1)
 
 const Q = new URLSearchParams(location.search);
 const TYPES = Object.keys(DEF);
@@ -34,6 +35,10 @@ const terrainH = (x, z) => 0.02 * Math.sin(x * 0.11) * Math.cos(z * 0.13) + (hil
 }
 const normalAt = () => new THREE.Vector3(0, 1, 0);
 const fx = createFx(scene, { groundY: (x, z) => Math.max(terrainH(x, z), 0), isWater: () => false, normalAt });
+// defence polish: &revet=1 digs the game's AA emplacement (world/structures.js buildAASite) on the slot at the origin,
+// its way in facing a pad 22 m off to -z, and the unit is parked in it the way war.js / brain.js seat() does
+const REVET = Q.get('revet') === '1';
+const revet = REVET ? buildAASite(terrainH, [[0, 0, Math.atan2(-22, 0)]]) : null; if (revet) scene.add(revet);
 const sfx = new Sfx();
 addEventListener('pointerdown', () => sfx.init()); addEventListener('keydown', () => sfx.init());
 
@@ -107,14 +112,16 @@ function setUnit(type) {
   const legacy = type.startsWith('legacy'), side = legacy ? +type[6] : DEF[type].side, mesh = legacy ? buildGun(side, 1) : buildDefence(type, side);
   scene.add(mesh);
   unit = { kind: 'aa', side, mesh, x: 0, y: 0, z: 0, hp: 7, dead: false, legacy, cd: 1 };   // legacy1ship = the old carrier mount: the same gun, range 150
-  if (!legacy) def.attach(unit, { terrain: false }); mesh.rotation.y = 0.5;
+  if (REVET && !legacy) { unit.I = { pad: { x: 0, z: -22 } }; def.attach(unit, { terrain: true }); revet.userData.setSide(side); }   // parked in the revetment, nose to the pad (-z)
+  else { if (!legacy) def.attach(unit, { terrain: false }); mesh.rotation.y = 0.5; }
   for (const d of drones) d.side = d.isPlayer ? (side === 2 ? 1 : 2) : (side === 1 ? 2 : 1);
   if (side === 1) for (const d of drones) d.isPlayer = false;
   playerObj.alive = drones.some(d => d.isPlayer);
   buildUI();
 }
 if (mode === 'lineup') {
-  TYPES.forEach((t, i) => { const m = buildDefence(t, DEF[t].side); m.position.set((i - 2.5) * 11, 0, 0); m.userData.pitch.rotation.x = 0.35; m.userData.yaw.rotation.y = -0.5; scene.add(m); lineup.push(m); });
+  const LT = ['vadst', 'vads', 'zu23', 'shilka', 'ciws', 'sparrow', 'talon', 'lance'];   // the island / carrier units (the ship mounts are the same models)
+  LT.forEach((t, i) => { const m = buildDefence(t, DEF[t].side); m.position.set((i - (LT.length - 1) / 2) * 10, 0, 0); m.userData.pitch.rotation.x = 0.35; m.userData.yaw.rotation.y = -0.5; if (m.userData.loYaw) { m.userData.loPitch.rotation.x = 0.35; m.userData.loYaw.rotation.y = -0.5; } scene.add(m); lineup.push(m); });
 } else {
   setUnit(unitType);
   const n = +(Q.get('drones') ?? (mode === 'view' ? 0 : 3));
@@ -231,6 +238,10 @@ requestAnimationFrame(frame);
 // test hook: advance the simulation deterministically from a scene script (headless frames are slow)
 window.__D = { THREE, sfx, scene, camera, renderer, cam, def, DEF, TYPES, drones, S, fx, lineup, playerObj, terrainH,
   get unit() { return unit; }, setUnit, addDrone, smokeScreen, balance,
+  build: (t, s) => buildDefence(t, s),
+  // knock the unit about: hurt(n) takes n hp (damaged below half), kill() leaves the burning wreck (as war.js killStruct)
+  hurt(n) { unit.hp -= n; return unit.hp; },
+  kill() { unit.dead = true; unit.hp = 0; const p = unit.mesh.position; fx.explode(p.x, p.y + 2, p.z, 1.4, { fire: 25, debris: 7, color: 0x5a5650, crater: 2.4 }); unit.mesh.userData.setState?.('destroyed'); return true; },
   // frame the unit from behind and to one side, looking out toward its target (or a point p)
   frame(p, side = 0.55, k = 0.3) { const u = unit.mesh.position, t = p || (unit.def.tgt ? unit.def.tgt.p : new THREE.Vector3(60, 25, -40)), dx = t.x - u.x, dz = t.z - u.z, l = Math.hypot(dx, dz) || 1;
     cam.t.set(u.x + dx * k, u.y + 2.5 + (t.y - u.y) * k * 0.5, u.z + dz * k); cam.yaw = Math.atan2(-dx, -dz) + side; cam.pitch = 0.06; cam.dist = 12 + l * k * 1.25; return true; },

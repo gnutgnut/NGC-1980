@@ -2531,3 +2531,59 @@ the terrain rebuild (ngc/terrain) will change which lots take them.
   the whole fleet), marinelife 10/11 (the miss is its TEST CAR step: the car is gone since ngc/wheeledgame, fails on
   experimental too), foot 12/12, rescue 2/2. jets.json, damage.json, jetsystems, jettrap, vehicle, tomcat and armorgame
   fail the same checks on the untouched experimental tree on this heavily loaded headless machine (1-8 fps: timing).
+
+## 2026-10-24 — NGC-1980 air defence polish: towed guns, crews, revetments, tracers, wrecks, LOD (branch ngc/defence-polish)
+
+**What.** The air defence units brought towards the Hornet / Huey bar on presentation and feel. Weapons stay game-level
+(tune.js: headline magazine sizes only; damage, rates and the missile / beam rules unchanged).
+- **Towed guns** (`models.js`): the **M167 VADS** (`vadst`: the M163's Vulcan, range-only radar and open mount on the
+  two-wheel M42 carriage, emplaced on three jacks with the wheels raised and the drawbar folded) and the **ZU-23-2**
+  (`zu23`: twin 23 mm in their cradle, 50-round box magazines outboard, two seats, the sight on the left, the base on
+  three pads with the wheels swung up). `pick()` alternates them with the tracked mounts, keyed on the island and its
+  gun count: our starting guns are Shilka / ZU-23-2, command 2 builds M163 / M167. Tune: towed hp 6 (tracked 7).
+- **Crews** (`crew.js`, new): 1980 US (OG-107, M1 helmet), Soviet AA gunner (khaki, SSh-68) and Soviet SPAAG crew
+  (black overalls, shlemofon); 8 meshes a man on one shared vertex-colour material, geometry shared per kit. Gunners
+  sit on the mounts and look where the gun looks (scan the sky while searching), the Shilka's commander and the
+  drivers stand in their hatches (the commander ducks while it fires), the M167's squad leader turns to the target and
+  points it out, then braces; the **loaders** keep the guns fed: walk to the ready-use boxes behind the gun, kneel,
+  carry a box back, heave it up (`mag.trip` rounds), and go again while there is room. The RUNAWAY don't crew guns:
+  the TALON's **TICK** (six legs, manipulator arm, cyan eye) climbs from the ground onto the truck's deck to feed the
+  belts and the missile packs after a launch (a rack of spare canisters on the deck), and comes down again. LANCE:
+  its sensor head sweeps while searching. Crews are drawn within 170 m only.
+- **Magazines** (`tune.js mag`, game level): M163 1,100 ready rounds, M167 500, Shilka 2,000, ZU-23-2 2 x 50, TALON
+  400 (an airburst round counts 4-6). A gun only runs dry under long heavy fire and then waits for the next box;
+  ship mounts are deck-fed (no `mag`).
+- **In the revetments**: `brain.js seat()` parks every island unit the way it drove into world/life.js's emplacement
+  (its way in faces the pad): nose to the pad, the turret ring (`userData.slotZ`) on the slot, so the TALON's cab sticks
+  out through the gap. Slot positions are war.js's own (the struct's x / z and the island's pad), no formula repeated.
+  defencewar.mjs checks every island gun: facing the pad (cos > 0.97, measured 0.999-1) and the turret < 1.2 m off
+  the slot (0.01-0.42 m).
+- **Effects**: tracer streaks (one InstancedMesh for every unit, every other gun round and every airburst round, on
+  the round's own ballistic path; war.js's colours), a flame tongue ahead of the muzzle flash, brass / link flecks
+  out of the ejection port (`userData.eject`), dust kicked up by the muzzle blast when the barrels are low, gun smoke
+  hanging round the mount after a burst. All gated by camera distance.
+- **Damage and wrecks**: below half hp a unit is DAMAGED (smoke from the deck, the odd spark). Killed, war.js calls
+  `userData.setState('destroyed')` (the hook WORLD's structures use), so the wreck stays on its slot instead of the
+  generic rubble: a burnt-out material (rust-brown and soot over the old paint, per-face variation), the turret
+  lifted / knocked askew on its ring, barrels drooping, the radar mast bent, crew, lamps, IFF and team panels gone; the
+  ready rounds cook off for 4-12 s (pops, sparks, the odd tracer whizzing out). A gun built on that slot later hauls the
+  wreck away (attach()).
+- **Performance**: every type / side is modelled and baked ONCE (prototype) and each unit is a clone sharing its
+  geometry and materials (only the LANCE's glow / radiator materials are per unit); 5.7 ms a unit including first
+  builds (was a full rebuild + bake each). Each unit is a `THREE.LOD`: the full model near, a 4-mesh box stand-in in
+  the same weathered colours beyond 220 m (170-190 m for ship mounts) whose turret mirrors the real one.
+
+**Shared-file hooks**: none (war.js untouched: it already calls `setState` when present). Dev page: `&revet=1` digs
+the game's emplacement (world/structures.js `buildAASite`) round the unit; `__D.hurt(n)`, `__D.kill()`, `__D.build()`.
+
+**Tests.** `scenes/defencepolish.mjs` 14/14 (look: six units fighting in their revetments; crew: the ZU-23-2 runs low
+and is fed, tracers, the TICK on deck; wreck: damaged -> destroyed for Shilka / M167 / TALON; war: PELICAN's gun
+knocked out in game, wreck on the slot, a new gun ordered on the same slot hauls it away; lod: far / near levels,
+build cost). `defcrewposes.mjs` (pose sheet). defence.mjs 11/11, defencewar.mjs 6/6 (+ the revetment seating check),
+defbalance.mjs 4/4 at BAL_RUNS=10 (kills/min of hp-12 stand-ins: legacy 3.5, M163 3.05, M167 3.05, Shilka 2.85,
+ZU-23-2 3.05; TALON / LANCE vs the player unchanged), smoke 5/5, worlddamage 4/4. `node --check` on game/js/*.js.
+
+**Known / next.** The loaders walk on the unit's plane (fine on the gentle pad slopes, would float on a steep one);
+the TICK can clip the TALON's combat module when the module traverses to the rear while it works; the hands-over-ears
+pose is a brace (rigid forearms); M167 / ZU-23-2 have no prime mover parked nearby; crews do not bail out or die as
+figures (they vanish with the wreck); no per-unit sounds for the towed guns' crews (box changes, shouts).

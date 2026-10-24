@@ -14,7 +14,7 @@ export default async function (h) {
     const r = await h.eval(`(() => { let s = 0; for (let i = 0; i < ${RUNS}; i++) s += __D.balance('${type}', ${SECS}, Object.assign({ t0: 300 }, ${JSON.stringify(ORBITS[o])})).hurtPerMin; return +(s / ${RUNS}).toFixed(3); })()`);
     (table[type] ||= []).push(r);
   }
-  for (const type of ['legacy1', 'legacy1ship', 'vads', 'shilka', 'ciws', 'sparrow']) {
+  for (const type of ['legacy1', 'legacy1ship', 'vads', 'vadst', 'shilka', 'zu23', 'ciws', 'sparrow']) {
     const r = await h.eval(`(() => { let s = 0; for (let i = 0; i < ${RUNS}; i++) s += __D.balance('${type}', ${SECS}, { t0: 300, hp: 12 }).killsPerMin; return +(s / ${RUNS}).toFixed(2); })()`);
     table[type] = r;
   }
@@ -24,7 +24,7 @@ export default async function (h) {
   // make range dangerous on purpose (that is what the hills are for), but by no more than 2x
   await h.expect(`['talon', 'lance'].every(t => __bal[t].every((v, i) => v <= __bal.legacy2[i] * (i < 2 ? 1.25 : 2) + 0.05))`);
   // our guns: an island gun at least 80 % of the old one; the ALBATROSS's four mounts together at most 2x its old four
-  await h.expect(`['vads', 'shilka'].every(t => __bal[t] >= __bal.legacy1 * 0.8)`);
+  await h.expect(`['vads', 'vadst', 'shilka', 'zu23'].every(t => __bal[t] >= __bal.legacy1 * 0.8)`);
   await h.expect(`2 * (__bal.ciws + __bal.sparrow) <= 4 * __bal.legacy1ship * 2`);
   // and must still be a threat (at least a third of the old gun, averaged over the orbits)
   await h.expect(`['talon', 'lance'].every(t => __bal[t].reduce((a, b) => a + b) >= __bal.legacy2.reduce((a, b) => a + b) / 3)`);
