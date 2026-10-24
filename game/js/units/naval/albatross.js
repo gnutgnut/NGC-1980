@@ -648,5 +648,6 @@ export function buildAlbatross(side = 1, opts = {}) {
       if (crew) { const near = dist < 450; crew.group.visible = near; if (near) crew.update(dt, t, avoid); }
     },
   };
+  parts.crew = crew;   // PERSONNEL: the deck crew (each member gets a roster record; hurt / taken over / stepping aside)
   return parts;
 }

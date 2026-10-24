@@ -405,6 +405,7 @@ export function createMedical(opts = {}) {
       if (M.cls() >= 3) T *= 1.3;   // fumbling
     }
     if (by.skill === 'corpsman' && !by.self) T *= 0.8;
+    if (by.speed > 0) T /= by.speed;   // PERSONNEL: the medic's own experience (roster perf, ~0.55 green .. 1.2 veteran)
     if (action === 'eat' && def.med.needs === 'p38' && by.has && !by.has('p38')) { T *= 2; label += ' (BAYONET AS OPENER)'; }
     return { ok: true, action, time: Math.round(T * 10) / 10, label, region };
   };

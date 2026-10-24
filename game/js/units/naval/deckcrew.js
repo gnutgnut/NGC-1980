@@ -68,7 +68,10 @@ export function createCrew(members, { seed = 5 } = {}) {
     for (let i = 0; i < n; i++) {
       const p = members[i]; p.ph += dt;
       let { x, z, yaw } = p, lean = 0, drop = 0, aL = 0, aR = 0, aLz = 0.06, aRz = 0.06, lL = 0, lR = 0;
-      const push = p.mode !== 'seated' && avoid && avoid(x, z);
+      if (p.hidden) { pose(i, x, -500, z, 0, 0, 0, 0, 0, 0, 0, 0, 0); continue; }   // PERSONNEL: the commander is this man now (his own figure is the player's)
+      if (p.down) { pose(i, x, p.y + 0.14, z, yaw, -1.5, 0, 0.3, -0.2, 0.3, 0.3, 0.1, -0.1); continue; }   // PERSONNEL: hurt - lies where he fell
+      // (PERSONNEL: crew.near(x, z) -> a push away from the player walking into him: he steps aside)
+      const push = p.mode !== 'seated' && ((avoid && avoid(x, z)) || (crew.near && crew.near(x, z)));
       if (push) {   // clear the area: walk briskly away, crouched against the downwash
         const len = Math.hypot(push[0], push[1]) || 1, sp = 2.4 * dt;
         p.x += push[0] / len * sp; p.z += push[1] / len * sp; x = p.x; z = p.z;

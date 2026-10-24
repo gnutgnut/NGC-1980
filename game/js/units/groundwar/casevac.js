@@ -31,7 +31,7 @@ export function createCasevac(o) {
     if (H.aboard.length) {
       const c = W.carrier, onShip = c && !c.sinking && Math.hypot(P.pos.x - c.p.x, P.pos.z - c.p.z) < 160 && P.pos.y > 3;
       const hq = W.islands.find(I => I.kind === 'hq' && I.owner === 1 && Math.hypot(P.pos.x - I.pad.x, P.pos.z - I.pad.z) < 40);
-      if (onShip || hq) { deliver(H.aboard.length, onShip ? 'ALBATROSS SICKBAY' : `${hq.name} AID STATION`); CV.stats.byHuey += H.aboard.length; H.aboard.length = 0; }
+      if (onShip || hq) { deliver(H.aboard.length, onShip ? 'ALBATROSS SICKBAY' : `${hq.name} AID STATION`, H.aboard.slice()); CV.stats.byHuey += H.aboard.length; H.aboard.length = 0; }
     }
     const list = GS.casualties(P.pos.x, P.pos.z, EVAC.REACH).filter(u => !(u.cas && u.cas.held));
     if (!list.length || H.aboard.length >= EVAC.HUEY_CAP) { H.loadT = 0; return; }
@@ -59,7 +59,7 @@ export function createCasevac(o) {
       for (const c of list) if (c.cas) c.cas.toHuey = [p.x, p.z];
       F.loadT += dt; F.tick = (F.tick || 0) + dt;
       const near = list.sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
-      if (F.tick > 4 + Math.hypot(near.x - p.x, near.z - p.z) / 4 || Math.hypot(near.x - p.x, near.z - p.z) < 6) { F.tick = 0; GS.evacuate(near); F.aboard++; }
+      if (F.tick > 4 + Math.hypot(near.x - p.x, near.z - p.z) / 4 || Math.hypot(near.x - p.x, near.z - p.z) < 6) { F.tick = 0; GS.evacuate(near); F.aboard++; (F.ids ||= []).push(near.id); }
       return false;
     };
     return F;
@@ -67,12 +67,12 @@ export function createCasevac(o) {
   function flightsTick() {
     for (let i = CV.flights.length - 1; i >= 0; i--) {
       const F = CV.flights[i];
-      if (F.u.stowed) { if (F.aboard) { deliver(F.aboard, 'ALBATROSS SICKBAY (SEA KNIGHT)'); CV.stats.byCH46 += F.aboard; } CV.flights.splice(i, 1); }
-      else if (F.u.dying || (F.u.dead && !F.u.stowed)) { if (F.aboard) { CV.stats.lostAboard += F.aboard; feed(`SEA KNIGHT DOWN WITH ${F.aboard} WOUNDED ABOARD`, 'bad'); } CV.flights.splice(i, 1); }
+      if (F.u.stowed) { if (F.aboard) { deliver(F.aboard, 'ALBATROSS SICKBAY (SEA KNIGHT)', F.ids); CV.stats.byCH46 += F.aboard; } CV.flights.splice(i, 1); }
+      else if (F.u.dying || (F.u.dead && !F.u.stowed)) { if (F.aboard) { CV.stats.lostAboard += F.aboard; feed(`SEA KNIGHT DOWN WITH ${F.aboard} WOUNDED ABOARD`, 'bad'); o.lost?.(F.ids || []); } CV.flights.splice(i, 1); }   // (PERSONNEL: o.lost - who was aboard)
     }
   }
-  function deliver(n, where) {
-    CV.stats.delivered += n;
+  function deliver(n, where, ids = []) {   // (PERSONNEL: ids = the ground-war unit ids delivered, o.delivered -> the roster's sick bay)
+    CV.stats.delivered += n; o.delivered?.(ids, where);
     for (let k = 0; k < n; k++) CV.sickbay.push({ t: 0 });
     feed(`${n} WOUNDED DELIVERED TO THE ${where}  -  THEY WILL BE BACK IN THE POOL`, 'good');
   }

@@ -73,7 +73,12 @@ export function createGroundSim(o) {
   const R = rng(o.seed ?? 1980), gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += R(); return (u - 3) / Math.sqrt(0.5); };
   const maps = createIslandMaps({ terrainH, islands });
   const GS = { maps, battles: [], units: [], proj: [], events: [], time: 0, nextId: 1, stats: { shots: { 1: 0, 2: 0 }, hits: { 1: 0, 2: 0 }, richShots: 0, warHits: { 1: 0, 2: 0 }, kills: { 1: 0, 2: 0 }, kia: 0, wia: 0, rtd: 0, dow: 0, evac: 0 }, cam: { x: 0, y: 0, z: 0 }, peace: false };
-  const ev = (e, x) => { GS.events.push(Object.assign({ e, t: GS.time }, x)); };
+  // PERSONNEL: hooks.onEvent sees every event as it happens (the war's rounds hit between steps)
+  const ev = (e, x) => { const ob = Object.assign({ e, t: GS.time }, x); GS.events.push(ob); if (hooks.onEvent) hooks.onEvent(ob); };
+  // PERSONNEL: o.ff = true - our own war rounds (door guns, rockets, bombs, gun runs, the player's rifle) and every
+  // blast hurt our own people through the same hit path as the enemy's. (The squad AI's own rifles watch their line of
+  // fire: they don't hit their own men.)
+  GS.ff = !!o.ff;
   // ngc/infdepth options: o.rich = { r (m from the camera), max (men) } puts the nearest Marines on the real rifleman and
   // medical sims; o.care = true runs casualty care (fieldcare.js). Both off by default (the balance benches).
   GS.richOpt = o.rich || null; GS.richCost = { ms: 0, steps: 0 };
@@ -134,7 +139,7 @@ export function createGroundSim(o) {
   };
   GS.addMarine = (B, role, x, z, yaw, o = {}) => {
     const body = createMarine({ id: GS.nextId, role, x, z, yaw, env: envLand, seed: o.seed });
-    const u = unit({ side: 1, kind: 'marine', role, body, laws: body.laws, gl: body.gl, frags: body.frags, able: true, h: 1.8, burst: 0, lawT: 0, seed: o.seed ?? GS.nextId, name: o.name });
+    const u = unit({ side: 1, kind: 'marine', role, body, laws: body.laws, gl: body.gl, frags: body.frags, able: true, h: 1.8, burst: 0, lawT: 0, seed: o.seed ?? GS.nextId, name: o.name, pid: o.pid ?? null });   // (PERSONNEL: pid = his roster record)
     sync(u); inBattle(B, u); return u;
   };
   function sync(u) {
@@ -308,7 +313,11 @@ export function createGroundSim(o) {
     if (u.cd > 0) return;
     const tg = tmap.get(a.aimId), moving = M.speed > 0.4, ey = M.stanceTo === 'prone' ? 0.32 : M.stanceTo === 'crouch' ? 1.0 : 1.5;
     const from = [M.x - Math.sin(M.yaw) * 0.6, M.y + ey, M.z - Math.cos(M.yaw) * 0.6];
-    const spread = w.spread * (1 + 2.5 * Math.min(1, a.supp) + (moving ? 1.5 : 0) + M.wounded * 2) * (M.stanceTo === 'prone' ? 0.7 : 1);
+    const spread = w.spread * (1 + 2.5 * Math.min(1, a.supp) + (moving ? 1.5 : 0) + M.wounded * 2) * (M.stanceTo === 'prone' ? 0.7 : 1) * (u.skK ?? 1);   // PERSONNEL: skK = 1 / his skill (a green man scatters)
+    // PERSONNEL: small-arms rounds out of his own kit (u.ammo is set by personnel.js; undefined = unlimited, the benches)
+    const fromKit = u.ammo !== undefined && (a.fire === 'rifle' || a.fire === 'auto' || a.fire === 'mg');
+    if (fromKit && u.ammo <= 0) { if (!u.dry) { u.dry = true; ev('dry', { id: u.id, pid: u.pid }); } u.cd = 1; u.burst = 0; return; }
+    if (fromKit) { u.dry = false; u.ammo--; u.spent = (u.spent || 0) + 1; }
     // lead a mover a little (people under-lead)
     const tof = Math.hypot(a.aim[0] - from[0], a.aim[2] - from[2]) / w.v, lead = tof * (a.fire === 'law' ? 0.9 : 0.7);   // (a LAW gunner leads properly; riflemen under-lead)
     const aim = tg ? [a.aim[0] + (tg.vx || 0) * lead, a.aim[1], a.aim[2] + (tg.vz || 0) * lead] : a.aim;
@@ -525,10 +534,10 @@ export function createGroundSim(o) {
   }
   const RAD = { marine: 1.2, strider: 1.4, hovertank: 5, mbt: 5.5 };
   // every unit of the other side within reach of a segment (cheap bounding test first)
-  function* candidates(side, ax, az, bx, bz, extra = 0) {
+  function* candidates(side, ax, az, bx, bz, extra = 0, own = false) {   // (PERSONNEL: own = our own people as well: friendly fire)
     const mx = (ax + bx) / 2, mz = (az + bz) / 2, half = Math.hypot(bx - ax, bz - az) / 2 + 6 + extra;
     for (const u of GS.units) {
-      if (u.side === side) continue;
+      if (u.side === side && !own) continue;
       if (!u.alive && !(u.kind === 'strider' && !u.lite)) continue;
       if (Math.abs(u.x - mx) > half || Math.abs(u.z - mz) > half) continue;
       yield u;
@@ -612,7 +621,7 @@ export function createGroundSim(o) {
           const u = what.unit, A = GW_AMMO[p.ammo], h = normalizeHit({ ...A, velocity: A.velocity, vel: [p.vx, p.vy, p.vz], point: [hx, hy, hz], side: p.side, weapon: p.ammo, src: p.src });
           const r = applyHit(u, h, (RW_HURT[p.ammo] || { hp: 60 }).hp);
           GS.stats.hits[p.side]++;
-          ev('hit', { x: hx, y: hy, z: hz, id: u.id, kind: u.kind, part: r.part, pen: r.pen, ammo: p.ammo, side: p.side });
+          ev('hit', { x: hx, y: hy, z: hz, id: u.id, kind: u.kind, part: r.part, pen: r.pen, ammo: p.ammo, side: p.side, src: p.src, ff: u.side === p.side });   // (PERSONNEL: src = the shooter's unit id)
           if (u.B && u.kind !== 'marine') u.B.rw.nearMiss(u.id, 0.3);
         } else if (what.ext) what.ext.apply(hx, hy, hz);
         if (p.heat || p.big || p.gl) explode(p, hx, hy, hz, what.unit);
@@ -636,18 +645,18 @@ export function createGroundSim(o) {
   function explode(p, x, y, z, direct) {
     const big = p.frag ? 0.5 : p.gl ? 0.45 : p.heat ? 1 : 0.75;
     ev('blast', { x, y, z, big, ammo: p.ammo, side: p.side });
-    GS.blast(x, y, z, p.frag ? 6 : p.gl ? 5 : 7, big, p.side, direct);
+    GS.blast(x, y, z, p.frag ? 6 : p.gl ? 5 : 7, big, p.side, direct, p.src);
     if (p.side === 2 && hooks.extBlast) hooks.extBlast(x, y, z, p.big ? 7 : 5, big, p.side);
   }
   // a blast at (x, y, z): striders get the blast hit-info (pushes, jolts, damage), vehicles a blast on top, Marines
   // fragments by distance; everyone near is suppressed. power ~ 1 for a LAW / rocket, 0.45 a 40 mm, 3+ a bomb.
-  GS.blast = (x, y, z, r, power, side, direct = null) => {
-    for (const u of candidates(side, x - r, z - r, x + r, z + r, 4)) {
+  GS.blast = (x, y, z, r, power, side, direct = null, src = 'war') => {   // (PERSONNEL: src = who set it off, for the friendly-fire count)
+    for (const u of candidates(side, x - r, z - r, x + r, z + r, 4, GS.ff && typeof src === "string")) {   // (the war's blasts and the player's; the squad AI aims its M203s / LAWs / M67s clear of its own men)
       if (!u.alive || u === direct) continue;
       const dd = Math.hypot(u.x - x, u.y + 1 - y, u.z - z), reach = u.kind === 'marine' ? r * 1.3 : r;
       if (dd > reach + (RAD[u.kind] || 1) * 0.5) continue;
       const k = clamp(1 - dd / (reach + 0.5), 0.05, 1), dx = (u.x - x) / (dd || 1), dz = (u.z - z) / (dd || 1);
-      if (u.kind === 'marine') applyHit(u, { point: null, type: 'blast' }, 260 * power * k);
+      if (u.kind === 'marine') { const rr = applyHit(u, { point: null, type: 'blast' }, 260 * power * k); ev('hit', { x: u.x, y: u.y + 1, z: u.z, id: u.id, kind: u.kind, part: rr.part, ammo: 'blast', side, src, blast: true, ff: u.side === side }); }   // PERSONNEL: a blast hit is a hit (who, whose)
       else if (u.kind === 'strider') applyHit(u, normalizeHit({ type: 'blast', energy: 9000 * k * power, impulse: 260 * k * power, dir: [dx, 0.3, dz], part: 'stomach', side }), 0);
       else applyHit(u, normalizeHit({ type: 'blast', energy: 30000 * k * power, impulse: 400 * k * power, dir: [dx, -0.5, dz], part: 'top', side }), 0);
       if (u.B) { if (u.kind === 'marine') u.B.mar.nearMiss(u.id, 0.6 * k + 0.2); else u.B.rw.nearMiss(u.id, 0.5 * k); }
@@ -661,9 +670,9 @@ export function createGroundSim(o) {
   // ------------------------------------------------------------------------------------------------- the war's rounds
   // a war.js projectile's path this frame (side 1: the player's guns, rockets, bombs; side 2: WASPs, flak) against the
   // ground units. Returns { t, unit, x, y, z } after applying the hit, or null. ammo: a GW_AMMO id.
-  GS.segHit = (side, ammo, ax, ay, az, bx, by, bz, hp, pad = 0) => {
+  GS.segHit = (side, ammo, ax, ay, az, bx, by, bz, hp, pad = 0, src = 'war') => {
     let best = null, bt = 2;
-    for (const u of candidates(side, ax, az, bx, bz, pad + 2)) {
+    for (const u of candidates(side, ax, az, bx, bz, pad + 2, GS.ff && side === 1)) {   // (PERSONNEL: our door guns, rockets, gun runs hit our own men too)
       const t = unitT(u, ax, ay, az, bx, by, bz, pad);
       if (t >= 0 && t < bt && u.alive) { bt = t; best = u; }
       else if (t < 0 && u.B) nearMissAt({ ammo, big: false, near: null }, u, ax, az, bx, bz);
@@ -672,7 +681,7 @@ export function createGroundSim(o) {
     const x = ax + (bx - ax) * bt, y = ay + (by - ay) * bt, z = az + (bz - az) * bt;
     const A = GW_AMMO[ammo] || GW_AMMO.m60, h = normalizeHit({ ...A, velocity: A.velocity, vel: [bx - ax, by - ay, bz - az], point: [x, y, z], side, weapon: ammo, src: 'war' });
     const r = applyHit(best, h, hp ?? 60); GS.stats.warHits[side]++;   // (war.js rounds: not in GS.stats.shots, so not in GS.stats.hits)
-    ev('hit', { x, y, z, id: best.id, kind: best.kind, part: r.part, pen: r.pen, ammo, side, war: true });
+    ev('hit', { x, y, z, id: best.id, kind: best.kind, part: r.part, pen: r.pen, ammo, side, war: true, src, ff: best.side === side });
     return { t: bt, unit: best, x, y, z };
   };
   // the war's projectiles are heard by the battles they pass near (the door gun draws the machines' attention)
@@ -683,7 +692,7 @@ export function createGroundSim(o) {
   GS.hitUnit = (side, ammo, u, x, y, z, dir, hp) => {
     const A = GW_AMMO[ammo] || GW_AMMO.m16, h = normalizeHit({ ...A, velocity: A.velocity, vel: [dir[0] * A.velocity, dir[1] * A.velocity, dir[2] * A.velocity], point: [x, y, z], side, weapon: ammo, src: 'player' });
     const r = applyHit(u, h, hp ?? 60); GS.stats.warHits[side]++;
-    ev('hit', { x, y, z, id: u.id, kind: u.kind, part: r.part, pen: r.pen, ammo, side, war: true });
+    ev('hit', { x, y, z, id: u.id, kind: u.kind, part: r.part, pen: r.pen, ammo, side, war: true, src: 'player', ff: u.side === side });
     if (u.B && u.kind !== 'marine') u.B.rw.nearMiss(u.id, 0.3);
     return r;
   };
@@ -696,6 +705,14 @@ export function createGroundSim(o) {
     if (u.B) { const j = u.B.units.indexOf(u); if (j >= 0) u.B.units.splice(j, 1); }
     if (u.squad && u.squad.members) { const j = u.squad.members.indexOf(u); if (j >= 0) u.squad.members.splice(j, 1); }
     ev('evac', { id: u.id, x: u.x, y: u.y, z: u.z, u }); ev('remove', { id: u.id, u });
+  };
+  // PERSONNEL: a man taken out of the battle without a casualty (the commander takes him over, or he is moved to another
+  // job / place): out of the units, the battle and his squad, quietly
+  GS.remove = u => {
+    const k = GS.units.indexOf(u); if (k >= 0) GS.units.splice(k, 1);
+    if (u.B) { const j = u.B.units.indexOf(u); if (j >= 0) u.B.units.splice(j, 1); }
+    if (u.squad && u.squad.members) { const j = u.squad.members.indexOf(u); if (j >= 0) u.squad.members.splice(j, 1); if (u.B && u.squad.marines && !u.squad.members.length) u.B.mar.removeSquad?.(u.squad.id); }
+    u.richOn = false; ev('remove', { id: u.id, u });
   };
   GS.reset = () => { GS.battles.length = 0; GS.units.length = 0; GS.proj.length = 0; GS.events.length = 0; GS.time = 0; };
   GS.hAt = hAt; GS.envLand = envLand; GS.armorEnv = armorEnv;

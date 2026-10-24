@@ -149,6 +149,7 @@ export function createCommander(h) {
     if (c === 'KeyX') { nav(); C.standDown(); render(true); return true; }
     if (c === 'KeyN') { nav(); C.act(C.sel, true); render(true); return true; }   // another one (the motor pool's types)
     if (c === 'Slash') { C.next(); return true; }
+    if (c === 'Tab' && h.personnel) { C.close(); h.personnel(); return true; }   // PERSONNEL: the roster page
     return !['KeyM', 'KeyP', 'KeyK', 'KeyJ'].includes(c);   // the map, pause, keyboard-only and the controls panel still work
   };
 
@@ -173,6 +174,7 @@ export function createCommander(h) {
       const st = o.act ? `<i>YOU ARE HERE</i>  ·  ${esc(o.status)}${more}` : o.out ? `<i>OUT</i>  ·  ${esc(o.status)}  ·  ENTER: SWITCH TO IT${o.r.recall && /CAP/.test(o.status) ? '  ·  R: RECALL' : ''}${o.r.standDown && o.r.canStandDown && o.r.canStandDown() ? '  ·  X: STAND DOWN' : ''}${more}` : `${o.action === 'none' ? '' : 'ENTER: '}${esc(o.label)}`;
       html += `<div class="${cls}" data-i="${i}"><span class="k">${i + 1}</span><span class="nm">${esc(o.t.short)}<small>${esc(o.r.label || o.t.label)}  ·  ${esc(o.t.note)}</small></span><span class="ct">${o.n}<small>IN RESERVE</small></span><span class="st">${st}</span></div>`;
     });
+    if (h.personnel) html += `<div class="foot" style="color:#ff8">TAB: PERSONNEL  -  EVERY MAN AND WOMAN OF THE TASK FORCE</div>`;   // PERSONNEL
     html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER VEHICLE  ·  / NEXT UNIT  ·  \\ CLOSE<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
     if (force || html !== C.lastHtml) { C.lastHtml = html; el.innerHTML = html; }
   }

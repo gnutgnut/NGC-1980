@@ -73,9 +73,12 @@ export function createMarineAI(world, opt = {}) {
       own: new Map(), spot: new Map(), lookT: R() * MAR_T.LOOK, react: 0, contactT: -1, rushT: 0, waitT: jit(1, 4), cover: null, coverT: -99, lookYaw: m.yaw ?? 0, slot: i };
     byMember.set(m.id, { m, S }); return S;
   };
+  // PERSONNEL: a squad taken off the board (its last man moved elsewhere), a man taken out of a squad
+  AI.removeSquad = id => { const i = AI.squads.findIndex(s => s.id === id); if (i < 0) return; for (const m of AI.squads[i].members) byMember.delete(m.id); AI.squads.splice(i, 1); };
+  AI.removeMember = (id, m) => { const S = AI.squads.find(s => s.id === id); if (!S) return; const i = S.members.indexOf(m); if (i >= 0) S.members.splice(i, 1); byMember.delete(m.id); if (!S.members.length) AI.removeSquad(id); };
   AI.order = (id, order) => { const S = AI.squads.find(s => s.id === id); if (!S) return; S.order = order; if (S.state !== 'withdraw') setState(S, order.type === 'defend' || order.type === 'hold' ? 'defend' : 'move'); for (const m of S.members) if (m.ai) m.ai.cover = null; };
   AI.hear = ev => AI.sounds.push(ev);
-  AI.nearMiss = (id, k = 0.15) => { const e = byMember.get(id); if (!e) return; const a = e.m.ai; a.supp = clamp(a.supp + k, 0, 1.3); if (a.contactT < 0) { a.contactT = AI.time; a.react = jit(...MAR_T.REACT); } };
+  AI.nearMiss = (id, k = 0.15) => { const e = byMember.get(id); if (!e) return; const a = e.m.ai; a.supp = clamp(a.supp + k, 0, 1.3); if (a.contactT < 0) { a.contactT = AI.time; a.react = jit(...MAR_T.REACT) * (e.m.reactK ?? 1); } };   // (PERSONNEL: reactK = a green man is slower to react)
   AI.casualty = (id, kind) => {
     const e = byMember.get(id); if (!e) return; const S = e.S;
     S.casualties++; S.morale = clamp(S.morale - (kind === 'kia' ? 0.11 : 0.07) - (e.m.ai.team === 0 ? 0.15 : 0), 0, 1);
@@ -117,7 +120,7 @@ export function createMarineAI(world, opt = {}) {
           const k = { id: t.id, x: t.x, y: t.y, z: t.z, vx: t.vx || 0, vz: t.vz || 0, h: t.h, kind: t.kind, t: AI.time, conf: 1, seen: true, firing: t.firing ?? 99 };
           a.own.set(t.id, k);
           if (fresh) {
-            if (a.contactT < 0) { a.contactT = AI.time; a.react = jit(...MAR_T.REACT); }
+            if (a.contactT < 0) { a.contactT = AI.time; a.react = jit(...MAR_T.REACT) * (m.reactK ?? 1); }
             // "CONTACT!": the squad leader hears it a moment later, roughly placed
             const err = d * 0.05 + 3, an = R() * 6.283;
             S.reports.push({ at: AI.time + jit(...MAR_T.REPORT), k: { ...k, x: t.x + Math.cos(an) * err, z: t.z + Math.sin(an) * err, seen: false, by: m.id } });
@@ -131,7 +134,7 @@ export function createMarineAI(world, opt = {}) {
       for (const m of S.members) {
         if (!m.alive) continue;
         const d = d2(m.x, m.z, ev.x, ev.z); if (d > ev.loud) continue;
-        const a = m.ai; if (a.contactT < 0 && d < ev.loud * 0.6) { a.contactT = AI.time; a.react = jit(...MAR_T.REACT); }
+        const a = m.ai; if (a.contactT < 0 && d < ev.loud * 0.6) { a.contactT = AI.time; a.react = jit(...MAR_T.REACT) * (m.reactK ?? 1); }
         const id = ev.src ?? ('snd' + Math.round(ev.x / 15) + ',' + Math.round(ev.z / 15));
         const old = a.own.get(id); if (old && old.seen && AI.time - old.t < 2) { old.firing = 0; continue; }
         const err = d * 0.2, an = R() * 6.283;

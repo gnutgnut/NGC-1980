@@ -67,7 +67,10 @@ export function createCraftHost({ G, Z, say = NOOP }) {
   host.control = (id, seat = 0, from = 'swap') => {
     const def = byId.get(id); if (!def) return false;
     const prev = host.active;
-    if (def.enter(seat, from) === false) return false;
+    // PERSONNEL: host.gate(def, seat, from) -> '' or why not: the person must be qualified for the seat (an untrained
+    // man can't fly the Hornet); on the command board it picks who goes
+    const why = host.gate ? host.gate(def, seat, from) : ''; if (why) { say(why, 2.4); return false; }
+    if (def.enter(seat, from) === false) { host.gateUndo?.(); return false; }
     if (prev && prev !== def) prev.exit(def);
     host.active = def; host.seat = seat; G.craft = id;
     host.onSwitch(prev, def);
@@ -107,7 +110,7 @@ export function createCraftHost({ G, Z, say = NOOP }) {
   host.cycleSeat = dir => {
     const def = host.active; if (!def || def.seats.length < 2 || !def.setSeat) { say('NO OTHER SEAT', 1); return false; }
     const n = def.seats.length; let i = host.seat;
-    for (let k = 0; k < n; k++) { i = (i + dir + n) % n; if (!def.seats[i].locked && def.setSeat(i) !== false) { host.seat = i; say(`${def.label}  -  ${host.seatName(def, i)}`, 1.2); return true; } }
+    for (let k = 0; k < n; k++) { i = (i + dir + n) % n; if (!def.seats[i].locked && !(host.gate && host.gate(def, i, 'seat', true)) && def.setSeat(i) !== false) { host.seat = i; host.onSeat?.(def, i); say(`${def.label}  -  ${host.seatName(def, i)}`, 1.2); return true; } }   // (PERSONNEL: a seat he isn't qualified for is skipped)
     return false;
   };
 

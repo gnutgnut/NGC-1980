@@ -179,6 +179,10 @@ export function createAmbient(ctx) {
     let n = 0;
     for (const p of A.people) {
       const dist = Math.hypot(p.x - cam.position.x, p.z - cam.position.z);
+      if (p.state === 'dead' || p.state === 'down') {   // PERSONNEL: a civilian hurt by the war lies where he fell (the wounded get up after a while and go home)
+        if (p.state === 'down' && (p.t -= dt) <= 0) { p.state = 'flee'; p.tgt = [p.door[0], p.door[2]]; p.speed = 1.2; }
+        else { if (dist > 420 || n >= MAXP) continue; p.y = groundAt(p.x, p.z); _p.set(p.x, p.y + 0.12, p.z); _q.setFromEuler(_e.set(-Math.PI / 2, p.yaw, 0, 'YXZ')); _m.compose(_p, _q, _s); pMesh.setMatrixAt(n, _m); pMesh.setColorAt(n, _c.setHex(p.col)); pWalk.setXY(n, p.phase, 0); n++; continue; }
+      }
       const danger = dangerNear(p.x, p.z);
       if (danger && p.state !== 'inside' && p.state !== 'flee') { p.state = 'flee'; p.tgt = [p.door[0], p.door[2]]; p.speed = rnd(3.8, 5.2); }
       p.t -= dt;

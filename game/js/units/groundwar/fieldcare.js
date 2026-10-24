@@ -122,7 +122,7 @@ export function createFieldCare(o) {
   }
   // the medic's hands on a patient for one step. Returns true while there is work.
   function treat(medic, p, dt, skill) {
-    const by = { self: false, skill };
+    const by = { self: false, skill, speed: medic.medK ?? 1 };   // (PERSONNEL: medK = his medical experience)
     if (p.rich || p.ext) {
       const M = p.ext ? p.M : p.rich.M;
       if (M.dead) return false;
@@ -141,7 +141,7 @@ export function createFieldCare(o) {
     // cheap model: a timer
     const c = casOf(p);
     if (!c.need) c.need = jit(...CARE.TREAT[skill === 'corpsman' ? 'doc' : 'buddy']);
-    c.treatT += dt;
+    c.treatT += dt * (medic.medK ?? 1);   // (PERSONNEL)
     if (c.treatT >= c.need) { c.treated = true; FC.stats.treated++; ev('treated', { id: p.id, medic: medic.id, x: p.x, y: p.y, z: p.z }); return false; }
     return true;
   }

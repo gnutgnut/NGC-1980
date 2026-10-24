@@ -45,7 +45,7 @@ export function createRichMarine(u, o = {}) {
   if (u.role === 'ar') for (let i = 0; i < 2; i++) I.autoStore(inv, Object.assign(I.newItem('mag_m16_20', { fill: 'M193', rounds: 18 })));
   if (kit === 'rifleman' && !(u.body && u.body.laws > 0) && inv.slots.secondary) I.detach(inv.slots.secondary);
   const B = createInvBridge(inv, { rng });
-  const R = createRifleman({ loadout: B.loadout(), inventory: B, kitKg: 0, id: 'gw' + u.id, side: 1, rng, swayScale: 1, deadzone: 0 });
+  const R = createRifleman({ loadout: B.loadout(), inventory: B, kitKg: 0, id: 'gw' + u.id, side: 1, rng, swayScale: u.skSway ?? 1, deadzone: 0 });   // (PERSONNEL: skSway = a green man's rifle wanders more)
   B.attach(R);
   const S = R.soldier;
   const M = createMedical({ rng, skill: u.role === 'doc' ? 'corpsman' : 'rifleman', name: (u.role === 'doc' ? 'HM3 ' : 'PFC ') + (u.name || 'MARINE ' + u.id) });

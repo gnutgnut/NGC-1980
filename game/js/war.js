@@ -584,6 +584,7 @@ export function createWar(ctx) {
   }
   // explosion damage to everything of the other side in radius r (and to the player helicopter for enemy blasts)
   function blast(x, y, z, r, dmg, side, noGround) {   // (noGround: the ground war's own blast, already applied to its units)
+    W.people?.blast(x, y, z, r, dmg, side, W.blastKind);   // PERSONNEL: the people in reach - civilians, deck crew, AA crews, our own man on foot (blue on blue)
     for (const t of targets(side)) {
       let d;
       if (t.ship || t.dims) { const tp = t.ship ? t.mesh.getWorldPosition(_w) : t.p; d = Math.hypot(x - tp.x, z - tp.z); if (t.dims) { const [lx, lz] = toLocal(t, x, z); d = Math.hypot(Math.max(0, Math.abs(lx) - t.dims.W / 2), Math.max(0, Math.abs(lz) - t.dims.L / 2), Math.max(0, y - t.dims.DECK - 3)); } }
@@ -643,11 +644,13 @@ export function createWar(ctx) {
           const wet = y < floor + 0.5 && isWater(x, z) && dy < 0;
           const ship = dy > gy + 0.5 && y < dy + 1 ? W.shipAt(x, z) : null;   // landed on a deck: a direct hit
           if (ship && ship.side !== b.side && ship.sinking === undefined) damage(ship, { rocket: 5, bomb: 24, shell: 18 }[b.kind] || 0, b.side);
-          if (b.kind === 'b' || b.kind === 'ciws' || b.kind === 'jb') { const q = b.p; if (hit) { damage(hit, b.kind === 'ciws' ? 0.5 : b.kind === 'jb' ? 1.4 : 1, b.side); fx.impact(q.x, q.y, q.z, 'metal'); } else if (!b.gwHit) fx.impact(q.x, Math.max(q.y, floor), q.z, wet ? 'water' : 'ground'); }
+          W.blastKind = b.kind;   // PERSONNEL: what the blasts below are (the friendly-fire report)
+          if (b.kind === 'b' || b.kind === 'ciws' || b.kind === 'jb') { const q = b.p; if (hit) { damage(hit, b.kind === 'ciws' ? 0.5 : b.kind === 'jb' ? 1.4 : 1, b.side); fx.impact(q.x, q.y, q.z, 'metal'); } else if (!b.gwHit) { fx.impact(q.x, Math.max(q.y, floor), q.z, wet ? 'water' : 'ground'); W.people?.impact(q.x, Math.max(q.y, floor), q.z, b.kind, b.side); } }   // (PERSONNEL: a round into a street / a deck)
           else if (b.kind === 'aam') { fx.explode(x, Math.max(y, floor), z, 1.3, { debris: 3 }); boomAt(x, y, z, 0.6); if (hit && !b.boom) damage(hit, 6, b.side); blast(x, y, z, 7, 3, b.side); }
           else if (b.kind === 'rocket') { fx.explode(x, Math.max(y, floor), z, 1.1, { debris: 2 }); boomAt(x, y, z, 0.45); if (hit) damage(hit, 4, b.side); blast(x, y, z, 6, 4, b.side); }
           else if (b.kind === 'bomb') { fx.explode(x, Math.max(y, floor), z, 2.8, { debris: 8, crater: 3.6, fire: wet ? 0 : 20 }); boomAt(x, y, z, 1.3); blast(x, Math.max(y, floor), z, 12, 20, b.side); }
           else if (b.kind === 'shell') { fx.explode(x, Math.max(y, floor), z, 2.4, { debris: 5, crater: 3 }); boomAt(x, y, z, 1); blast(x, Math.max(y, floor), z, 10, 16, b.side); }
+          W.blastKind = null;
         }
       }
       if (done) { if (b.mesh) scene.remove(b.mesh); W.proj[i] = W.proj[W.proj.length - 1]; W.proj.pop(); }

@@ -20,6 +20,7 @@ import { FIGURES } from '../air/rotary/figures.js';
 import { createCasevac } from './casevac.js';   // ngc/infdepth
 import { careHands, throwHands } from '../infantry/carepose.js';   // ngc/infdepth-fix
 import { m67Geometry, grenadeMaterial } from '../infantry/grenademodel.js';   // ngc/marine-polish: the AI's M67s drawn in flight
+import { PH } from '../personnel/hooks.js';   // PERSONNEL: the roster's hooks (who each man is)
 
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -93,8 +94,9 @@ export function createGroundWar(ctx) {
   }
   function extBlast(x, y, z, r, power, side) { W.blast(x, y, z, r, 4 * power, side, true); }   // (true: the ground war already did its own)
   // ngc/infdepth: the Marines near the camera on the real rifleman + medical sims (rich), casualty care, casevac
-  const GS = createGroundSim({ terrainH, islands: W.islands, hooks: { targetsFor, extSeg, extBlast, patients: B => CV.patients(B) }, rich: { r: GW_T.RICH_R, max: GW_T.RICH_MAX }, care: true });
-  const CV = createCasevac({ GS, W, PL: () => ctx.player(), feed });
+  // PERSONNEL: ff = our own fire and blasts hurt our own men; onEvent: the roster sees every hit, casualty and shot
+  const GS = createGroundSim({ terrainH, islands: W.islands, hooks: { targetsFor, extSeg, extBlast, patients: B => CV.patients(B), onEvent: e => PH.gsEvent?.(e) }, rich: { r: GW_T.RICH_R, max: GW_T.RICH_MAX }, care: true, ff: true });
+  const CV = createCasevac({ GS, W, PL: () => ctx.player(), feed, delivered: (ids, where) => PH.delivered?.(ids, where), lost: ids => PH.lostAboard?.(ids) });   // (PERSONNEL)
   const GW = { sim: GS, root, views: new Map(), proxies: [], landings: [], lcacs: [], hoverT: GW_T.HOVER_AT, mbtT: GW_T.MBT_AT, playerFiredT: 99, bank: 0, kills: new Map(), godPlayer: false, T: GW_T, CV };
 
   // ------------------------------------------------------------------------------------------- views
@@ -327,6 +329,7 @@ export function createGroundWar(ctx) {
           // ngc/infdepth: the last man off a Sea Knight is the squad's Navy corpsman
           const role = k >= 5 && k === Q.figs.length - 1 ? 'doc' : ['sl', 'tl', 'ar', 'aar', 'gren'][k === 0 ? 0 : 1 + ((k - 1) % 4)];
           unit = GS.addMarine(L.B, role, F.x, F.z, F.yaw, { seed: k, name: nameOf(role, GS.nextId) });
+          PH.marineAdded?.(unit, { I: L.I, k, n: Q.figs.length, L, transport: L.u });   // PERSONNEL: the man off the ramp is a roster record
           if (fig.poseFull) { unit.adoptView = fig; fig.group.parent?.remove(fig.group); }   // the same man, now in the fight
           else fig.group.parent?.remove(fig.group);
         }
@@ -383,6 +386,7 @@ export function createGroundWar(ctx) {
       const role = k >= 5 && k === n - 1 ? 'doc' : ['sl', 'tl', 'ar', 'aar', 'gren'][k === 0 ? 0 : 1 + ((k - 1) % 4)];   // (ngc/infdepth: a corpsman with six or more)
       units.push(side === 2 ? GS.addStrider(B, ux, uz, o.yaw ?? 0, { weapon: k % GW_T.SQUAD === 0 ? 'coil' : 'xm7', tag: `R${I.id}-${GS.nextId}` }) : GS.addMarine(B, role, ux, uz, o.yaw ?? 0, { seed: k, name: nameOf(role, GS.nextId) }));
     }
+    if (side === 1) { const L = { addSquad: true }; units.forEach((u, k) => PH.marineAdded?.(u, { I, k, n: units.length, L, recs: o.recs })); }   // PERSONNEL (o.recs: these men)
     const order = o.order || (I.owner === side ? { type: 'defend', x: I.pad.x, z: I.pad.z, r: 25 } : { type: 'take', x: I.pad.x, z: I.pad.z, r: 30 });
     if (side === 2) for (let k = 0; k < units.length; k += GW_T.SQUAD) P.squads.push(GS.squadRW(B, units.slice(k, k + GW_T.SQUAD), order));
     else P.squads.push(GS.squadMarines(B, units, order));
@@ -532,14 +536,15 @@ export function createGroundWar(ctx) {
     if (b.kind === 'flak' && b.life > 0) return false;   // (flak bursts at its fuse; the war's blast handles it)
     // RW-7 point defence against the player's rockets
     if (b.side === 1 && b.kind === 'rocket' && GS.pdIntercept(b.p.x, b.p.y, b.p.z)) { b.boom = true; return true; }
-    const r = GS.segHit(b.side, WAR_AMMO[b.kind] || 'm60', from.x, from.y, from.z, b.p.x, b.p.y, b.p.z, WAR_HP[b.kind] ?? 60, b.kind === 'rocket' ? 0.3 : 0);
+    const r = GS.segHit(b.side, WAR_AMMO[b.kind] || 'm60', from.x, from.y, from.z, b.p.x, b.p.y, b.p.z, WAR_HP[b.kind] ?? 60, b.kind === 'rocket' ? 0.3 : 0, 'war:' + b.kind);   // (PERSONNEL: whose round)
     if (!r) return false;
     b.p.set(r.x, r.y, r.z); b.gwHit = true;
     if (b.kind === 'b' || b.kind === 'jb' || b.kind === 'ciws') fx.impact(r.x, r.y, r.z, r.unit.kind === 'marine' ? 'ground' : 'metal');
     return true;
   };
   // war.js blast hook (bombs, rockets, shells, crashes): the ground units in reach
-  GW.blast = (x, y, z, r, dmg, side) => { if (GS.units.length) GS.blast(x, y, z, r * 0.9, dmg / 4, side); };
+  GW.blast = (x, y, z, r, dmg, side) => { if (GS.units.length) GS.blast(x, y, z, r * 0.9, dmg / 4, side, null, 'war:' + (W.blastKind || 'blast')); };   // (PERSONNEL: W.blastKind = what went off)
+  GW.dropView = dropView;   // PERSONNEL: a man taken out of the battle by the commander (GS.remove happens between the sim's steps)
 
   // ngc/marine-polish: the AI's hand grenades in flight and lying where they came to rest (groundsim projectiles with
   // p.frag), one instanced draw: tumbling in the air, on its side on the ground. A dropped live one ('fragDropped': a

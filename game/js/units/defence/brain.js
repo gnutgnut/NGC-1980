@@ -195,7 +195,7 @@ export function createDefence(env) {
       const wasLos = D.losWas; D.losWas = D.los;
       if (D.jamT > 0) D.jamT -= dt;
       if (D.los && D.jamT > 0 && f.player) { D.lockT = Math.min(D.lockT, T.lock * CM_RULES.chaff.keep); D.lostT = 0; }   // CM: chaff in the radar
-      else if (D.los) { D.lockT = Math.min(D.lockT + dt, T.lock + (T.msl ? T.msl.lockExtra : 0) + 0.5); D.lostT = 0; }
+      else if (D.los) { D.lockT = Math.min(D.lockT + dt * (D.crewK ?? 1), T.lock + (T.msl ? T.msl.lockExtra : 0) + 0.5); D.lostT = 0; }   // (PERSONNEL: crewK = the gun crew's skill, 0 = unmanned)
       else { if (wasLos) D.lockT = Math.min(D.lockT, T.lock * (T.lockKeep ?? 1)); D.lockT = Math.max(0, D.lockT - dt * 2); D.lostT += dt; if (D.lostT > 2.5) { D.tgt = null; D.key = null; D.mode = 'search'; } }
       // lead: gun rounds -> linear prediction, iterated once; missiles and the beam point straight at it
       const sp = T.gun ? T.gun.speed : 0;
@@ -217,7 +217,7 @@ export function createDefence(env) {
     if (f) err = Math.abs(angDiff(D.yaw, wantYaw)) * Math.cos(D.pitch) + Math.abs(wantPitch - D.pitch);
     D.err = err;
     // ---- weapons
-    const locked = f && D.los && D.lockT >= T.lock;
+    const locked = f && D.los && D.lockT >= T.lock && D.crewK !== 0;   // (PERSONNEL: an unmanned gun holds fire)
     let firing = false;
     if (T.gun) firing = gun(o, D, T, f, locked, err, dt, t) || firing;
     if (T.msl) missileLauncher(o, D, T, f, dt);
@@ -245,13 +245,13 @@ export function createDefence(env) {
     if (!fl) {   // tracer stream in bursts
       if (D.pauseT > 0) return false;
       if (T.spin && D.spin < 0.7) return false;   // rotary guns fire once the barrels are up to speed
-      if (D.burstT <= 0) { D.burstT = G.burst; D.roundT = 0; burstSound(o, D, G); }
+      if (D.burstT <= 0) { D.burstT = G.burst; D.roundT = 0; burstSound(o, D, G); D.bursts = (D.bursts || 0) + 1; }   // (PERSONNEL: bursts = the crew's practice)
       D.burstT -= dt; D.roundT -= dt;
       let shots = 0;
       while (D.roundT <= 0 && shots < 6) {
         D.roundT += G.rate; shots++;
         const mz = ud.muzzles[(D.cell++) % ud.muzzles.length]; ud.pitch.localToWorld(_m.copy(mz));
-        barrelDir(o, _n); const e = G.spread;
+        barrelDir(o, _n); const e = G.spread / Math.max(0.4, D.crewK ?? 1);   // (PERSONNEL: a green crew sprays)
         _n.x += rnd(-e, e); _n.y += rnd(-e, e); _n.z += rnd(-e, e); _n.normalize();
         env.shoot('ciws', o.def.side, _m.x, _m.y, _m.z, _n.x * G.speed, _n.y * G.speed, _n.z * G.speed, Math.min(G.range + 15, D.d + 25) / G.speed);
         muzzleFx(_m, _n, 0.6);
@@ -263,7 +263,7 @@ export function createDefence(env) {
     // airburst rounds at range
     if (D.flakT > 0) return false;
     D.flakT = G.flakRate + rnd(G.flakJit || 0) - Math.min(G.ramp || 0, t / 900);
-    const err2 = (f.player ? (G.flakErrPlayer ?? G.flakErr) : G.flakErr) * (D.d / 100);
+    const err2 = (f.player ? (G.flakErrPlayer ?? G.flakErr) : G.flakErr) * (D.d / 100) / Math.max(0.4, D.crewK ?? 1);   // (PERSONNEL)
     const mz = ud.muzzles[(D.cell++) % ud.muzzles.length]; ud.pitch.localToWorld(_m.copy(mz));
     const bx = D.aim.x + rnd(-err2, err2), by = D.aim.y + rnd(-err2, err2), bz = D.aim.z + rnd(-err2, err2), d2 = Math.hypot(bx - _m.x, by - _m.y, bz - _m.z) || 1;
     const sp = 90;   // airburst rounds keep the old flak's flight
