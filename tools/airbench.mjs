@@ -165,6 +165,22 @@ if (!ONLY || ONLY === 'section') {
   check('section: both trap', ok && !!L.P.trapped && !!Wg.P.trapped, `${L.P.trapped?.wire}/${Wg.P.trapped?.wire} wire at ${T.toFixed(0)} s, wave-offs ${L.P.waveoffs}/${Wg.P.waveoffs}, bolters ${L.P.bolters}/${Wg.P.bolters}`);
 }
 
+// ------------------------------------------------------------------------------------------------- 1c. island on the quarter
+// (airai-polish) TERRAIN put islands close to the ALBATROSS: a 90 m hill where the left-hand downwind and the 180 go
+// (deck coordinates -460, 600; the ship at anchor). The pilot flies the right-hand pattern instead, and traps.
+if (!ONLY || ONLY === 'quarter') {
+  console.log('--- an island off the port quarter: the right-hand pattern ---');
+  const yaw = 0.4, co = Math.cos(yaw), si = Math.sin(yaw), hx = -460 * co + 600 * si, hz = 460 * si + 600 * co;
+  const hill = (x, z) => 90 * Math.exp(-((x - hx) ** 2 + (z - hz) ** 2) / (2 * 220 ** 2)) - 1;
+  const W = carrierWorld({ x: 0, z: 0, yaw, speed: 0 }, hill);
+  const A = createTomcatSim(G, { fuelX: 10 }); A.reset(0, 0, 0, 0, { running: true, airborne: true, alt: 240, speed: 75 }); A.pos.set(400, 240, -600); for (const e of A.eng) e.n = 0.85; A.fuel = 3000;
+  const P = createPilot(A, { side: 1 }); P.anchor = { x: 0, y: 0, z: 0 }; P.spawnAir('rtb');
+  let minClr = 1e9;
+  run(500, () => { P.update(DT, W); if (!A.onGround && P.state !== 'final' && P.state !== 'trapped') minClr = Math.min(minClr, A.pos.y - Math.max(0, hill(A.pos.x, A.pos.z))); if (A.dead || P.recovered) return false; });
+  if (V || !P.recovered) console.log(P.log.map(l => `   ${l.t} ${l.msg}`).join('\n'));
+  check('island on the port quarter: right-hand pattern, clear of it, trap', P.patSide === -1 && P.recovered && !A.dead && minClr > 40, `side ${P.patSide}, ${P.trapped ? P.trapped.wire + ' wire' : 'no trap ' + (A.dead || P.state)}, ${P.waveoffs} wave-offs, min clearance ${minClr.toFixed(0)} m`);
+}
+
 // ------------------------------------------------------------------------------------------------- 1b. wave-off, bolter
 if (!ONLY || ONLY === 'recovery') {
   console.log('--- recovery: a wave-off (shoved off the centreline in close), a bolter (hook skips) ---');

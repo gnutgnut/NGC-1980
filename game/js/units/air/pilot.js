@@ -297,26 +297,43 @@ export function createPilot(A, o = {}) {
     if (!A.hookCmd) { A.hookCmd = 1; say('HOOK DOWN'); }
     if (A.flapSel < 2 && A.eas < 112) { A.flapSel = 2; say('FLAPS FULL'); }
   }
+  // which side to fly the downwind and the 180 (TERRAIN: an island off the ship's port quarter): the left-hand pattern
+  // unless the right-hand one is clearly lower; the pattern height rises to clear what is left under it
+  function patSide(c, env) {
+    PL.patSide = 1; PL.patLift = 0; if (!env.terrain) return;
+    let best = 1, bh = 1e9;
+    for (const K of [1, -1]) {
+      let h = -1e9;
+      for (let lz = -300; lz <= 1400; lz += 100) for (const lx0 of [-520, -430, -330, -220, -110]) {
+        if (lx0 > -300 && lz < 700) continue;   // inside the downwind only where the 180 swings in
+        world(c, A.landX + K * (lx0 - A.landX), lz, _k); h = Math.max(h, env.terrain(_k.x, _k.z));
+      }
+      if (h < bh - 5) { bh = h; best = K; }
+    }
+    PL.patSide = best; PL.patLift = Math.max(0, bh + 55 - (c.deck + T.patAlt));
+    if (best < 0 || PL.patLift > 0) say(`${best < 0 ? 'RIGHT-HAND PATTERN' : 'PATTERN'}${PL.patLift > 0 ? '  HIGH ' + PL.patLift.toFixed(0) : ''}  (TERRAIN)`);
+  }
   function recover(dt, env) {
     const c = env.carrier && env.carrier();
     if (!c) { orbit(dt, env, PL.anchor || A.pos, T.capEAS); return; }
     const [lx, lz] = deck(c, A.pos.x, A.pos.z), aimZ = DK.WIRES[2] - A.P.HOOK_TIP[2] - (T.hookLead ?? 20);   // the hook hangs ~3.4 m under the CG at ~7° nose up and a wire catches it within 0.45 m of the deck: aiming the CG's glideslope this far up the deck takes the 3 wire
     const R = lz - aimZ, hdgS = -c.yaw, hdgA = hdgOf(A.vel), herr = wrap(hdgA - hdgS);   // ship's bow along -z: heading -yaw
-    const patH = c.deck + T.patAlt;
+    const patH = c.deck + T.patAlt + (PL.patLift || 0);
     if (PL.state === 'rtb') {
       // short of fuel and already behind the ship, roughly lined up: straight in; else the break
       if (A.fuel < (T.bingo || 1e9) * 0.45 && R > 1300 && R < 3200 && Math.abs(lx - A.landX) < R * 0.45 && Math.abs(herr) < 1.0) { set('final', 'STRAIGHT IN'); return; }
-      if (PL.wp === 0) PL.wp = 1;
+      if (PL.wp === 0) { PL.wp = 1; patSide(c, env); }
+      const K = PL.patSide || 1, mx = v => A.landX + K * (v - A.landX), mlx = mx(lx);   // mirrored for a right-hand pattern
       if (PL.wp <= 2 && PL.lead && PL.leadOk() && PL.lead.state === 'rtb') { formation(dt, env); PL.wp = Math.max(PL.wp, PL.lead.wp); return; }   // on the lead's wing to the break
       if (PL.wp === 6) {   // the 180: a steady descending left turn whose radius puts the roll-out on the centreline
         // left turn through b (rad) from radius rho rolls out at lx + rho (1 - cos b): rho for lx -> landX; the bank for
         // that radius at this TAS; the height comes down from pattern height to the glideslope as the turn winds off
-        let b = herr; if (b < -0.3) b += 2 * Math.PI;
-        const V = Math.max(A.tas, 20), rho = clamp((A.landX - lx) / Math.max(0.08, 1 - Math.cos(b)), 60, 1200);
+        let b = K * herr; if (b < -0.3) b += 2 * Math.PI;
+        const V = Math.max(A.tas, 20), rho = clamp((A.landX - mlx) / Math.max(0.08, 1 - Math.cos(b)), 60, 1200);
         const phi = clamp(Math.atan(V * V / (9 * rho)), 0.12, 0.72);
         const yGS = c.deck + A.P.REST_H + Math.tan(T.gs) * Math.max(0, R), yW = yGS + Math.max(0, patH - yGS) * clamp(b / Math.PI, 0, 1);
         const vyDes = clamp(0.25 * (yW - A.pos.y) - 1, -6, 2);
-        FD.ctl.roll = FD.rollFor(-phi); FD.ctl.pitch = FD.pitchFor(Math.cos(A.attitude().pitch) / Math.cos(phi) + 0.12 * (vyDes - A.vel.y), dt);
+        FD.ctl.roll = FD.rollFor(-phi * K); FD.ctl.pitch = FD.pitchFor(Math.cos(A.attitude().pitch) / Math.cos(phi) + 0.12 * (vyDes - A.vel.y), dt);
         FD.ctl.yaw = clamp(A.beta * 3, -0.6, 0.6);
         dirtyUp(); speedOnFinal(dt, A.surf.flap > 0.85 && A.gear > 0.95, 6);
         // terrain: the turn is flown low and slow; anything in the next few seconds of path inside 35 m: go round, high
@@ -327,7 +344,7 @@ export function createPilot(A, o = {}) {
       const w = PATTERN[PL.wp - 1];
       let wz = w[1];
       if (PL.wp === 5 && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && (o.state === 'final' || (o.state === 'rtb' && o.wp === 6))) wz = Math.max(wz, Math.min(1900, deck(c, o.A.pos.x, o.A.pos.z)[1] + 520));   // a jet turning in or in the groove ahead: extend downwind
-      world(c, w[0], wz, _t); _t.y = c.deck + T.patAlt * w[2];
+      world(c, mx(w[0]), wz, _t); _t.y = c.deck + T.patAlt * w[2] + (PL.patLift || 0);
       _t.x += (c.vx || 0) * 8; _t.z += (c.vz || 0) * 8;   // the ship moves: aim where the waypoint will be
       let hold = false;   // at the break with another jet just broken ahead: carry on up the deck heading, then break
       if (PL.wp === 2 && lz < -150 && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && o.t - o.brokeAt < (T.breakGap ?? 11)) hold = true;
@@ -338,14 +355,14 @@ export function createPilot(A, o = {}) {
       if (PL.wp >= 4) dirtyUp();
       const dh = Math.hypot(_t.x - A.pos.x, _t.z - A.pos.z);
       let next = false;
-      if (PL.wp === 1) next = dh < 300 || (lz > 0 && lz < w[1] && lx > -150 && lx < 260 && Math.abs(herr) < 0.6);
+      if (PL.wp === 1) next = dh < 300 || (lz > 0 && lz < w[1] && mlx > -150 && mlx < 260 && Math.abs(herr) < 0.6);
       else if (PL.wp === 2) next = !hold && (lz < -150 || dh < 150);
-      else if (PL.wp === 3) next = dh < 220 || (lz > w[1] - 40 && lx < -250);
+      else if (PL.wp === 3) next = dh < 220 || (lz > w[1] - 40 && mlx < -250);
       else if (PL.wp === 4) next = lz > wz;
       else next = lz > wz - 30;
       if (next) {
         if (PL.wp === 2) PL.brokeAt = PL.t;
-        if (PL.wp >= 5) { PL.wp = 6; PL.turn = { x: (lx + A.landX) / 2, z: lz, r: Math.max(120, (A.landX - lx) / 2) }; say(WPNAME[5]); return; }
+        if (PL.wp >= 5) { PL.wp = 6; say(WPNAME[5]); return; }
         say(WPNAME[PL.wp]); PL.wp++;
       }
       return;
