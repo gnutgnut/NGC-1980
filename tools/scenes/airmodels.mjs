@@ -33,11 +33,16 @@ export default async function (h) {
   // (airai-polish) the crew figures: helmets, visors, masks, harness (the heads scan when nobody gives them a look)
   await h.eval(`(() => { const A = __A; Object.assign(A.cam, { yaw: 2.0, pitch: 0.35, dist: 5 }); A.cam.t.set(0, 1, -4.9); Object.assign(A.S, { canopy: 0 }); return 1; })()`);
   await h.wait(350); await h.shot('tomcat_crew');
+  for (const [n, cam, t] of [['tomcat_crew_side', '1.5708,0.15,4', [0, 1.0, -4.9]], ['tomcat_crew_front', '3.14,0.12,6', [0, 1.0, -5.0]], ['tomcat_crew_above', '0.4,1.2,4.5', [0, 1.0, -4.9]], ['tomcat_crew_rear', '0.5,0.35,5', [0, 1.1, -4.6]]]) {
+    await h.eval(`(() => { const A = __A, [y, p, d] = '${cam}'.split(',').map(Number); Object.assign(A.cam, { yaw: y, pitch: p, dist: d }); A.cam.t.set(${t.join(',')}); return 1 })()`);
+    await h.wait(350); await h.shot(n);
+  }
   for (const m of ['shrike', 'reaper', 'shahed']) {
     await h.goto(`dev/air.html?model=${m}&ui=0`);
     await h.waitFor('window.__A', 10000);
     const d = { shrike: 18, reaper: 30, shahed: 7 }[m];
-    for (const [n, cam] of [['front34', `2.4,0.35,${d}`], ['top', `0.2,1.45,${d * 1.1}`], ['rear', `0.6,0.2,${d * 0.9}`]]) {
+    for (const [n, cam] of [['front34', `2.4,0.35,${d}`], ['top', `0.2,1.45,${d * 1.1}`], ['rear', `0.6,0.2,${d * 0.9}`], ['side', `1.5708,0.05,${d}`], ['below', `2.0,-0.7,${d}`], ['front_low', `3.14,0.05,${d * 0.8}`],
+      ['lod_near', `2.4,0.3,${d * 6}`], ['lod_switch', `2.4,0.3,${{ shrike: 270, reaper: 330, shahed: 150 }[m]}`], ['lod_far', `2.4,0.3,${d * 40}`]]) {
       await h.eval(`(() => { const A = __A, [y, p, dd] = '${cam}'.split(',').map(Number); Object.assign(A.cam, { yaw: y, pitch: p, dist: dd }); A.S.gear = 0; A.S.eng = [{ n: 0.95, nozzle: 0.6, ab: 0 }]; return 1; })()`);
       await h.wait(350); await h.shot(`${m}_${n}`);
     }

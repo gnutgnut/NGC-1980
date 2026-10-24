@@ -1,0 +1,8 @@
+{ "name": "loddbg", "query": "?debug&kb&peace&res=0.45", "steps": [
+ "waitFor 10000 window.__G", "key tap Enter", "wait 1200",
+ "eval (()=>{ const G=__G, P=G.H.pos; window.__s = G.war.air.spawnShrike({x:P.x+20, y:P.y+150, z:P.z-30, yaw:0}, {x:P.x,y:0,z:P.z}); const T=G.THREE, r0=G.renderer.render.bind(G.renderer), off=new T.Vector3(); G.renderer.render=(sc,cam)=>{ off.set(7,3,18).applyQuaternion(__s.sim.q); cam.position.copy(__s.p).add(off); cam.lookAt(__s.p); cam.updateMatrixWorld(); r0(sc,cam); }; return 1 })()",
+ "wait 1500", "shot healthy",
+ "eval (__s.hp = 1, [__s.mesh.getCurrentLevel(), __s.mesh.visible, __s.mesh.levels[0].object.visible])",
+ "wait 1500", "shot hp1",
+ "eval [__s.mesh.getCurrentLevel(), __s.mesh.visible, __s.mesh.levels[0].object.visible, __s.dmgF]"
+]}

@@ -12,6 +12,11 @@ export default async function (h) {
     const T = G.THREE, r0 = G.renderer.render.bind(G.renderer), off = new T.Vector3(); window.__cam = null;
     G.renderer.render = (sc, cam) => { const f = window.__cam; if (f && (f.u || f.p)) { const p = f.u ? f.u.p : f.p; off.set(...(f.off || [0, 5, 32])); if (f.u && f.u.sim && !f.world) off.applyQuaternion(f.u.sim.q); cam.position.copy(p).add(off); cam.lookAt(f.at ? f.at : p); cam.updateMatrixWorld(); } r0(sc, cam); };
     return 1 })()`);
+  // deck ops: the first one on the port bow cat, run up (from the side, the front, above: the deck crew clear of her)
+  await h.waitFor('__esc().length >= 1 && __esc()[0].ai.state === "cat"', 60000);
+  await h.wait(1500);
+  for (const [n, off] of [['cat_side', [-18, 4, 2]], ['cat_front', [-5, 4, -26]], ['cat_above', [3, 26, 6]]]) { await h.eval(`(window.__cam = { u: __esc()[0], off: ${JSON.stringify(off)} }, 1)`); await h.wait(700); await h.shot(n); }
+  await h.eval('(window.__cam = null, 1)');
   await h.waitFor('__esc().length === 2 && __esc().every(u => u.ai.state === "cap")', 240000);
   await h.eval('({ lead: __esc()[0].ai.wing === __esc()[1].ai, form: __esc()[1].ai.form, log: __esc()[1].ai.log.map(l => l.t + " " + l.msg).join("; ") })');
   await h.expect('__esc()[1].ai.lead === __esc()[0].ai');
@@ -20,24 +25,35 @@ export default async function (h) {
   await h.wait(600); await h.shot('section_cap');
   await h.eval('(window.__cam = { u: __esc()[0], off: [6, 1.5, -9], at: __esc()[0].p }, 1)'); await h.wait(600); await h.shot('crew_look');
   await h.expect('__esc()[0].p.distanceTo(__esc()[1].p) < 120');
-  // a SHRIKE over an island, hit once (damage state), then down: tumble, debris, a burning wreck on the ground
-  await h.eval(`(() => { const G = __G, I = G.war.islands.filter(I => I.pad).sort((a, b) => b.pad.h - a.pad.h)[0], b = { x: I.pad.x, y: I.pad.h + 160, z: I.pad.z, yaw: 0 };
-    window.__s = G.war.air.spawnShrike(b, { x: I.pad.x, y: 0, z: I.pad.z }); window.__s.hp = 1; window.__I = I.name; window.__cam = { u: __s, off: [7, 3, 18] }; return I.name })()`);
+  // a SHRIKE out over the sea (its radar off, so it just flies), hit once (damage state); then down over an enemy island:
+  // tumble, debris, a burning wreck on the ground
+  await h.eval(`(() => { const G = __G, c = G.war.carrier, b = { x: c.p.x + 600, y: 300, z: c.p.z + 2400, yaw: 0 };
+    window.__s = G.war.air.spawnShrike(b, { x: b.x, y: 0, z: b.z }); __s.ai.T.radar = 0; __s.hp = 1; window.__cam = { u: __s, off: [7, 3, 18] }; return 1 })()`);
   await h.wait(2500); await h.shot('shrike_damaged');
-  await h.eval('(() => { const s = __s; s.hp = 0; s.dying = true; window.__cam = { u: s, off: [20, 8, 40], world: true }; return 1 })()');
+  await h.eval('(window.__cam = { u: __s, off: [-9, -3, -16] }, 1)'); await h.wait(800); await h.shot('shrike_damaged_below');
+  await h.eval(`(() => { const G = __G, I = G.war.islands.filter(I => I.pad && I.owner === 2)[0] || G.war.islands.filter(I => I.pad)[0], s = __s;
+    s.sim.pos.set(I.pad.x + 30, Math.max(I.pad.h, 0) + 140, I.pad.z + 30); s.hp = 0; s.dying = true; window.__cam = { u: s, off: [20, 8, 40], world: true }; return I.name })()`);
   await h.wait(1500); await h.shot('shrike_falling');
   await h.waitFor('__s.dead', 60000);
   await h.eval(`(() => { const w = __G.war.air.wrecks[__G.war.air.wrecks.length - 1]; if (!w) return 'no wreck'; window.__cam = { p: w.obj.position, off: [14, 8, 18], world: true }; return { wet: w.wet, y: +w.obj.position.y.toFixed(1), debris: __G.war.air.debris.length } })()`);
   await h.wait(3000); await h.shot('shrike_wreck');
-  // a REAPER, damaged (an aileron gone, smoke)
-  await h.eval(`(() => { const G = __G, c = G.war.carrier; window.__rq = G.war.air.spawnReaper(c.p); __rq.hp = 1; window.__cam = { u: __rq, off: [14, 5, 26] }; return 1 })()`);
+  // a REAPER out over the sea, damaged (an aileron gone, smoke), seen from above and below; a SHAHED in flight
+  await h.eval(`(() => { const G = __G, c = G.war.carrier, b = { x: c.p.x - 600, y: 0, z: c.p.z + 2400 }; window.__rq = G.war.air.spawnReaper(b); __rq.sim.pos.set(b.x, 260, b.z); __rq.hp = 1; window.__cam = { u: __rq, off: [14, 5, 26] }; return 1 })()`);
   await h.wait(2500); await h.shot('reaper_damaged');
+  await h.eval('(window.__cam = { u: __rq, off: [-12, -6, 14] }, 1)'); await h.wait(800); await h.shot('reaper_below');
+  await h.eval('(window.__cam = { u: __rq, off: [0, 3, -60] }, 1)'); await h.wait(800); await h.shot('reaper_far60');
+  await h.eval('(window.__cam = { u: __rq, off: [0, 40, 400], world: true }, 1)'); await h.wait(800); await h.shot('reaper_farLOD400');
   await h.eval('(() => { __rq.hp = 0; __rq.dying = true; return 1 })()');
   // bingo for the lead: the section comes home, breaks one at a time and both trap
   await h.eval('(() => { const L = __esc()[0]; L.sim.fuel = 1850; window.__L = L; window.__W = __esc()[1]; window.__cam = null; return L.name })()');
   await h.waitFor('__W.ai.state === "rtb" || __W.dead', 60000);
   await h.waitFor('__L.ai.log.some(l => l.msg === "THE BREAK") || __L.dead || __L.dying', 180000);
   await h.eval('(window.__cam = { u: __L, off: [-30, 12, 60], world: true }, 1)'); await h.wait(1500); await h.shot('the_break');
+  await h.waitFor('__L.ai.recovered || __L.dead || __L.dying', 300000);
+  // deck ops after the trap: hook up, wings to oversweep, taxiing out of the landing area (deck crew clear of her)
+  await h.eval('(window.__cam = { u: __L, off: [-16, 7, 22], world: true }, 1)'); await h.wait(4000); await h.shot('trap_rollout');
+  await h.wait(6000); await h.eval('(window.__cam = { u: __L, off: [14, 9, -20], world: true }, 1)'); await h.wait(800); await h.shot('taxi_oversweep');
+  await h.eval('({ sweep: Math.round(__L.sim.sweep), clear: !!__L.taxiClear, recT: +(__L.recT || 0).toFixed(1) })');
   await h.waitFor('(__L.ai.recovered || __L.dead || __L.dying) && (__W.ai.recovered || __W.dead || __W.dying)', 400000);
   await h.eval('[__L, __W].map(u => ({ name: u.name, trapped: u.ai.trapped && u.ai.trapped.wire, waveoffs: u.ai.waveoffs, bolters: u.ai.bolters, dying: !!u.dying, log: u.ai.log.slice(-14).map(l => l.t + " " + l.msg).join("; ") }))');
   await h.expect('!!__L.ai.trapped && !!__W.ai.trapped');

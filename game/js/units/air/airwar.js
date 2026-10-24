@@ -50,7 +50,7 @@ export function createAirWar(W, ctx, H) {
       // (airai-polish) the recovery: the other jets in the pattern (break interval, extended downwind) and a foul deck
       // (a jet still in the wires in the landing area)
       traffic: () => { const out = AW._traffic || (AW._traffic = []); out.length = 0; for (const u of W.units) if (u.side === side && u.type === 'escort' && !u.dead && !u.dying) out.push(u.ai); return out; },
-      deckFoul: me => W.units.some(u => u.side === side && u.type === 'escort' && u.ai !== me && !u.dead && !u.dying && u.ai.state === 'trapped'),
+      deckFoul: me => W.units.some(u => u.side === side && u.type === 'escort' && u.ai !== me && !u.dead && !u.dying && u.ai.state === 'trapped' && !u.taxiClear),
       fire: (kind, A, st, tgt, Wp) => {
         const u = A.unit; A.forward(_f);
         if (kind === 'gun') {
@@ -166,6 +166,7 @@ export function createAirWar(W, ctx, H) {
     AW.pl = pl;
     if (u.drone) return updateShahed(u, dt);
     const A = u.sim, P = u.ai;
+    if (u.type === 'escort' && P.recovered) { taxi(u, dt); pose(u, dt, NO_EV); return; }   // (airai-polish) out of the wires: taxi clear, struck below
     if (u.type === 'escort') {   // CAP point: the ordered island, else the ship
       const c = carrierOf(1);
       if (P.state === 'cat') {   // the shooter only fires with open water ahead of the bow; the ship turns into clear water for the launch
@@ -189,10 +190,28 @@ export function createAirWar(W, ctx, H) {
       u.dying = true; u.hp = 0; u.v.multiplyScalar(0.3);
       if (u.side === 1) feed(`${u.name} ${A.dead === 'water' ? 'WENT IN THE WATER' : 'CRASHED'}`, 'bad');
     }
-    if (P.recovered) { u.recT = (u.recT || 0) + dt; if (u.recT > 2.5) { u.dead = true; AW.gone(u); feed(`${u.name} RECOVERED  -  ${P.trapped ? P.trapped.wire + ' WIRE' : 'ON DECK'}`, 'good'); W.P.mat += 15; } }
+    if (P.recovered && !u.recT) { u.recT = 1e-3; feed(`${u.name} RECOVERED  -  ${P.trapped ? P.trapped.wire + ' WIRE' : 'ON DECK'}`, 'good'); W.P.mat += 15; }
     pose(u, dt, evs);
   };
   AW.gone = u => { if (u.ai) u.ai.gone = true; };   // (airai-polish) a section's pilots let go of a lost or recovered jet
+  // (airai-polish) after the trap: hook up, wings to oversweep, a slow taxi out of the landing area forward to the waist
+  // (the deck is clear for the next one as soon as she is out of the wires), then struck below. Kinematic, on the deck.
+  const NO_EV = [];
+  function taxi(u, dt) {
+    const A = u.sim, c = carrierOf(1); u.recT += dt;
+    if (!c || u.recT > 22) { u.dead = true; AW.gone(u); return; }
+    const co = Math.cos(c.yaw), si = Math.sin(c.yaw), dx = A.pos.x - c.p.x, dz = A.pos.z - c.p.z;
+    let lx = dx * co - dz * si, lz = dx * si + dz * co;
+    const tx = 3, tz = 6, ex = tx - lx, ez = tz - lz, d = Math.hypot(ex, ez), sp = Math.min(2.6, d * 0.5, u.recT * 0.6);
+    if (d > 0.3 && u.recT > 1.5) { lx += ex / d * sp * dt; lz += ez / d * sp * dt; u.taxiYaw = Math.atan2(ex, ez); }
+    if (lz < 26) u.taxiClear = true;
+    A.pos.x = c.p.x + lx * co + lz * si; A.pos.z = c.p.z - lx * si + lz * co; A.pos.y = W.deckY(A.pos.x, A.pos.z) + A.P.REST_H;
+    if (u.taxiYaw !== undefined) A.q.setFromEuler(_eu.set(0, c.yaw + u.taxiYaw + Math.PI, 0, 'YXZ'));   // nose along the taxi direction (deck axes: +z aft)
+    A.vel.set(0, 0, 0); A.hook = Math.max(0, A.hook - dt * 0.5); A.hookCmd = 0; A.sweep = Math.min(75, A.sweep + dt * 8);
+    A.surf.flap = Math.max(0, A.surf.flap - dt * 0.4); A.surf.lef = Math.max(0, A.surf.lef - dt * 0.4); A.surf.brake = 0;
+    for (const e of A.eng) { e.n += (0.68 - e.n) * Math.min(1, dt); e.ab = 0; }
+    if (d < 0.5 && u.recT > 16) { u.dead = true; AW.gone(u); }
+  }
   function _anchor(u, x, y, z) { const a = u._anc || (u._anc = { x: 0, y: 0, z: 0 }); a.x = x; a.y = Math.max(0, y); a.z = z; return a; }
   function pose(u, dt, evs = u.sim.events) {
     const A = u.sim, m = u.mesh;
