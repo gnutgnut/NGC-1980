@@ -331,9 +331,13 @@ export function createPilot(A, o = {}) {
         let b = K * herr; if (b < -0.3) b += 2 * Math.PI;
         const V = Math.max(A.tas, 20), rho = clamp((A.landX - mlx) / Math.max(0.08, 1 - Math.cos(b)), 60, 1200);
         const phi = clamp(Math.atan(V * V / (9 * rho)), 0.12, 0.72);
-        const yGS = c.deck + A.P.REST_H + Math.tan(T.gs) * Math.max(0, R), yW = yGS + Math.max(0, patH - yGS) * clamp(b / Math.PI, 0, 1);
-        const vyDes = clamp(0.25 * (yW - A.pos.y) - 1, -6, 2);
-        FD.ctl.roll = FD.rollFor(-phi * K); FD.ctl.pitch = FD.pitchFor(Math.cos(A.attitude().pitch) / Math.cos(phi) + 0.12 * (vyDes - A.vel.y), dt);
+        const yGS = c.deck + A.P.REST_H + Math.tan(T.gs) * Math.max(0, R), yW = Math.min(patH, yGS + Math.max(0, patH - yGS) * clamp(b / Math.PI, 0, 1));
+        const vyDes = clamp(0.25 * (yW - A.pos.y) - 1, -6, 0.5);   // down to the glideslope, never a climb in the turn (slow, dirty, a TF30)
+        // AoA protection: past on-speed + 6° the pull eases and the bank comes off (the TF30 stalls at high AoA, and a
+        // stalled pair at idle in a slow turn is how the Tomcat went in)
+        const over = A.alpha - (T.aoaApp + 6 * D2R), phiA = over > 0 ? phi * clamp(1 - over * 4, 0.5, 1) : phi;
+        let nC = Math.cos(A.attitude().pitch) / Math.cos(phiA) + 0.12 * (vyDes - A.vel.y); if (over > 0) nC = Math.min(nC, Math.max(0.7, A.nz - over * 2));
+        FD.ctl.roll = FD.rollFor(-phiA * K); FD.ctl.pitch = FD.pitchFor(nC, dt);
         FD.ctl.yaw = clamp(A.beta * 3, -0.6, 0.6);
         dirtyUp(); speedOnFinal(dt, A.surf.flap > 0.85 && A.gear > 0.95, 6);
         // terrain: the turn is flown low and slow; anything in the next few seconds of path inside 35 m: go round, high
@@ -343,7 +347,7 @@ export function createPilot(A, o = {}) {
       }
       const w = PATTERN[PL.wp - 1];
       let wz = w[1];
-      if (PL.wp === 5 && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && (o.state === 'final' || (o.state === 'rtb' && o.wp === 6))) wz = Math.max(wz, Math.min(1900, deck(c, o.A.pos.x, o.A.pos.z)[1] + 520));   // a jet turning in or in the groove ahead: extend downwind
+      if (PL.wp === 5 && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && (o.state === 'final' || (o.state === 'rtb' && o.wp === 6))) wz = Math.max(wz, Math.min(1350, deck(c, o.A.pos.x, o.A.pos.z)[1] + 520));   // a jet turning in or in the groove ahead: extend downwind
       world(c, mx(w[0]), wz, _t); _t.y = c.deck + T.patAlt * w[2] + (PL.patLift || 0);
       _t.x += (c.vx || 0) * 8; _t.z += (c.vz || 0) * 8;   // the ship moves: aim where the waypoint will be
       let hold = false;   // at the break with another jet just broken ahead: carry on up the deck heading, then break
@@ -425,7 +429,8 @@ export function createPilot(A, o = {}) {
     const va = vApproach(), want = (dirty ? va : Math.max(va + 12, Math.min(A.eas, 112) - 4)) + extra;
     const e = want - A.eas, aerr = dirty ? A.alpha - T.aoaApp : 0;
     PL.thrI = clamp((PL.thrI ?? 0.6) + (e * 0.02 + aerr * 0.6) * dt, 0.05, 0.79);
-    FD.thr = clamp(PL.thrI + e * 0.04 + aerr * 2.5, 0, 0.95); FD.setThrottle(FD.thr); PL.vapp = va;
+    const tw = clamp(PL.thrI + e * 0.04 + aerr * 2.5, 0, 0.95);
+    FD.thr += clamp(tw - FD.thr, -1.2 * dt, 1.2 * dt); FD.setThrottle(FD.thr); PL.vapp = va;   // (airai-polish) no slams: a TF30 slammed at high AoA stalls
     A.brakeCmd = e < -12 && !dirty ? 1 : 0;   // speedbrake out when well fast on the way in
   }
   // wave-off: power up, wings level, stop the sink and climb gently on AoA (never past on-speed + 3°: a slow TF30
