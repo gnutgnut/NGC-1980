@@ -2699,3 +2699,38 @@ ZU-23-2 3.05; TALON / LANCE vs the player unchanged), smoke 5/5, worlddamage 4/4
 the TICK can clip the TALON's combat module when the module traverses to the rear while it works; the hands-over-ears
 pose is a brace (rigid forearms); M167 / ZU-23-2 have no prime mover parked nearby; crews do not bail out or die as
 figures (they vanish with the wreck); no per-unit sounds for the towed guns' crews (box changes, shouts).
+
+## 2026-10-24 — NGC-1980 integration fixes after TERRAIN + RUNAWAY ground polish + defence polish (branch ngc/integ)
+
+- **STRIDERs never reacted to the helicopter** (`scenes/rwpolish.mjs` "air: to cover / disperse"). There were two
+  causes. (1) Perception was purely visual inside the STRIDER's 126-degree cone. On the new SANDBAR the walkers end
+  the fight facing the Marines' axis (west), and the scene's Huey works them from the east, behind them (line of
+  sight was clear for all 8). So the helicopter at 120 m was unseen, and its contact stayed a stale 'vehicle' from
+  when it sat on the pad. (2) From the terrain: once they did see it, a walker reacted only with 'to cover' (cover
+  from the aircraft within 20 m) or 'disperse' (a squad mate within 7 m). SANDBAR is now a flat sandy cay with no
+  cover from above, and the squad stands more than 7 m apart, so it did nothing (1 run in 2).
+  Fix (`units/runaway/squadai.js`):
+  - An aircraft low over the island is heard all round (`AI_T.ROTOR` 180 m: within it, sight needs only line of
+    sight, not the cone).
+  - A heard contact takes the kind of the live target with that id.
+  - With no cover from the aircraft, a walker breaks 12 m sideways off its line of fire, alternating each 5 s ('air:
+    disperse').
+  - After a failed cover search, the next one waits 2 s (it used to run every step).
+- **The Marine stopped 1.19 m inside the house door** (`scenes/interiors.mjs` waited for 1.2). The village re-fit
+  picked a different two-storey house nearest the pad, whose living-room sofa stood end-on 1.4 m in front of the
+  front door. Fix (`interiors/rooms.js`): `Plan.clearEntry` keeps the first 1.9 m inside a front door (1.3 m in a
+  shop) clear of furniture. A piece there moves back into the room, else sideways, else it goes. This covers houses,
+  cottages and terrace homes / shops.
+- **Doors on the new slopes** (found by the new check): the front steps down a slope ended in the air where the
+  ground kept falling, because the flight's length came from one sample 1.4 m out. Now the flight is lengthened
+  until its foot meets the ground (to 4.2 m down). A zone cottage's door opened into the bank (the ground in front
+  was above the floor and the lintel lower than a man), so in the zone `layout.footing` also lifts the floor over
+  the ground 1.4 m in front of the building.
+- **Check**: `tools/worldsolidbench.mjs` #4 walks in through every outside door of the zone's enterable buildings
+  (82), door open (r 0.3 m, 1.8 m tall, 0.45 m steps, walls and furniture push). Before the fixes, 10+ failed (the
+  interiors house among them); now 82/82. The bench's push now treats a door leaf as a box, as ground.js does.
+  Wild-land towns are not held to it: a town house on its platform can stand 4 m over its street (4079,-1187).
+- **Tests**: rwpolish 6/6 (x3), interiors 20/20, terrain 13/13, worlddamage 4/4, defencepolish 20/20, smoke 5/5.
+  groundwar 9-10/10: 'both sides fire' fails about 1 run in 2, the same on the unpatched merge (1 of 2 baseline runs
+  failed). 'Hover tank came ashore' failed once in 4 runs under load. Benches: runaway 50/50, groundwar 33/33, world
+  pass, worldsolid 10/10.

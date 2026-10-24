@@ -31,6 +31,9 @@ export function footing(x, z, yaw, w, d, hf = E.hf, maxStep = 4.2) {
     addPad(x, z, y, yaw, hu, hv, sh);
     return { y: y + 0.15, drop: 0.5 };
   }
+  // (ngc/integ: and over the ground outside the front, where the doors are - on a slope up to the street a door would
+  // open into the bank, its lintel lower than a man standing on the ground in front of it)
+  for (const u of [-0.4, 0, 0.4]) { const [px, pz] = toW(x, z, yaw, u * w, d / 2 + 1.4); hi = Math.max(hi, hf(px, pz)); }
   return { y: hi + 0.2, drop: hi + 0.2 - lo + 0.35 };
 }
 // world point of local (u, v) in a frame at (x, z) turned by yaw (yaw like THREE rotation.y)

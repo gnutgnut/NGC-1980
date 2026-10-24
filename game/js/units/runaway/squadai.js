@@ -45,6 +45,7 @@ export const AI_T = {
   LINK_DOWN: 8, FREEZE: 1.5,
   SIGHT: { strider: 260, hovertank: 330, mbt: 330 },   // m, daylight
   FOV: { strider: 2.2, hovertank: 6.3, mbt: 3.2 },      // rad full cone (the hover tank's sensor mast sees all round)
+  ROTOR: 180,             // m: an aircraft low over the island is heard all round - its bearing is found without facing it
   RETREAT_RATIO: 0.55, ASSAULT_RATIO: 2.4,
   POWER: { strider: 1.8, hovertank: 5, mbt: 6 },
   THREAT: { inf: 1, mg: 1.6, at: 1.8, vehicle: 4, air: 2 },   // (air: a helicopter low over the fight - GROUND WAR, wave 2)
@@ -94,7 +95,7 @@ export function createSquadAI(world, opt = {}) {
         let vis = false;
         if (d < sight) {
           const ang = Math.atan2(-dx, -dz), off = Math.abs(((ang - (m.headYaw ?? m.yaw)) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
-          if (off < fov || d < 25) vis = world.los(m.x, m.y + m.eye, m.z, t.x, t.y + t.h * 0.92, t.z) || world.los(m.x, m.y + m.eye, m.z, t.x, t.y + t.h * 0.6, t.z) || world.los(m.x, m.y + m.eye, m.z, t.x, t.y + t.h * 0.3, t.z);
+          if (off < fov || d < 25 || (t.kind === 'air' && d < AI_T.ROTOR)) vis = world.los(m.x, m.y + m.eye, m.z, t.x, t.y + t.h * 0.92, t.z) || world.los(m.x, m.y + m.eye, m.z, t.x, t.y + t.h * 0.6, t.z) || world.los(m.x, m.y + m.eye, m.z, t.x, t.y + t.h * 0.3, t.z);
         }
         if (vis) {
           // detection builds faster close in, on movers and shooters, slower on targets in cover
@@ -119,7 +120,7 @@ export function createSquadAI(world, opt = {}) {
       const old = S.know.get(id);
       if (old && old.seen && AI.time - old.t < 1.5) { old.firing = 0; continue; }   // already in sight: just note it fired
       const a = R() * 2 * Math.PI, e = R() * err;
-      S.know.set(id, { id, x: ev.x + Math.cos(a) * e, y: ev.y, z: ev.z + Math.sin(a) * e, vx: 0, vz: 0, h: 1.6, kind: old?.kind || (ev.kind === 'blast' ? 'at' : 'inf'), t: AI.time, conf: Math.max(old?.conf || 0, 0.6), err, seen: false, heard: true, by: ears[0].id, firing: 0 });
+      S.know.set(id, { id, x: ev.x + Math.cos(a) * e, y: ev.y, z: ev.z + Math.sin(a) * e, vx: 0, vz: 0, h: 1.6, kind: targets.find(t => t.id === id)?.kind || old?.kind || (ev.kind === 'blast' ? 'at' : 'inf'), t: AI.time, conf: Math.max(old?.conf || 0, 0.6), err, seen: false, heard: true, by: ears[0].id, firing: 0 });
     }
     // decay: a contact not seen for a while fades; extrapolate briefly along its last velocity
     for (const [id, k] of S.know) {
@@ -422,8 +423,18 @@ export function createSquadAI(world, opt = {}) {
       if (!m.vehicle) {
         const shootingAir = a.aimId === S.air.id && a.fire;
         if (!shootingAir && !(st === 'flank' && a.flanker)) {
-          if (!a.airCover || AI.time - (a.airCoverT || 0) > 8) { a.airCover = chooseCover(S, m, m.x, m.z, 20, S.air); a.airCoverT = AI.time; }
+          if (AI.time - (a.airCoverT ?? -99) > (a.airCover ? 8 : 2)) { a.airCover = chooseCover(S, m, m.x, m.z, 20, S.air); a.airCoverT = AI.time; }   // (none: look again in 2 s, not every step)
           if (a.airCover) { a.cover = a.airCover; dest = [a.airCover.x, a.airCover.z]; a.run = true; a.state = 'air: to cover'; }
+          else {
+            // ngc/integ: no cover from it within reach (open sand - a flat cay, a beach): break sideways off its line of
+            // fire, each walker its own way, a fresh dash every few seconds - never stand still under the door gun
+            if (!a.airDash || AI.time - a.airDashT > 5 || dist2(a.airDash[0], a.airDash[1], m.x, m.z) < 1.5) {
+              const bx = m.x - S.air.x, bz = m.z - S.air.z, bl = Math.hypot(bx, bz) || 1, sd = (m.id + Math.floor(AI.time / 5)) % 2 ? 1 : -1;
+              let px = -bz / bl * sd * 12, pz = bx / bl * sd * 12; if (world.isWater(m.x + px, m.z + pz)) { px = -px; pz = -pz; }
+              a.airDash = world.isWater(m.x + px, m.z + pz) ? null : [m.x + px, m.z + pz]; a.airDashT = AI.time;
+            }
+            if (a.airDash) { dest = a.airDash; a.run = true; a.state = 'air: disperse'; }
+          }
         }
         let nb = null, nd = 7;
         for (const q of ms) if (q !== m && !q.vehicle) { const d = dist2(q.x, q.z, m.x, m.z); if (d < nd) { nd = d; nb = q; } }

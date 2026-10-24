@@ -72,8 +72,24 @@ class Plan {
   door(d) { d.id = this.doors.length; this.doors.push(d); return d; }
   // a piece of furniture; sz [w, d, h] (local x, z, y) also makes it a collider
   put(k, u, v, y, yaw = 0, o = {}, sz = null) {
-    this.furn.push({ k, u, v, y, yaw, o });
-    if (sz) { const c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw)), hu = (sz[0] * c + sz[1] * s) / 2, hv = (sz[0] * s + sz[1] * c) / 2; this.solid.push({ u0: u - hu, u1: u + hu, v0: v - hv, v1: v + hv, y0: y - 0.1, y1: y + sz[2] }); }
+    const F = { k, u, v, y, yaw, o }; this.furn.push(F);
+    if (sz) { const c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw)), hu = (sz[0] * c + sz[1] * s) / 2, hv = (sz[0] * s + sz[1] * c) / 2; this.solid.push(F.sb = { u0: u - hu, u1: u + hu, v0: v - hv, v1: v + hv, y0: y - 0.1, y1: y + sz[2] }); }
+  }
+  // the way in kept clear (ngc/integ): no furniture (put since index `from`) in the first `depth` m inside front door d
+  // (in a +v wall), the door's width + 0.4 m each side - a piece in it moves back into the room along v, else sideways,
+  // else goes; room [u0, u1, v0, v1]: where it may go. (A sofa end 1.4 m inside the door stopped you in the doorway.)
+  clearEntry(d, from, room, depth = 1.9) {
+    const zu0 = d.u - d.w / 2 - 0.4, zu1 = d.u + d.w / 2 + 0.4, zv0 = d.v - depth, [ru0, ru1, rv0, rv1] = room;
+    for (let i = from; i < this.furn.length; i++) {
+      const F = this.furn[i], b = F.sb; if (!b || b.u1 <= zu0 || b.u0 >= zu1 || b.v1 <= zv0 || b.v0 >= d.v) continue;
+      let du = 0, dv = 0;
+      if (b.v0 - (b.v1 - zv0) >= rv0) dv = zv0 - b.v1;
+      else if (b.u1 - zu0 <= zu1 - b.u0 && b.u0 - (b.u1 - zu0) >= ru0) du = zu0 - b.u1;
+      else if (b.u1 + (zu1 - b.u0) <= ru1) du = zu1 - b.u0;
+      else if (b.u0 - (b.u1 - zu0) >= ru0) du = zu0 - b.u1;
+      else { this.furn.splice(i, 1); this.solid.splice(this.solid.indexOf(b), 1); i--; continue; }
+      F.u += du; F.v += dv; b.u0 += du; b.u1 += du; b.v0 += dv; b.v1 += dv;
+    }
   }
   // a straight stair (a ramp you walk, drawn as steps): from (low end) at y0 up to y1, along ax, rising toward `up`
   // (+1: toward + the axis). Under it, stepped colliders so nobody walks through the flight from the side underneath.
@@ -173,8 +189,12 @@ function shellWalls(P, w, d, floors, fh, H, wins, doorsFront, c, cUp) {
 function frontSteps(P, u, w, d, hf, it) {
   P.floor(u - w / 2 - 0.25, u + w / 2 + 0.25, d / 2 - T - 0.02, d / 2 + 0.85, 0, 0x9a958a, 'step');
   if (!hf) return;
-  const c = Math.cos(it.yaw || 0), s = Math.sin(it.yaw || 0), v = d / 2 + 1.4, g = hf(it.x + c * u + s * v, it.z - s * u + c * v) - it.y;
-  if (g < -0.35 && g > -4) { const L = -g / 0.62; P.stair('v', d / 2 + 0.85, d / 2 + 0.85 + L, u - w / 2 - 0.1, u + w / 2 + 0.1, g, 0, -1, 0x9a958a); P.floors[P.floors.length - 1].kind = 'steps'; }
+  const c = Math.cos(it.yaw || 0), s = Math.sin(it.yaw || 0), at = v => hf(it.x + c * u + s * v, it.z - s * u + c * v) - it.y;
+  // the flight's foot must meet the ground: where it falls away from the door the ground under the foot is lower than
+  // 1.4 m out, so lengthen the flight to it (a few rounds; ngc/integ - the steps ended in the air on the new slopes)
+  let g = Math.min(at(d / 2 + 0.9), at(d / 2 + 1.4));
+  if (g < -0.35) for (let k = 0; k < 6; k++) { const gf = at(d / 2 + 0.85 - g / 0.62 - 0.15); if (gf > g - 0.03) break; g = Math.max(gf, -4.2); }
+  if (g < -0.35 && g > -4.2) { const L = -g / 0.62; P.stair('v', d / 2 + 0.85, d / 2 + 0.85 + L, u - w / 2 - 0.1, u + w / 2 + 0.1, g, 0, -1, 0x9a958a); P.floors[P.floors.length - 1].kind = 'steps'; }
 }
 
 function housePlan(it, hf) {
@@ -204,7 +224,7 @@ function housePlan(it, hf) {
     P.wall('v', S > 0 ? su0 - 0.08 : su1, 0.08, sv0 + 0.4, sv1 - 1.0, -0.3, 0.9 + y, 0x7a5a3a);   // (the lowest metre open: you step on from the side)
     slabWithHole(P, iu0, iu1, iv0, iv1, fh, [su0, su1, sv0, sv1], r.pick(CARPET), CEIL);
     P.rail(S > 0 ? su0 - 0.06 : su1, S > 0 ? su0 : su1 + 0.06, sv0, sv1, fh); P.rail(su0, su1, sv1, sv1 + 0.06, fh);
-    livingRoom(P, r, ru0, ru1, vk + 0.06, iv1, y, { fireSide: -S, sbU: (ru0 + ru1) / 2 - S * 1.1 });
+    const f0 = P.furn.length; livingRoom(P, r, ru0, ru1, vk + 0.06, iv1, y, { fireSide: -S, sbU: (ru0 + ru1) / 2 - S * 1.1 }); P.clearEntry(P.doors[0], f0, [ru0, ru1, vk + 0.06, iv1]);
     kitchen(P, r, ru0, ru1, iv0, vk - 0.06, y, -1);
     // upstairs: front bedroom, back room (a bathroom in a narrow house, else a second bedroom); the landing by the stairs
     const vp = iv0 + Math.max(2.3, (iv1 - iv0) * 0.42);
@@ -222,7 +242,7 @@ function housePlan(it, hf) {
     P.wall('u', vk - 0.06, 0.12, iu0, iu1, -0.3, ceil, paper[2], [{ a: gK - 0.45, b: gK + 0.45, lo: -0.3, hi: Math.min(1.95, ceil - 0.2) }, { a: gB - 0.45, b: gB + 0.45, lo: -0.3, hi: Math.min(1.95, ceil - 0.2) }]);
     P.wall('v', -0.06, 0.12, iv0, vk - 0.06, -0.3, ceil, paper[1]);
     P.door({ u: gB, v: vk, y, w: 0.9, h: Math.min(1.95, ceil - 0.2) - y, ax: 'u', hinge: 1, swing: -1, kind: 'inner', c: 0xd8d0b8 });
-    livingRoom(P, r, iu0, iu1, vk + 0.06, iv1, y, { fireSide: dx > 0 ? -1 : 1, tvBack: true, sideboard: false });
+    const f0 = P.furn.length; livingRoom(P, r, iu0, iu1, vk + 0.06, iv1, y, { fireSide: dx > 0 ? -1 : 1, tvBack: true, sideboard: false }); P.clearEntry(P.doors[0], f0, [iu0, iu1, vk + 0.06, iv1]);
     kitchen(P, r, iu0, -0.06, iv0, vk - 0.06, y, -1);
     bedroom(P, r, 0.06, iu1, iv0, vk - 0.06, y, { side: 1, double: iu1 > 2, wardrobe: false });
     P.ceil(iu0, iu1, iv0, iv1, ceil);
@@ -252,7 +272,7 @@ function terracePlan(it, hf) {
       if (i > 0) P.wall('v', x - uw / 2 - 0.08, 0.16, iv0, iv1, y0, y1, wc);   // party wall (one per pair)
     }
     if (fl > 2) P.walls.push({ u0: x - uw / 2, u1: x + uw / 2, v0: -d / 2, v1: d / 2, y0: 2 * fh, y1: H, c: 0xcccccc, skip: 63, hide: true });   // the closed floors above (solid only)
-    P.door({ u: dU, v: d / 2 - T / 2, y: 0, w: dW, h: dH, ax: 'u', hinge: 1, swing: -1, kind: shop ? 'shop' : 'house', c: shop ? 0x3a3a3a : 0x2f5a3a, out: 1 });
+    const fd = P.door({ u: dU, v: d / 2 - T / 2, y: 0, w: dW, h: dH, ax: 'u', hinge: 1, swing: -1, kind: shop ? 'shop' : 'house', c: shop ? 0x3a3a3a : 0x2f5a3a, out: 1 });
     frontSteps(P, dU, dW, d, hf, it);
     // stairs along the back wall, rising toward -u, to the flat upstairs
     const rise = fh - y, run = rise / STAIR_TAN, su1 = iu1 - 0.2, su0 = Math.max(iu0 + 0.3, su1 - run), sv0 = iv0, sv1 = iv0 + 0.9;
@@ -265,8 +285,10 @@ function terracePlan(it, hf) {
     slabWithHole(P, iu0, iu1, iv0, iv1, fh, [su0, su1, sv0, sv1], r.pick(CARPET), CEIL);
     P.rail(su0, su1, sv1, sv1 + 0.06, fh);
     P.ceil(iu0, iu1, iv0, iv1, 2 * fh - 0.02);
+    const f0 = P.furn.length;
     if (shop) shopFit(P, r, shopKind(it, i), iu0, iu1, vp + 0.06, iv1, y, dU);
     else { livingRoom(P, r, iu0, iu1, vp + 0.06, iv1, y, { fireSide: -1, tv: true }); }
+    P.clearEntry(fd, f0, [iu0, iu1, vp + 0.06, iv1], shop ? 1.3 : 1.9);
     kitchen(P, r, iu0, iu1 - 1.5, sv1 + 0.05, vp - 0.06, y, 1);   // a galley along the partition, clear of its doorway
     // upstairs: a bedroom at the front, the WC at the back (by the landing)
     P.wall('u', vp, 0.12, iu0, iu1, fh, 2 * fh, paper[1], [{ a: iu1 - 1.1, b: iu1 - 0.2, lo: fh, hi: fh + 1.95 }]);
