@@ -329,6 +329,7 @@ export function createGround(ctx) {
   // the first thing in the way - the ground, a deck, a hull side, a craft's footprint (except `skip`'s)
   GR.clearView = (ex, ey, ez, p, skip = null) => {
     const dx = p.x - ex, dy = p.y - ey, dz = p.z - ez, boxes = ctx.crafts ? ctx.crafts.bounds(skip) : [];
+    _eyeB = CW.pointIn(ex, ey, ez, 0.05) || (skip && skip._cwb) || null;   // (the body the eye is in: its own)
     let tHit = 1;
     for (let t = 0.1; t <= 1.0001 && tHit === 1; t += 0.05) {
       const x = ex + dx * t, y = ey + dy * t, z = ez + dz * t;
@@ -338,10 +339,24 @@ export function createGround(ctx) {
         const c = Math.cos(b.yaw), s = Math.sin(b.yaw), qx = x - b.x, qz = z - b.z, lx = qx * c - qz * s, lz = qx * s + qz * c;
         if (Math.abs(lx) < b.hw + 0.2 && Math.abs(lz) < b.hl + 0.2) { tHit = t; break; }
       }
+      if (tHit < 1) break;
+      if (solidAt(x, y, z)) { tHit = t; break; }   // COLLISION: people, the ground war's units, trees, buildings
     }
-    if (tHit < 1) { const k = Math.max(0.12, tHit - 0.08); p.x = ex + dx * k; p.y = ey + dy * k; p.z = ez + dz * k; }
+    if (tHit < 1) {
+      let k = Math.max(0.12, tHit - 0.08); p.x = ex + dx * k; p.y = ey + dy * k; p.z = ez + dz * k;
+      if (solidAt(p.x, p.y, p.z) || GR.floor(p.x, p.z, p.y, 0.2) > p.y - 0.1) { k = 0.02; p.x = ex + dx * k; p.y = ey + dy * k; p.z = ez + dz * k; }   // (still inside: at the eye)
+    }
     return tHit < 1;
   };
+  // COLLISION (wave 3): is (x, y, z) inside something a camera must not sit in - a body of the collision world (not the
+  // one the eye is in: its own) or one of the world's solids (buildings, walls, poles)? clearView's per-sample test
+  let _eyeB = null; const _cv = { x: 0, z: 0, r: 0.2, y0: 0, y1: 0 }, notEye = b => b === _eyeB;
+  function solidAt(x, y, z) {
+    if (CW.pointIn(x, y, z, 0.18, notEye)) return true;
+    for (const src of sources) for (const c of src(x, z, 1)) { _cv.x = x; _cv.z = z; _cv.r = 0.18; _cv.y0 = y - 0.05; _cv.y1 = y + 0.05; if (c.hl !== undefined ? pushBox(_cv, c) : (y > c.y0 && y < c.y1 && pushCircle(_cv, c.x, c.z, c.r))) return true; }
+    return false;
+  }
+  GR.solidAt = solidAt;
 
   // ------------------------------------------------------------------ spawn points
   // carrier deck parking spots (local; clear of the catapult and the landing area). SEAWORLD: moved to the port bow
@@ -364,7 +379,8 @@ export function createGround(ctx) {
     return { name: s.name, x: _w.x, z: _w.z, y: deckH(_w.x, _w.z), yaw: u.yaw + s.yaw, plat: u };
   };
   const _o = { x: 0, z: 0, r: 2.4 };
-  GR.clearAt = (x, z, r = 2.4, skip = null) => { _o.x = x; _o.z = z; _o.r = r; _o.y0 = -1e9; _o.y1 = 1e9; return GR.collide(_o, skip) === 0 && Math.hypot(_o.x - x, _o.z - z) < 0.01; };
+  GR.clearAt = (x, z, r = 2.4, skip = null) => { if (ctx.crafts && ctx.crafts.cw) ctx.crafts.syncBodies(0);   // (COLLISION: spawn checks see crafts placed this frame)
+    _o.x = x; _o.z = z; _o.r = r; _o.y0 = -1e9; _o.y1 = 1e9; return GR.collide(_o, skip) === 0 && Math.hypot(_o.x - x, _o.z - z) < 0.01; };
   // beside the pad of island I, on flat dry ground, nose to the pad
   GR.motorPool = (I, r = 2.4) => {
     const p = I.pad; if (!p) return null;

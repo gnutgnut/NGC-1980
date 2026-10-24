@@ -45,6 +45,8 @@ import { createArmorDelivery } from './units/armor/armordelivery.js';
 import { createCollisionWorld } from './collision.js';   // COLLISION (wave 3)
 import { groundContact, contactDamage } from './aircontact.js';
 import { UH1H } from './hueyfm.js';
+import { setSquadWorld } from './units/air/rotary/squad.js';   // COLLISION: the transports' troops are people in the world
+import { setPeopleWorld } from './world/ambient.js';   // COLLISION: so are the villagers
 // TERRAIN (wave 3): the islands' real ground - geology, beaches, cliffs, dunes, valleys - and the one surface API every sim reads
 import { zoneSurf, zoneGrid, beaches as terrainBeaches, inGrid, SURFACE, SURF_NAMES, GEOLOGY, geologyOf, ZONE_C, bakeMs as TERRAIN_BAKE_MS } from './world/terrain.js';
 
@@ -675,6 +677,7 @@ const PSTORE = { get fuel() { return G.res; }, set fuel(v) { G.res = v; }, get m
 // COLLISION (wave 3, collision.js): one collision world for every unit - the crafts' footprints (craft.js syncs them),
 // the ground war's machines and Marines, the island trees (ground.js); CW.step resolves contacts once a frame
 const CW = createCollisionWorld({ cell: 10 });
+setSquadWorld(CW); setPeopleWorld(CW);
 const crafts = createCraftHost({ G, Z, say: (t, s) => say(t, s), cw: CW });
 const PL = crafts.PL;
 const feedItems = [];

@@ -7,6 +7,12 @@ import * as THREE from 'three';
 import { FIGURES } from './figures.js';
 
 const _w = { x: 0, y: 0, z: 0 };
+// COLLISION (wave 3): the game's collision world (main.js sets it): the troops on the ground - waiting in their file,
+// running to and holding their posts, standing guard - are people in it (collision.js CW.person): they block the
+// player and the vehicles, step out of their way, and are drawn where the world's offset puts them
+let CW = null;
+export function setSquadWorld(cw) { CW = cw; }
+const PERSON_ST = { stick: 1, run: 1, hold: 1, guard: 1 };
 const ang = (a, b) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; return d; };
 // slots round a point: leader in the middle, the rest on two rings facing out (Marines: a 360 perimeter)
 export function padSlots(cx, cz, n, r0 = 5, r1 = 8.5, a0 = 0) {
@@ -60,7 +66,7 @@ export function createSquad(o) {
     update(dt, time) {
       const gph = time * (machine ? 7.2 : 9.5);   // machines share one gait phase
       for (const F of figs) {
-        const G = F.f.group;
+        const G = F.f.group; if (F.cwb && !PERSON_ST[F.st]) F.cwb.enabled = false;   // (aboard, filing in, fallen: out of the collision world)
         switch (F.st) {
           case 'aboard': G.visible = false; continue;
           case 'stick': case 'embark': {   // in the aircraft's frame: wait in the file, then up the ramp
@@ -106,12 +112,17 @@ export function createSquad(o) {
           case 'fall': F.fall += dt * 1.6; F.f.pose('fall', F.fall); if (F.fall >= 1) F.st = 'dead'; break;
           case 'dead': F.f.pose('dead', 1); break;
         }
-        G.position.set(F.x, F.y, F.z); G.rotation.y = F.yaw;
+        if (CW && PERSON_ST[F.st] && G.visible !== false) {
+          const b = F.cwb || (F.cwb = CW.person({ owner: F, r: machine ? 0.4 : 0.3, mass: machine ? 300 : 90 }));
+          CW.placePerson(b, F.x, F.z, F.y, F.y + (machine ? 2.1 : 1.8), dt);
+          G.position.set(b.x, F.y, b.z);
+        } else { if (F.cwb) F.cwb.enabled = false; G.position.set(F.x, F.y, F.z); }
+        G.rotation.y = F.yaw;
       }
       if (Q.state === 'boarding' && Q.boarded) Q.state = 'aboard';
       if (Q.state !== 'aboard' && Q.alive === 0) Q.deadT += dt;
     },
-    dispose() { o.parent.remove(root); },
+    dispose() { o.parent.remove(root); if (CW) for (const F of figs) if (F.cwb) { CW.remove(F.cwb); F.cwb = null; } },
   };
   return Q;
 }

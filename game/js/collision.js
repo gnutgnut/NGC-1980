@@ -238,7 +238,8 @@ export function createCollisionWorld(opt = {}) {
         pairs++;
         if (!CW.contact(a, b, _c)) continue;
         hits++;
-        const ia = invM(a), ib = invM(b), nx = _c.nx, nz = _c.nz;
+        // (the player has right of way over people: they give way - the shove is mostly theirs)
+        const ia = invM(a) * (a.yieldTo && b.isPerson ? 0.15 : 1), ib = invM(b) * (b.yieldTo && a.isPerson ? 0.15 : 1), nx = _c.nx, nz = _c.nz;
         const rv = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz, closing = -rv;
         _cf.nx = -nx; _cf.nz = -nz; _cf.depth = _c.depth; _cf.x = _c.x; _cf.z = _c.z;
         if (closing > 0.3) { if (a.hit) a.hit(b, closing, _c); if (b.hit) b.hit(a, closing, _cf); }
@@ -315,6 +316,77 @@ export function createCollisionWorld(opt = {}) {
     if (l < 1e-3) { rx = -uz; rz = ux; l = 1; }
     out.x = rx / l; out.z = rz / l; out.k = k; CW.stats.ms += now() - t0;
     return out;
+  };
+
+  // ------------------------------------------------------------------ people
+  // Everyone on foot who is not a sim of their own - the deck crew, the troops filing to and from a transport, the
+  // villagers - is a person body: a 0.3 m circle with an OFFSET from where their own animation puts them. Contacts
+  // shove the offset (never the animation's path), and placePerson() steps them out of the way of the player (bodies
+  // with yieldTo) and of moving vehicles and aircraft - aside from the way it is going, not just back - and drifts them
+  // back to their place when it is clear. The caller draws the person at (b.x, b.z).
+  const _yn = [];
+  const capOff = b => { const l = Math.hypot(b.ox, b.oz); if (l > 3) { b.ox *= 3 / l; b.oz *= 3 / l; } };
+  CW.person = (o = {}) => {
+    const b = CW.add({ cls: 'inf', shape: 'circle', r: o.r ?? 0.3, x: o.x ?? 0, z: o.z ?? 0, y0: o.y0 ?? 0, y1: o.y1 ?? 1.8, mass: o.mass ?? 85, owner: o.owner || null });
+    b.ox = 0; b.oz = 0; b.isPerson = true; b.yields = 0;
+    b.shove = (dx, dz) => { b.ox += dx; b.oz += dz; capOff(b); CW.place(b, b.x + dx, b.z + dz); };
+    return b;
+  };
+  CW.placePerson = (b, x, z, y0, y1, dt, vx = 0, vz = 0) => {
+    b.enabled = true;
+    const px = x + b.ox, pz = z + b.oz;
+    let ax = 0, az = 0;
+    if (!CW.off) for (const n of CW.near(px, pz, 9, _yn, null, false)) {
+      if (n === b || !n.solid || n.isPerson) continue;
+      const sp = Math.hypot(n.vx || 0, n.vz || 0), big = n.cls === 'veh' || n.cls === 'trk' || n.cls === 'air';
+      if (!(n.yieldTo || (big && sp > 1))) continue;
+      if (n.y1 < y0 - 0.5 || n.y0 > y1) continue;
+      const dx = px - n.x, dz = pz - n.z, d = Math.hypot(dx, dz) || 1e-3, reach = (n.avoidR ?? n.R) + 1.3 + (big ? Math.min(4, sp) : 0);
+      if (d > reach) continue;
+      let ux = dx / d, uz = dz / d;
+      if (sp > 0.3) {   // it is coming: to the side of its way (the side we are already on)
+        const fx = n.vx / sp, fz = n.vz / sp;
+        if (dx * fx + dz * fz > -0.5) { const s = dx * -fz + dz * fx >= 0 ? 1 : -1; ux = -fz * s * 0.85 + ux * 0.15; uz = fx * s * 0.85 + uz * 0.15; }
+      }
+      const w = (reach - d) / reach; ax += ux * w; az += uz * w;
+    }
+    const al = Math.hypot(ax, az);
+    if (al > 1e-4) { const st = 1.7 * dt * Math.min(1, al * 3); b.ox += ax / al * st; b.oz += az / al * st; b.yields++; }
+    else { const l = Math.hypot(b.ox, b.oz); if (l > 0) { const k = Math.max(0, l - 0.5 * dt) / l; b.ox *= k; b.oz *= k; } }
+    capOff(b);
+    b.vx = vx; b.vz = vz;
+    CW.place(b, x + b.ox, z + b.oz, 0, y0, y1);
+    return b;
+  };
+  // overlaps for tests: people inside people, people inside crafts / vehicles / machines, the deepest of each
+  CW.audit = (x, z, r, out = {}) => {
+    out.pp = 0; out.pv = 0; out.n = 0; out.worstPP = null; out.worstPV = null;
+    const list = CW.near(x, z, r, [], b => b.cls === 'inf', false), c = {};
+    for (const a of list) {
+      out.n++;
+      for (const b of CW.near(a.x, a.z, a.R + 12, [], null, false)) {
+        if (b === a || !b.solid || (b.owner && b.owner === a.owner)) continue;
+        if (!CW.contact(a, b, c)) continue;
+        if (b.cls === 'inf') { if (c.depth > out.pp) { out.pp = c.depth; out.worstPP = [a.owner && (a.owner.label || a.owner.kind || a.owner.jersey) || 'person', b.owner && (b.owner.label || b.owner.kind || b.owner.jersey) || 'person']; } }
+        else if (c.depth > out.pv) { out.pv = c.depth; out.worstPV = [a.owner && (a.owner.label || a.owner.kind || a.owner.jersey) || 'person', b.cls, b.owner && (b.owner.label || b.owner.kind) || '']; }
+      }
+    }
+    return out;
+  };
+
+  // the body whose shape holds the point (x, y, z) - within r of its plan shape, inside its height; tree crowns as
+  // cones (cameras: never inside a person, a vehicle, a tree); skip(b) -> true to ignore one
+  const _pn = [];
+  CW.pointIn = (x, y, z, r = 0.2, skip = null) => {
+    for (const b of CW.near(x, z, r + 0.5, _pn, null, true)) {
+      if (y < b.y0 || y > b.y1 || (skip && skip(b))) continue;
+      for (const p of b.parts) {
+        if (y < p.y0 || y > p.y1) continue;
+        if (p.k === 'c') { const pr = p.cone ? Math.max(p.r, p.cone * (1 - (y - p.y0) / Math.max(0.1, p.y1 - p.y0))) : p.r; if (Math.hypot(x - p.x, z - p.z) < pr + r) return b; }
+        else if (circlePart(x, z, r, p)) return b;
+      }
+    }
+    return null;
   };
 
   // ------------------------------------------------------------------ rotor discs and segments

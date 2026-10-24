@@ -123,7 +123,7 @@ export function createCraftHost({ G, Z, say = NOOP, cw = null }) {
     const a = host.active;
     if (cw) host.syncBodies(dt);   // COLLISION: where everything stands before anyone moves
     if (cw && a && a._cwb) a._cwb.enabled = false;   // (not in its own way while it moves: GR.collide is asked with no skip)
-    if (a) a.update(dt, input);
+    host._inUpdate = a; if (a) a.update(dt, input); host._inUpdate = null;
     if (cw && a) host.syncBody(a, 0);   // (the craft you drive, after it moved: the parked ones collide with where it is now)
     for (const def of defs) if (def !== a && def.present()) def.idle(dt);
     if (a) a.avatar(Z);
@@ -159,7 +159,7 @@ export function createCraftHost({ G, Z, say = NOOP, cw = null }) {
       const cls = def.cwClass || (def.kind === 'air' ? 'air' : def.kind === 'foot' ? 'inf' : 'veh');
       B = def._cwb = cw.add({ cls, shape: 'box', x: arr[0].x, z: arr[0].z, hl: 1, hw: 1, owner: def, side: 1,
         push: def.push ? (jx, jz, x, z) => def.push(jx, jz, x, z) : null, shove: def.shove ? (dx, dz) => def.shove(dx, dz) : null,
-        hit: def.contact ? (o, sp, c) => def.contact(o, sp, c) : null });
+        hit: def.contact ? (o, sp, c) => def.contact(o, sp, c) : null, yieldTo: !!def.cwYield });   // (cwYield: people step out of its way - the player on foot)
       B._px = arr[0].x; B._pz = arr[0].z;
     }
     const m = typeof def.mass === 'function' ? def.mass() : def.mass; B.mass = m > 0 ? m : 3000;
@@ -172,7 +172,7 @@ export function createCraftHost({ G, Z, say = NOOP, cw = null }) {
     }
     return B;
   };
-  host.syncBodies = dt => { for (const def of defs) if (def.bounds || def.cwBounds || def._cwb) host.syncBody(def, dt); };
+  host.syncBodies = dt => { for (const def of defs) if ((def.bounds || def.cwBounds || def._cwb) && def !== host._inUpdate) host.syncBody(def, dt); };   // (not the one moving now: it is out of its own way)
   host.bodyOf = def => def._cwb || null;
 
   // ------------------------------------------------------------------ PL: the player as war.js sees it

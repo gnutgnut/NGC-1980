@@ -147,6 +147,46 @@ function drive(CW, A, B, secs = 14, o = {}) {   // two kinematic vehicles steeri
   void P;
 }
 
+// ------------------------------------------------------------------------------------------------- 3b. people
+// the deck crew / villagers / troops: person bodies with an offset; they step aside for the player and for moving
+// vehicles, are shoved out of crafts, never overlap each other or the player's eye
+{
+  const CW = createCollisionWorld(), dt = 1 / 30;
+  const crew = [];
+  for (let i = 0; i < 6; i++) crew.push(CW.person({ owner: { i } }));
+  const home = crew.map((b, i) => [i * 0.7, 0]);   // a tight file of six (0.7 m apart: just clear of each other)
+  const pl = CW.add({ cls: 'inf', shape: 'circle', r: 0.35, x: 1.75, z: -8, y0: 0, y1: 1.8, mass: 100, yieldTo: true });
+  pl.shove = (dx, dz) => CW.place(pl, pl.x + dx, pl.z + dz);
+  let minEye = 99, worstPP = 0, blocked = 0;
+  for (let f = 0; f < 16 / dt; f++) {
+    // the player walks straight through the file at 1.5 m/s (his own collision: blocked by people as walls)
+    const o = { x: pl.x, z: pl.z + 1.5 * dt, r: 0.35, y0: 0, y1: 1.8 }; if (CW.pushCircle(o, pl) > 0) blocked++;
+    pl.vx = 0; pl.vz = 1.5; CW.place(pl, o.x, o.z);
+    crew.forEach((b, i) => CW.placePerson(b, home[i][0], home[i][1], 0, 1.8, dt));
+    CW.step(dt);
+    for (const b of crew) minEye = Math.min(minEye, Math.hypot(b.x - pl.x, b.z - pl.z));
+    const A = CW.audit(0, 0, 30); worstPP = Math.max(worstPP, ...crew.map(b => { let w = 0; for (const c of crew) if (c !== b) { const k = CW.contact(b, c); if (k) w = Math.max(w, k.depth); } return w; }));
+    void A;
+  }
+  check(pl.z > 6, 'the player walks through a file of six deck crew: they make way, he gets through', `z ${f2(pl.z)}, blocked ${blocked} frames`);
+  check(minEye > 0.6, 'nobody ever closer than 0.6 m to his centre (his eye clear)', f2(minEye));
+  check(worstPP < 0.1, 'the crew never stand inside each other while they make way', `worst ${f2(worstPP)} m`);
+  check(crew.some(b => b.yields > 0) && crew.filter(b => b.yields > 0).length <= 4, 'the ones in his way stepped aside (not the whole file)', crew.map(b => b.yields).join(' '));
+  for (let f = 0; f < 15 / dt; f++) { crew.forEach((b, i) => CW.placePerson(b, home[i][0], home[i][1], 0, 1.8, dt)); CW.step(dt); }
+  check(crew.every(b => Math.hypot(b.ox, b.oz) < 0.2), 'and drift back to their places once he has gone', crew.map(b => f2(Math.hypot(b.ox, b.oz))).join(' '));
+  // a jeep driving at a man on its line: he steps to the side of its way, not just back
+  const C2 = createCollisionWorld(), man = C2.person({ owner: {} }), jeep = C2.add({ cls: 'veh', shape: 'box', x: 0, z: -20, hl: 2, hw: 0.85, y0: 0, y1: 2, mass: 1100 });
+  let hit = 0;
+  for (let f = 0; f < 6 / dt; f++) { jeep.vz = 5; jeep.vx = 0; C2.place(jeep, 0, jeep.z + 5 * dt); C2.placePerson(man, 0.2, 0, 0, 1.8, dt); if (C2.contact(man, jeep)) hit++; C2.step(dt); }
+  check(hit === 0 && Math.abs(man.x) > 1.2, 'a jeep at 18 km/h on a man\'s spot: he steps aside off its line in time', `lateral ${f2(man.x)} m, ${hit} contact frames`);
+  // a parked aircraft spotted on top of people: they are shoved out within a second
+  const C3 = createCollisionWorld(), ps = [C3.person({ owner: {} }), C3.person({ owner: {} })], jet = C3.add({ cls: 'air', shape: 'box', x: 0, z: 0, hl: 8.2, hw: 1.5, y0: 0, y1: 3 });
+  for (let f = 0; f < 30; f++) { C3.placePerson(ps[0], 0.5, 1, 0, 1.8, dt); C3.placePerson(ps[1], -0.4, -3, 0, 1.8, dt); C3.step(dt); }
+  const au = C3.audit(0, 0, 20);
+  check(au.pv < 0.05, 'people under a jet spotted on top of them are out of her within a second', `worst ${f2(au.pv)} m`);
+  void jet;
+}
+
 // ------------------------------------------------------------------------------------------------- 4. aircraft on the ground
 {
   check(contactDamage(0.5).band === 'nudge' && contactDamage(2).band === 'bump' && contactDamage(5).band === 'damage' && contactDamage(9).band === 'crash', 'contact bands: 1 kt nudge, 4 kt bump, 10 kt damage, 17 kt crash');

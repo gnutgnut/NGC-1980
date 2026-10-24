@@ -334,11 +334,26 @@ export function createWar(ctx) {
     const d = Math.hypot(u.p.x - ear.x, u.p.y - ear.y, u.p.z - ear.z), pl = W._pl;
     // deck crew clear out from under a helicopter or jet coming down close to them
     let avoid = null;
-    if (pl && pl.alive && pl.pos && Math.abs(pl.pos.x - u.p.x) < 90 && Math.abs(pl.pos.z - u.p.z) < 90) {
+    if (pl && pl.alive && pl.pos && pl.kind === 'air' && Math.abs(pl.pos.x - u.p.x) < 90 && Math.abs(pl.pos.z - u.p.z) < 90) {   // (COLLISION: an aircraft - a man on foot or a vehicle is stepped round through the collision world, not fled from)
       const [hx, hz] = toLocal(u, pl.pos.x, pl.pos.z), hy = pl.pos.y - u.p.y - u.dims.DECK;
       if (hy < 14 && hy > -2) avoid = (x, z) => { const dx = x - hx, dz = z - hz, r = Math.hypot(dx, dz); return r < 9 ? [dx || 0.1, dz] : null; };
     }
     u.parts.tick(dt, W.time, d, avoid);
+    if (W.cw && u.parts.crew) crewBodies(u, dt, d < 450);
+  }
+  // COLLISION (wave 3): the deck crew are people in the collision world (collision.js CW.person): they block the man
+  // on foot and every craft, step out of his way and out of the way of a moving vehicle or aircraft, and are never left
+  // standing inside a parked craft; the step aside is an offset (ship frame) the crew model draws them at
+  function crewBodies(u, dt, near) {
+    const ms = u.parts.crew.members, co = Math.cos(u.yaw), si = Math.sin(u.yaw), y = u.p.y + u.dims.DECK + (u.att ? u.att.heave : 0);
+    const sv = u.v || { x: 0, z: 0 };
+    for (const p of ms) {
+      if (!near || p.mode === 'seated' || u.sinking !== undefined) { if (p.cwb) p.cwb.enabled = false; p.ox = p.oz = 0; continue; }
+      const b = p.cwb || (p.cwb = W.cw.person({ owner: p }));
+      const wx = u.p.x + p.x * co + p.z * si, wz = u.p.z - p.x * si + p.z * co;
+      W.cw.placePerson(b, wx, wz, y, y + 1.8, dt, sv.x, sv.z);
+      p.ox = b.ox * co - b.oz * si; p.oz = b.ox * si + b.oz * co;   // the offset in the ship frame (the model draws it)
+    }
   }
   function sailShip(u, dt) {
     tickParts(u, dt);

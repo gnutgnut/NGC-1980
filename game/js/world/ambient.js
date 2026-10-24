@@ -141,6 +141,10 @@ function instMat(fog, uTime, kind) {
 const walkAttr = (geo, n) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * 2), 2); a.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aWalk', a); return a; };
 
 // ------------------------------------------------------------------------------------------- the ambient world
+// COLLISION (wave 3): the game's collision world (main.js sets it): villagers in the street near the camera are people
+// in it (collision.js CW.person) - they block the player and vehicles, step out of their way, are drawn at its offset
+let PCW = null;
+export function setPeopleWorld(cw) { PCW = cw; }
 export function createAmbient(ctx) {
   const { scene, fx, root, zone, chunks, war, nav } = ctx;
   const fogM = ctx.fog || null, uTime = ctx.uTime || null;
@@ -173,7 +177,7 @@ export function createAmbient(ctx) {
     }
     towns.set(src, list);
   }
-  function dropPeople(src) { const l = towns.get(src); if (!l) return; A.people = A.people.filter(p => p.src !== src); towns.delete(src); }
+  function dropPeople(src) { const l = towns.get(src); if (!l) return; for (const p of l) if (p.cwb && PCW) { PCW.remove(p.cwb); p.cwb = null; } A.people = A.people.filter(p => p.src !== src); towns.delete(src); }
   const _pt = {};
   function updatePeople(dt, cam) {
     let n = 0;
@@ -183,6 +187,7 @@ export function createAmbient(ctx) {
       if (danger && p.state !== 'inside' && p.state !== 'flee') { p.state = 'flee'; p.tgt = [p.door[0], p.door[2]]; p.speed = rnd(3.8, 5.2); }
       p.t -= dt;
       if (p.state === 'inside') {
+        if (p.cwb) p.cwb.enabled = false;
         if (p.t <= 0 && !danger) { p.state = 'out'; p.x = p.door[0]; p.z = p.door[2]; const rd = nearestRoad(p.x, p.z, 25); if (rd) { p.R = rd.R; p.s = rd.s; const q = roadPoint(p.R, p.s, p.lat); p.tgt = [q.x, q.z]; } else p.state = 'inside'; p.speed = rnd(1.1, 1.5); p.t = 10; }
         continue;
       }
@@ -199,10 +204,13 @@ export function createAmbient(ctx) {
         if (d < 0.4) { if (p.state === 'out') { p.state = 'walk'; p.walked = 0; } else { p.state = 'inside'; p.t = p.state === 'flee' ? 60 : rnd(8, 40); if (danger) p.t = 60; } continue; }
         const st = Math.min(d, p.speed * dt); p.x += dx / d * st; p.z += dz / d * st; p.yaw = Math.atan2(dx, dz);
       }
-      if (dist > 420 || n >= MAXP) continue;
+      if (dist > 420 || n >= MAXP) { if (p.cwb) p.cwb.enabled = false; continue; }
       p.phase += dt * p.speed * 3.6;
       p.y = groundAt(p.x, p.z);
-      _p.set(p.x, p.y, p.z); _q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, p.yaw); _m.compose(_p, _q, _s);
+      let rx = p.x, rz = p.z;
+      if (PCW && dist < 160) { const b = p.cwb || (p.cwb = PCW.person({ owner: p })); PCW.placePerson(b, p.x, p.z, p.y, p.y + 1.75, dt, Math.sin(p.yaw) * p.speed, Math.cos(p.yaw) * p.speed); rx = b.x; rz = b.z; }
+      else if (p.cwb) p.cwb.enabled = false;
+      _p.set(rx, p.y, rz); _q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, p.yaw); _m.compose(_p, _q, _s);
       pMesh.setMatrixAt(n, _m); pMesh.setColorAt(n, _c.setHex(p.col)); pWalk.setXY(n, p.phase, p.state === 'flee' ? 0.85 : 0.45); n++;
     }
     pMesh.count = n; pMesh.instanceMatrix.needsUpdate = true; if (pMesh.instanceColor) pMesh.instanceColor.needsUpdate = true; pWalk.needsUpdate = true;

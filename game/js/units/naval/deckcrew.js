@@ -54,6 +54,7 @@ export function createCrew(members, { seed = 5 } = {}) {
   const crew = { group, members, J, B, A, L, scatter: null };
   // write one person's matrices: root (x, y, z, yaw), body lean / drop, arm and leg swings (rad, + = forward)
   function pose(i, x, y, z, yaw, lean, drop, aL, aR, aLz, aRz, lL, lR) {
+    const pm = members[i]; if (pm.ox) x += pm.ox; if (pm.oz) z += pm.oz;   // COLLISION: stepped aside (war.js crewBodies: the collision world's offset, ship frame)
     _q.setFromEuler(_e.set(lean, yaw, 0, 'YXZ'));
     _m.compose(_v.set(x, y - drop, z), _q, _s);
     J.setMatrixAt(i, _m); B.setMatrixAt(i, _m);

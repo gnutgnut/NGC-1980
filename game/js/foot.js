@@ -344,11 +344,11 @@ export function createFootCraft(ctx) {
   }
   F.kill = why => die(why);
   // ---------------------------------------------------------------- COLLISION (wave 3): the soldier in the collision world
-  // a 0.3 m circle (his height by stance; lying: a body length along his facing as a box), 100 kg with kit. Vehicles
+  // a 0.35 m circle (his eye stays clear of anyone in front of him) (his height by stance; lying: a body length along his facing as a box), 100 kg with kit. Vehicles
   // heavier than him are walls for him (GR.collide); he is not a wall for them (lighter than PUSH_RATIO): the contact
   // response shoves him aside, and one that comes at him faster than 3 m/s knocks him down and hurts him (GAME).
-  F.mass = 100; F.cwClass = 'inf';
-  const _cwc = [{ x: 0, z: 0, r: 0.3, y0: 0, y1: 1.8 }], _cwp = [{ x: 0, z: 0, yaw: 0, hl: 0.9, hw: 0.3, y0: 0, y1: 0.45 }];
+  F.mass = 100; F.cwClass = 'inf'; F.cwYield = true;   // (the deck crew, villagers, troops in their files step aside for him)
+  const _cwc = [{ x: 0, z: 0, r: 0.35, y0: 0, y1: 1.8 }], _cwp = [{ x: 0, z: 0, yaw: 0, hl: 0.9, hw: 0.3, y0: 0, y1: 0.45 }];
   F.cwBounds = () => {
     if (!F.exists) return null; const W = slots.soldier;
     if (W.stance === 'prone' || !F.alive) { const p = _cwp[0]; p.x = W.x; p.z = W.z; p.yaw = W.yaw; p.y0 = W.y; p.y1 = W.y + 0.45; return _cwp; }
