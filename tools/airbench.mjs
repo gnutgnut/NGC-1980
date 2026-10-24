@@ -120,6 +120,51 @@ if (!ONLY || ONLY === 'sortie') {
   }
 }
 
+// ------------------------------------------------------------------------------------------------- 1a. the section
+// (airai-polish) two Tomcats off the same cat 25 s apart: the second joins on the first (rendezvous, then the slot in
+// the lead's axes), the section flies the CAP racetrack, comes home together at the lead's bingo, breaks one at a time
+// (the break interval), and both trap; a jet still in the wires fouls the deck for the one behind.
+if (!ONLY || ONLY === 'section') {
+  console.log('--- section: lead + wingman, join-up, CAP in formation, Case I break interval, two traps ---');
+  const W = carrierWorld({ x: 0, z: 0, yaw: 0.3, speed: 6, w: 0 });
+  const mk = (name) => { const A = createTomcatSim(G, { fuelX: 10 }); A.reset(0, 8, 0, 0, { running: true }); A.fuel = 5200; return { A, P: createPilot(A, { side: 1, name }) }; };
+  const L = mk('VICTORY 201'), Wg = mk('VICTORY 202'); Wg.P.lead = L.P; L.P.wing = Wg.P;
+  L.P.capAxis = Wg.P.capAxis = 0.9;   // the threat axis: the racetrack's legs point that way
+  const parked = new Set(), trapT = {};
+  W.traffic = () => [L.P, Wg.P].filter(p => !parked.has(p));
+  W.deckFoul = me => [L.P, Wg.P].some(o => o !== me && o.state === 'trapped' && !parked.has(o));
+  L.P.launch(W); let wingUp = false, joinT = null, capT = 0, slotErr = [], minSep = 1e9, brk = {}, ok = true, inForm = 0;
+  const T = run(1100, t => {
+    if (!wingUp && t > 25) { wingUp = true; Wg.P.launch(W); }
+    if (t > 230 && L.P.state === 'cap' && L.A.fuel > 1950) L.A.fuel = 1950;   // the lead calls bingo
+    for (const u of [L, Wg]) {
+      if (u === Wg && !wingUp) continue;
+      if (parked.has(u.P)) continue;
+      u.P.update(DT, W);
+      if (u.A.dead) { ok = false; console.log(`   ${u.P.name} ${u.A.dead}`); return false; }
+      if (u.P.state === 'trapped' && u.P.stateT > 8) parked.add(u.P);   // taxied clear of the landing area
+      const b = u.P.log.find(l => l.msg === 'THE BREAK' && !brk[u.P.name]); if (b) brk[u.P.name] = t;
+    }
+    W.tick(DT);
+    if (wingUp && Wg.P.state === 'cap' && joinT === null) joinT = t;
+    if (Wg.P.state === 'cap' && L.P.state === 'cap' && Wg.P.stateT > 20) {
+      capT += DT; const s = new THREE.Vector3(...Wg.P.T.slot).applyQuaternion(L.A.q).add(L.A.pos), e = s.distanceTo(Wg.A.pos); slotErr.push(e);
+      if (e < 30) inForm += DT;
+    }
+    if (wingUp && !Wg.A.onGround && !L.A.onGround) minSep = Math.min(minSep, L.A.pos.distanceTo(Wg.A.pos));
+    if (V && Math.round(t * 60) % 300 === 0) { logState(t, L.P, L.A, W); logState(t, Wg.P, Wg.A, W); }
+    if (parked.size === 2) return false;
+  });
+  if (V || !(L.P.recovered && Wg.P.recovered)) for (const u of [L, Wg]) console.log(u.P.log.map(l => `   ${u.P.name.slice(-3)} ${l.t} ${l.msg}`).join('\n'));
+  slotErr.sort((a, b) => a - b); const med = slotErr[slotErr.length >> 1] || 999, p95 = slotErr[Math.floor(slotErr.length * 0.95)] || 999;
+  check('section: the wingman joins on the lead', joinT !== null && joinT < 120, `joined at ${joinT?.toFixed(0)} s`, '< 120 s');
+  check('section: holds the slot on the CAP racetrack', capT > 30 && med < 15 && p95 < 45 && inForm / capT > 0.8, `slot error median ${med.toFixed(1)} m, 95% ${p95.toFixed(0)} m, ${(100 * inForm / Math.max(capT, 1e-3)).toFixed(0)}% inside 30 m over ${capT.toFixed(0)} s`, 'median < 15, 95% < 45, 80% inside 30 m');
+  check('section: never closer than 12 m in the air', minSep > 12, `${minSep.toFixed(1)} m`);
+  const gap = (brk['VICTORY 202'] ?? 0) - (brk['VICTORY 201'] ?? 0);
+  check('section: home together, break interval', Wg.P.log.some(l => /WITH LEAD/.test(l.msg)) && gap > 8 && gap < 40, `wing broke ${gap.toFixed(1)} s after the lead`, '8-40 s');
+  check('section: both trap', ok && !!L.P.trapped && !!Wg.P.trapped, `${L.P.trapped?.wire}/${Wg.P.trapped?.wire} wire at ${T.toFixed(0)} s, wave-offs ${L.P.waveoffs}/${Wg.P.waveoffs}, bolters ${L.P.bolters}/${Wg.P.bolters}`);
+}
+
 // ------------------------------------------------------------------------------------------------- 1b. wave-off, bolter
 if (!ONLY || ONLY === 'recovery') {
   console.log('--- recovery: a wave-off (shoved off the centreline in close), a bolter (hook skips) ---');

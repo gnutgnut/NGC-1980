@@ -99,12 +99,14 @@ export function createAirWar(W, ctx, H) {
     for (let d = 60; d <= max; d += 20) if (terrainH(c.p.x + fx_ * d, c.p.z + fz * d) > -1) return false;
     return true;
   }
-  // like main.js does for the HORNET: steam onto the nearest heading with a clear run (as carriers turn into the wind)
+  // like main.js does for the HORNET: steam onto the nearest heading with a clear run (as carriers turn into the wind).
+  // (ngc/airai-polish) 480 m, not 700: on the TERRAIN islands the ALBATROSS starts bow-on to a shore 60 m off and the
+  // nearest 700 m lane was 120° round - she kept re-planning the turn and the Tomcat sat on the cat for good (jets.json)
   function turnIntoClear(c) {
     if (c.sky && c.sky.up) return;
     for (let k = 1; k <= 24; k++) for (const s of [1, -1]) {
       const y = c.yaw + s * k * Math.PI / 12;
-      if (laneClear(c, y, 700)) { W.orderCarrier(c.p.x - Math.sin(y) * 500, c.p.z - Math.cos(y) * 500); feed('ALBATROSS: TURNING INTO CLEAR WATER TO LAUNCH THE TOMCATS'); return; }
+      if (laneClear(c, y, 480)) { W.orderCarrier(c.p.x - Math.sin(y) * 500, c.p.z - Math.cos(y) * 500); feed('ALBATROSS: TURNING INTO CLEAR WATER TO LAUNCH THE TOMCATS'); return; }
     }
   }
   function launchQueued(u, dt) {

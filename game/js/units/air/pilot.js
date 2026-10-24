@@ -26,6 +26,25 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const wrap = a => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 const D2R = Math.PI / 180;
 const _d = new THREE.Vector3(), _t = new THREE.Vector3(), _r = new THREE.Vector3(), _f = new THREE.Vector3(), _a = new THREE.Vector3(), _q = new THREE.Vector3();
+const _k = new THREE.Vector3(), _s = new THREE.Vector3(), _lv = new THREE.Vector3();
+
+// The CAP racetrack in its own axes (a along the threat axis, b across): straight legs at b = +R (inbound, toward the
+// threat) and b = -R, joined by half circles. trackPoint: the point s metres along the loop; trackS: the s of the
+// point nearest (pa, pb).
+export function trackPoint(s, L, R, out) {
+  const P = Math.PI * R, tot = 2 * L + 2 * P; s = ((s % tot) + tot) % tot;
+  if (s < L) return out.set(-L / 2 + s, 0, R);
+  s -= L; if (s < P) { const th = Math.PI / 2 - s / R; return out.set(L / 2 + R * Math.cos(th), 0, R * Math.sin(th)); }
+  s -= P; if (s < L) return out.set(L / 2 - s, 0, -R);
+  s -= L; const th = -Math.PI / 2 - s / R; return out.set(-L / 2 + R * Math.cos(th), 0, R * Math.sin(th));
+}
+export function trackS(pa, pb, L, R) {
+  const P = Math.PI * R;
+  if (Math.abs(pa) <= L / 2) return pb >= 0 ? pa + L / 2 : L + P + (L / 2 - pa);
+  if (pa > L / 2) return L + R * (Math.PI / 2 - Math.atan2(pb, pa - L / 2));
+  let u = -Math.PI / 2 - Math.atan2(pb, pa + L / 2); u = ((u % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  return 2 * L + P + R * u;
+}
 
 // per-type behaviour numbers (EAS in m/s; the game's air is 4x denser, so true speeds are about half: see jetfm.js)
 // Weapons are game-level: a kind, the range band and nose cone it is fired in, how long the projectile lives.
@@ -39,6 +58,9 @@ export const PILOTS = {
       { w: 'aim9', rmin: 130, rmax: 520, cone: 0.45, life: 6, v0: 15, every: 2 },
     ],
     gun: { range: 380, cone: 0.06, speed: 520, burst: 0.45, rest: 0.5 },   // snapshots too: a burst whenever the pipper sweeps through
+    // (airai-polish) CAP as a racetrack on the threat axis, the section's wingman slot (right of, below and behind the
+    // lead, in the lead's axes: x right, y up, z aft), the break interval in the Case I pattern
+    racetrack: true, capLeg: 700, slot: [26, -3, 26], breakGap: 16, ballCall: true,
   },
   SHRIKE: {
     climbEAS: 160, capEAS: 140, corner: 165, fightTop: 210, vmin: 78, gmax: 9, gfight: 10, capAlt: 200, capR: 450,
@@ -57,7 +79,9 @@ export function createPilot(A, o = {}) {
     A, FD, T, side: o.side ?? 1, name: o.name || A.P.name, state: o.state || 'cap', t: 0, stateT: 0,
     tgt: null, threat: null, anchor: null, wp: 0, log: [], lastFire: -99, gunT: 0, gunRest: 0, fired: {},
     trapped: null, recovered: false, waveoffs: 0, bolters: 0, kills: 0, why: '', tdT: -1, terrainPull: 0, minAGL: 1e9,
+    lead: null, wing: null, form: '', capAxis: 0, brokeAt: -99, look: null, ball: false, gone: false,   // (airai-polish) section, racetrack, crew's eyes
   };
+  const _look = new THREE.Vector3();
   const say = (msg) => { PL.log.push({ t: +PL.t.toFixed(1), msg }); if (PL.log.length > 60) PL.log.shift(); if (o.onSay) o.onSay(msg, PL); };
   const set = (s, why) => { if (PL.state !== s) { PL.state = s; PL.stateT = 0; PL.wp = 0; A.brakeCmd = 0; say(`${s.toUpperCase()}${why ? '  ' + why : ''}`); } };
   PL.set = set;
@@ -260,7 +284,19 @@ export function createPilot(A, o = {}) {
 
   // ------------------------------------------------------------------ carrier recovery
   // pattern waypoints in deck coordinates (lx starboard, lz aft of the ship's centre), heights above the deck
-  const PATTERN = [[-60, -750, 1], [-480, -300, 1], [-480, 1250, 0.9]];
+  // Case I (airai-polish): in at the INITIAL, astern and to starboard of the wake at 1.5 x pattern height, up the
+  // starboard side, THE BREAK over the bow (a level ~4 g turn to port, power back, speedbrake), DOWNWIND at pattern
+  // height, dirty at the ABEAM (gear, hook, full flaps), THE 180 well aft (game scale: the LSO's part wants ~700 m of
+  // groove), then 'final' flies the turn into the groove. A section stays together to the break and breaks one at a
+  // time, T.breakGap s apart; a jet still in the groove ahead extends the downwind. Straight in only when short of fuel.
+  // Waypoints in deck coordinates (lx starboard, lz aft of the ship's centre), height factor, EAS.
+  const PATTERN = [[90, 1500, 1.5, 150], [40, -260, 1.5, 150], [-430, -120, 1, 112], [-430, 260, 1, 104], [-430, 860, 0.95, 100]];
+  const WPNAME = ['', 'INITIAL', 'THE BREAK', 'DOWNWIND', 'ABEAM', 'THE 180'];
+  function dirtyUp() {
+    if (A.gearCmd === 0 && A.eas < 140) { A.gearCmd = 1; say('GEAR DOWN'); }
+    if (!A.hookCmd) { A.hookCmd = 1; say('HOOK DOWN'); }
+    if (A.flapSel < 2 && A.eas < 112) { A.flapSel = 2; say('FLAPS FULL'); }
+  }
   function recover(dt, env) {
     const c = env.carrier && env.carrier();
     if (!c) { orbit(dt, env, PL.anchor || A.pos, T.capEAS); return; }
@@ -268,16 +304,50 @@ export function createPilot(A, o = {}) {
     const R = lz - aimZ, hdgS = -c.yaw, hdgA = hdgOf(A.vel), herr = wrap(hdgA - hdgS);   // ship's bow along -z: heading -yaw
     const patH = c.deck + T.patAlt;
     if (PL.state === 'rtb') {
-      // straight in when already behind the ship, roughly lined up; else round the pattern
-      if (R > 1300 && R < 3200 && Math.abs(lx - A.landX) < R * 0.45 && Math.abs(herr) < 1.0) { set('final', 'STRAIGHT IN'); return; }
-      if (PL.wp === 0) PL.wp = R < 600 ? 1 : 3;   // ahead or abeam: upwind first; behind: direct to the base turn
-      const w = PATTERN[Math.min(PL.wp, 3) - 1];
-      world(c, w[0], w[1], _t); _t.y = c.deck + T.patAlt * w[2];
-      // the ship moves: aim where the waypoint will be
-      _t.x += (c.vx || 0) * 8; _t.z += (c.vz || 0) * 8;
-      dirTo(_t.x, _t.y, _t.z, 0.25);
-      fly(_d, dt, env, { speed: PL.wp >= 3 ? 118 : 130, g: 3 }); A.brakeCmd = A.eas > 140 ? 1 : 0;
-      if (Math.hypot(_t.x - A.pos.x, _t.z - A.pos.z) < 300) { if (PL.wp >= 3) set('final', 'BASE'); else PL.wp++; }
+      // short of fuel and already behind the ship, roughly lined up: straight in; else the break
+      if (A.fuel < (T.bingo || 1e9) * 0.45 && R > 1300 && R < 3200 && Math.abs(lx - A.landX) < R * 0.45 && Math.abs(herr) < 1.0) { set('final', 'STRAIGHT IN'); return; }
+      if (PL.wp === 0) PL.wp = 1;
+      if (PL.wp <= 2 && PL.lead && PL.leadOk() && PL.lead.state === 'rtb') { formation(dt, env); PL.wp = Math.max(PL.wp, PL.lead.wp); return; }   // on the lead's wing to the break
+      if (PL.wp === 6) {   // the 180: a steady descending left turn whose radius puts the roll-out on the centreline
+        // left turn through b (rad) from radius rho rolls out at lx + rho (1 - cos b): rho for lx -> landX; the bank for
+        // that radius at this TAS; the height comes down from pattern height to the glideslope as the turn winds off
+        let b = herr; if (b < -0.3) b += 2 * Math.PI;
+        const V = Math.max(A.tas, 20), rho = clamp((A.landX - lx) / Math.max(0.08, 1 - Math.cos(b)), 60, 1200);
+        const phi = clamp(Math.atan(V * V / (9 * rho)), 0.12, 0.72);
+        const yGS = c.deck + A.P.REST_H + Math.tan(T.gs) * Math.max(0, R), yW = yGS + Math.max(0, patH - yGS) * clamp(b / Math.PI, 0, 1);
+        const vyDes = clamp(0.25 * (yW - A.pos.y) - 1, -6, 2);
+        FD.ctl.roll = FD.rollFor(-phi); FD.ctl.pitch = FD.pitchFor(Math.cos(A.attitude().pitch) / Math.cos(phi) + 0.12 * (vyDes - A.vel.y), dt);
+        FD.ctl.yaw = clamp(A.beta * 3, -0.6, 0.6);
+        dirtyUp(); speedOnFinal(dt, A.surf.flap > 0.85 && A.gear > 0.95, 6);
+        // terrain: the turn is flown low and slow; anything in the next few seconds of path inside 35 m: go round, high
+        if (env.terrain) for (const s of [2, 4, 6]) { const g = env.terrain(A.pos.x + A.vel.x * s, A.pos.z + A.vel.z * s); if (g > 2 && g > A.pos.y - 35) { PL.waveoffs++; set('waveoff', 'TERRAIN IN THE TURN'); return; } }
+        if (b < 0.2 || b > 2 * Math.PI - 0.5) set('final', Math.abs(lx - A.landX) < 40 ? 'IN THE GROOVE' : 'OVERSHOT THE GROOVE');
+        return;
+      }
+      const w = PATTERN[PL.wp - 1];
+      let wz = w[1];
+      if (PL.wp === 5 && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && (o.state === 'final' || (o.state === 'rtb' && o.wp === 6))) wz = Math.max(wz, Math.min(1900, deck(c, o.A.pos.x, o.A.pos.z)[1] + 520));   // a jet turning in or in the groove ahead: extend downwind
+      world(c, w[0], wz, _t); _t.y = c.deck + T.patAlt * w[2];
+      _t.x += (c.vx || 0) * 8; _t.z += (c.vz || 0) * 8;   // the ship moves: aim where the waypoint will be
+      let hold = false;   // at the break with another jet just broken ahead: carry on up the deck heading, then break
+      if (PL.wp === 2 && lz < -150 && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && o.t - o.brokeAt < (T.breakGap ?? 11)) hold = true;
+      if (hold) FD.dirHdg(hdgS, clamp((_t.y - A.pos.y) * 0.01, -0.1, 0.1), _d); else dirTo(_t.x, _t.y, _t.z, 0.25);
+      const brk = PL.wp === 3;
+      fly(_d, dt, env, { speed: PL.wp >= 4 ? vApproach() + (PL.wp === 4 ? 16 : 12) : w[3], g: brk ? 4.2 : 3, k: brk ? 2.4 : 1.6, ab: false });
+      A.brakeCmd = A.eas > w[3] + 12 ? 1 : 0;
+      if (PL.wp >= 4) dirtyUp();
+      const dh = Math.hypot(_t.x - A.pos.x, _t.z - A.pos.z);
+      let next = false;
+      if (PL.wp === 1) next = dh < 300 || (lz > 0 && lz < w[1] && lx > -150 && lx < 260 && Math.abs(herr) < 0.6);
+      else if (PL.wp === 2) next = !hold && (lz < -150 || dh < 150);
+      else if (PL.wp === 3) next = dh < 220 || (lz > w[1] - 40 && lx < -250);
+      else if (PL.wp === 4) next = lz > wz;
+      else next = lz > wz - 30;
+      if (next) {
+        if (PL.wp === 2) PL.brokeAt = PL.t;
+        if (PL.wp >= 5) { PL.wp = 6; PL.turn = { x: (lx + A.landX) / 2, z: lz, r: Math.max(120, (A.landX - lx) / 2) }; say(WPNAME[5]); return; }
+        say(WPNAME[PL.wp]); PL.wp++;
+      }
       return;
     }
     // ---- final: dirty up, carrot onto the centreline, then the LSO controller
@@ -292,7 +362,8 @@ export function createPilot(A, o = {}) {
     const vlat = rvx * co - rvz * si, vlong = rvx * si + rvz * co;   // + starboard, + aft
     const latErr = lx - A.landX, hErr = A.pos.y - yGS;
     PL.lso = { R, latErr, hErr, aoa: A.alpha / D2R, eas: A.eas };
-    // wave-off: out of parameters in close, or the deck is swinging
+    // wave-off: out of parameters in close, or the deck is swinging, or the landing area is foul (a jet still in the wires)
+    if (R < 320 && R > 15 && env.deckFoul && env.deckFoul(PL)) { PL.waveoffs++; set('waveoff', 'FOUL DECK'); return; }
     if (R < 320 && R > 15) {
       const tol = R < 120 ? 1 : 1.6;
       if (Math.abs(latErr) > 5 * tol || Math.abs(hErr) > 5 * tol || Math.abs(c.w || 0) > 0.03 || !dirty || A.alpha > 15 * D2R || A.alpha < 5 * D2R) {
@@ -301,6 +372,7 @@ export function createPilot(A, o = {}) {
       }
     }
     if (R < -10 && !A.onGround) { PL.waveoffs++; set('waveoff', 'OVERFLEW THE DECK'); return; }
+    if (R > 700) PL.ball = false;
     if (R > 700 || Math.abs(latErr) > 40 || Math.abs(herr) > 0.3) {
       if (R < 450) { PL.waveoffs++; set('waveoff', `NOT LINED UP  lat ${latErr.toFixed(0)} hdg ${(herr / D2R).toFixed(0)}°`); return; }
       // carrot: a point on the centreline ahead of us, at the glideslope height
@@ -314,6 +386,7 @@ export function createPilot(A, o = {}) {
       return;
     }
     // the last 700 m: stick flies the glideslope (vertical speed), throttle holds the AoA, bank holds the lineup
+    if (!PL.ball) { PL.ball = true; if (T.ballCall) say(`BALL  ${(A.fuel * 2.2046 / 1000).toFixed(1)}`); }   // "Tomcat ball, 4.2": the meatball in sight, and his fuel
     const vyDes = -Math.tan(T.gs) * clos + 0.25 * (yGS - A.pos.y);
     FD.ctl.pitch = FD.pitchFor(Math.cos(A.attitude().pitch) + 0.12 * (vyDes - A.vel.y), dt);
     const rollCmd = clamp(-latErr * 0.012 - vlat * 0.05, -0.35, 0.35);
@@ -331,8 +404,8 @@ export function createPilot(A, o = {}) {
   }
   // throttle: speed while configuring, then on-speed held by EAS with the AoA as the fine trim; the TF30 spools slowly,
   // so the integrator is generous and the AoA term leads
-  function speedOnFinal(dt, dirty) {
-    const va = vApproach(), want = dirty ? va : Math.max(va + 12, Math.min(A.eas, 112) - 4);
+  function speedOnFinal(dt, dirty, extra = 0) {
+    const va = vApproach(), want = (dirty ? va : Math.max(va + 12, Math.min(A.eas, 112) - 4)) + extra;
     const e = want - A.eas, aerr = dirty ? A.alpha - T.aoaApp : 0;
     PL.thrI = clamp((PL.thrI ?? 0.6) + (e * 0.02 + aerr * 0.6) * dt, 0.05, 0.79);
     FD.thr = clamp(PL.thrI + e * 0.04 + aerr * 2.5, 0, 0.95); FD.setThrottle(FD.thr); PL.vapp = va;
@@ -342,7 +415,8 @@ export function createPilot(A, o = {}) {
   // is still spooling), then up and away along the deck heading and round the pattern
   function waveoff(dt, env) {
     const c = env.carrier && env.carrier();
-    FD.setThrottle(1); FD.thr = 1; PL.thrI = 0.79;
+    // (airai-polish) MIL, as the TF30 jets fly it; burner only while still sinking or slow in the first seconds
+    const wt = PL.stateT < 3 && (A.vel.y < -1 || A.eas < (PL.vapp || 70)) ? 1 : 0.8; FD.setThrottle(wt); FD.thr = wt; PL.thrI = 0.79;
     if (PL.stateT < 6 || A.eas < 105) {
       const vyDes = PL.stateT < 2 ? 0.5 : 3;
       let n = Math.cos(A.attitude().pitch) + 0.1 * (vyDes - A.vel.y);
@@ -350,11 +424,12 @@ export function createPilot(A, o = {}) {
       FD.ctl.roll = FD.rollFor(0); FD.ctl.pitch = FD.pitchFor(clamp(n, 0.6, 1.6), dt); FD.ctl.yaw = clamp(A.beta * 3, -0.6, 0.6);
     } else {
       FD.dirHdg(c ? -c.yaw : hdgOf(A.vel), 0.12, _d);
-      fly(_d, dt, env, { g: 2.5, k: 1.2 }); FD.setThrottle(1);
+      fly(_d, dt, env, { g: 2.5, k: 1.2 }); FD.setThrottle(0.8);
     }
     if (PL.stateT > 4 && A.flapSel === 2 && A.vel.y > 1) A.flapSel = 1;
-    if (A.eas > 100 && A.flapSel === 1 && PL.stateT > 6) A.gearCmd = 0;
-    if (c && A.pos.y > c.deck + 60 && PL.stateT > 8 && A.eas > 105) { A.flapSel = 0; A.gearCmd = 0; A.hookCmd = 0; set('rtb', 'PATTERN'); PL.wp = 1; }
+    // (airai-polish) the bolter / wave-off pattern is flown dirty (gear and hook down, half flaps): upwind, then a left
+    // turn to the downwind and round again
+    if (c && A.pos.y > c.deck + 60 && PL.stateT > 8 && A.eas > 105) { A.flapSel = 1; set('rtb', 'PATTERN'); PL.wp = 3; }
   }
 
   // ------------------------------------------------------------------ orbit / CAP
@@ -365,6 +440,54 @@ export function createPilot(A, o = {}) {
     const floor = env.terrain ? Math.max(env.terrain(anc.x, anc.z), 0) : 0;
     dirTo(tx, Math.max(anc.y || 0, floor) + alt, tz, 0.3);
     fly(_d, dt, env, { speed, g: 3.5 });
+  }
+
+  // ------------------------------------------------------------------ CAP racetrack (airai-polish)
+  // Two legs along the threat axis (PL.capAxis, a heading; the inbound leg points the radar at the threat) joined by
+  // half circles of ~0.8 capR, the anchor in the middle; followed with a carrot a few seconds ahead of the nearest
+  // point on the track (so the turns at the ends are flown at a steady bank, not as corners).
+  function racetrack(dt, env, anc, speed) {
+    const R = T.capR * 0.82, L = T.capLeg ?? 700, ax = PL.capAxis || 0, sg = PL.orbitDir || 1;
+    const ux = Math.sin(ax), uz = -Math.cos(ax), vx = Math.cos(ax) * sg, vz = Math.sin(ax) * sg;
+    const dx = A.pos.x - anc.x, dz = A.pos.z - anc.z, pa = dx * ux + dz * uz, pb = dx * vx + dz * vz;
+    const s = trackS(pa, pb, L, R); trackPoint(s, L, R, _k);
+    const off = Math.hypot(pa - _k.x, pb - _k.z);
+    trackPoint(s + Math.max(160, A.tas * 3) + Math.min(off, 600) * 0.5, L, R, _k);
+    PL.leg = s < L ? 'INBOUND' : s < L + Math.PI * R ? 'TURN' : s < 2 * L + Math.PI * R ? 'OUTBOUND' : 'TURN';
+    const floor = env.terrain ? Math.max(env.terrain(anc.x, anc.z), 0) : 0;
+    dirTo(anc.x + _k.x * ux + _k.z * vx, Math.max(anc.y || 0, floor) + T.capAlt, anc.z + _k.x * uz + _k.z * vz, 0.3);
+    fly(_d, dt, env, { speed, g: 3.5 });
+  }
+
+  // ------------------------------------------------------------------ the section (airai-polish)
+  // A wingman (PL.lead set) keeps station in the lead's axes (T.slot: right, up, aft), so in a turn he stays on the
+  // lead's plane, as in parade. Far off he rendezvouses: a cut-off point ahead of the lead, 20 m/s faster. Close in,
+  // the stick flies at a carrot 1.6 s ahead of the slot along the lead's path and the throttle matches the lead's power
+  // plus the along-track error and closure (the TF30 is slow: the speedbrake takes off an overrun).
+  PL.leadOk = () => { const L = PL.lead; return !!L && !L.gone && !L.A.dead && (L.state === 'climb' || L.state === 'cap' || (L.state === 'rtb' && L.wp <= 2 && L.wp > 0)); };
+  function formation(dt, env) {
+    const L = PL.lead, LA = L.A;
+    _s.set(T.slot[0], T.slot[1], T.slot[2]).applyQuaternion(LA.q).add(LA.pos);
+    const vl = LA.vel.length() || 1; _lv.copy(LA.vel).divideScalar(vl);
+    _t.copy(_s).sub(A.pos); const dist = _t.length(), along = _t.dot(_lv), k = A.eas / Math.max(A.tas, 1);
+    if (dist > 450) {
+      const tgo = clamp(dist / 70, 1, 9); _a.copy(_s).addScaledVector(LA.vel, tgo);
+      _d.copy(_a).sub(A.pos).normalize(); PL.form = 'JOIN';
+      fly(_d, dt, env, { speed: Math.min(T.fightTop, LA.eas + 22), g: 4, k: 1.4, ab: false }); A.brakeCmd = 0;
+      return dist;
+    }
+    PL.form = dist < 30 ? 'PARADE' : 'CLOSING';
+    _a.copy(_s).addScaledVector(LA.vel, 1.6); _d.copy(_a).sub(A.pos);
+    _t.copy(LA.pos).sub(A.pos); const dl = _t.length();
+    if (dl < 16) _d.addScaledVector(_t, -(16 - dl) * 0.6 / dl);   // never into the lead himself
+    _d.normalize();
+    const clos = (A.vel.x - LA.vel.x) * _lv.x + (A.vel.y - LA.vel.y) * _lv.y + (A.vel.z - LA.vel.z) * _lv.z;   // + = gaining on the slot
+    PL.fI = clamp((PL.fI || 0) + along * dt * 0.03, -12, 12);   // a slow trim on the along-track error (a steady lag or lead)
+    const easCmd = LA.eas + clamp((along * 0.2 + PL.fI - clos * 0.9) * k, -25, 30);
+    if (L.FD) FD.ti += (L.FD.thr - FD.ti) * Math.min(1, dt * 0.6);   // match the lead's power, then trim
+    fly(_d, dt, env, { speed: easCmd, g: 5, k: 2.2, ab: along > 150 });
+    A.brakeCmd = along < -10 && clos > 1.5 ? 1 : 0;
+    return dist;
   }
 
   // ------------------------------------------------------------------ per frame
@@ -387,6 +510,8 @@ export function createPilot(A, o = {}) {
       const wpnLeft = !T.weapons.length || A.stores.some(s => s.on) || (T.gun && A.gun > 0);
       if (T.bingo && airborne && A.fuel < T.bingo) { PL.tgt = null; PL.threat = null; set('rtb', `BINGO ${A.fuel.toFixed(0)} kg`); }
       else if (T.bingo && airborne && !wpnLeft && PL.state !== 'climb') { PL.tgt = null; set('rtb', 'WINCHESTER'); }
+      else if (PL.lead && PL.state === 'cap' && !PL.lead.gone && PL.lead.state === 'rtb' && PL.lead.wp <= 2) set('rtb', 'WITH LEAD');   // the section comes home together
+      if (PL.lead && (PL.lead.gone || PL.lead.A.dead)) { if (PL.lead.wing === PL) PL.lead.wing = null; PL.lead = null; say('LEAD LOST  -  SINGLE'); }
     }
     const anc = PL.anchor || (env.anchor && env.anchor()) || A.pos;
     switch (PL.state) {
@@ -400,14 +525,23 @@ export function createPilot(A, o = {}) {
       case 'climb': {
         if (A.gearCmd && A.vel.y > 1.5 && PL.stateT > 1.5) { A.gearCmd = 0; say('GEAR UP'); }
         if (A.flapSel && A.eas > 95 && PL.stateT > 3) { A.flapSel = 0; say('FLAPS UP'); }
+        const floor = env.terrain ? Math.max(0, env.terrain(anc.x, anc.z)) : 0;
+        if (PL.stateT > 6 && PL.lead && PL.leadOk() && A.gearCmd === 0) {   // the wingman: join on the lead
+          const d = formation(dt, env);
+          if (d < 200 && A.pos.y > Math.max(anc.y || 0, floor) + T.capAlt * 0.5) set('cap', 'JOINED');
+          break;
+        }
         const gam = PL.stateT < 4 ? 0.16 : 0.22, hdg = PL.stateT < 6 ? hdgOf(A.vel) : Math.atan2(anc.x - A.pos.x, -(anc.z - A.pos.z));
         FD.dirHdg(PL.stateT < 6 ? hdg : hdgOf(A.vel) + clamp(wrap(hdg - hdgOf(A.vel)), -0.6, 0.6), gam, _d);
         fly(_d, dt, env, { speed: T.climbEAS, ab: PL.stateT < 6, g: 3 });
-        const floor = env.terrain ? Math.max(0, env.terrain(anc.x, anc.z)) : 0;
         if (A.pos.y > Math.max(anc.y || 0, floor) + T.capAlt * 0.75 && PL.stateT > 6) set('cap');
         break;
       }
-      case 'cap': orbit(dt, env, anc, T.capEAS); break;
+      case 'cap':
+        if (PL.lead && PL.leadOk()) formation(dt, env);
+        else if (T.racetrack) racetrack(dt, env, anc, T.capEAS);
+        else orbit(dt, env, anc, T.capEAS);
+        break;
       case 'patrol': orbit(dt, env, anc, T.capEAS); break;
       case 'fight': fight(dt, env); weapons(dt, env); break;
       case 'strike': {
@@ -429,6 +563,13 @@ export function createPilot(A, o = {}) {
         break;
       }
     }
+    // where the crew look (the model turns their heads): the bandit, the threat, the lead (or now and then the
+    // wingman), the ship in the pattern; null = the pilot's own scan
+    const cv = (PL.state === 'rtb' || PL.state === 'final') && env.carrier ? env.carrier() : null;
+    PL.look = PL.threat && PL.defT > 0 ? PL.threat.p : PL.tgt && PL.state === 'fight' ? PL.tgt.p
+      : PL.lead && PL.leadOk() && (PL.state === 'cap' || PL.state === 'climb' || PL.state === 'rtb') ? PL.lead.A.pos
+      : PL.wing && !PL.wing.gone && PL.t % 11 < 2.5 ? PL.wing.A.pos
+      : cv ? _look.set(cv.x, cv.deck, cv.z) : null;
     const ev = A.step(dt, FD.ctl, env);
     for (const e of ev) {
       if (e.e === 'catshot') say('CAT SHOT');
