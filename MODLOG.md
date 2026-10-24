@@ -2643,3 +2643,56 @@ stays game-level (no weapon figures changed). New files: `units/runaway/rwlod.js
   the 6-mesh stand-ins (not instanced); RW-7 / MBT have no far LOD (few of them). Cover from aircraft is weak against
   one circling overhead (walls don't hide from above) - forests (the world's trees) aren't cover points yet. The hover
   tank wreck is not an obstacle for the AI or the collision world (the collision agent's).
+
+## 2026-10-24 — NGC-1980 AIR polish batch 2: the AI Tomcats fly like a squadron, the RUNAWAY drones get real models (branch ngc/airai-polish)
+- **AI F-14A behaviour** (units/air/pilot.js, still only stick / pedals / throttles through the flight director):
+  - **CAP racetrack** on the threat axis (airwar.js points it at the KRAKEN / IRONHOLD): two 700 m legs joined by half
+    circles of ~0.8 capR, followed with a carrot a few seconds ahead of the nearest point on the track (steady bank in
+    the turns, the inbound leg points the radar at the threat). Drones (REAPER patrol, SHRIKE CAP) keep the circle orbit.
+  - **Sections**: the second Tomcat ordered to the same CAP flies on the first's wing (`P.lead` / `P.wing`). Far off it
+    rendezvouses (a cut-off point ahead of the lead, +20 m/s, no burner); close in it keeps a slot in the lead's own axes
+    (26 m right, 3 m low, 26 m aft: on the lead's plane in turns, parade style) with a carrot 1.6 s ahead of the slot
+    for the stick and the lead's power plus along-track error / closure (and a slow trim) for the throttle, speedbrake
+    for an overrun, never inside 16 m of the lead. Both fight on contact (each its own target), the wing rejoins after,
+    and the section comes home together at the lead's bingo ("WITH LEAD"). A lost lead leaves the wing single.
+  - **Case I recovery**: INITIAL astern and starboard of the wake at 1.5 x pattern height, up the starboard side, THE
+    BREAK over the bow (level ~4 g turn to port, power back, speedbrake), DOWNWIND, gear / hook / full flaps at the ABEAM,
+    THE 180 well aft, then a computed descending left turn whose radius (rho = (landX - lx) / (1 - cos b) for the b
+    still to turn) rolls it out on the centreline ~800 m out, into the existing LSO glideslope / on-speed AoA controller
+    ("BALL 4.2": the ball call with fuel). A section breaks one at a time, 16 s apart (the wing carries on up the deck
+    heading until the interval is up); a jet turning in or in the groove ahead extends the next one's downwind; a jet still
+    in the wires is a FOUL DECK wave-off. Wave-offs / bolters now go round dirty (gear and hook down, half flaps) straight
+    to the downwind, at MIL (burner only while still sinking or slow in the first seconds: full AB go-arounds had the
+    bench jets landing dry). Straight-in only when short of fuel. The old upwind / downwind / base box is gone.
+  - **Crew eyes**: `P.look` (the bandit, the threat, the lead, now and then the wingman, the ship in the pattern) turns
+    the model's helmets.
+- **F-14A model** (tomcatmodel.js, shared with the player's jet): the crew as figures like the cockpit's RIO - chest,
+  shoulders and arms in the harness, LPU collar, white helmets with the visor down, a squadron stripe, oxygen masks and
+  hoses; heads look at `A.crewLook` (world point, set by airwar.js) or scan the sky (the RIO mostly heads down). The new
+  meshes carry the names tomcatplay.js hides in the cockpit view.
+- **RUNAWAY drones** (rwmodel.js, rebuilt on the old models): each a THREE.LOD - the detailed model, one merged
+  vertex-coloured mesh in the RUNAWAY ground kit (units/runaway/rwkit.js, one draw call) past 260 / 320 / 140 m, nothing
+  past 3.2 / 3.6 / 1.6 km (SHRIKE / REAPER / SHAHED); details are not posed while far.
+  - RW-4 SHRIKE: wings as separate groups with access panels, a sensor spike off the left root (the BIBLE's asymmetry
+    again), scanning lens ring, antenna blades, ventral fairings, 2D nozzle with a turbine face that glows with power, a
+    core and an outer exhaust, thrust-vectoring paddles moving with the pitch command, missile bay doors that open as it
+    fires (`A.bayT`), a white belly strobe and pulsing cyan tip markers.
+  - MQ-9 REAPER: NACA intake, exhaust stubs with oil streaks, empty pylons, a satcom cable run, a second aperture on the
+    ball (which now also tilts), the pod's lens; three-blade pusher with tipped blades / a disc, out of balance when hit;
+    USAF nav lights (red port, green starboard, white tail), a red anti-collision beacon, the RUNAWAY's cyan IFF beacon.
+  - SHAHED-style: warhead nose and joint ring, repainted panels, elevon lines, lower tip fins, an air-cooled engine with
+    cooling fins and exhaust pipe, the rail booster bottle with its flame that burns 2.5 s and drops off, a dim cyan blink.
+  - Damage states `setDamage(hp / hpMax)`: scorch and holes, the REAPER loses an aileron, the SHRIKE's seams stutter;
+    airwar.js puts smoke (and fire under a third) at each model's `damagePts`. `kill()` puts engines, lights and seams out.
+- **Shot down** (airwar.js `AW.dying`, war.js one-line hook in updateAir: `W.air.dying(u, dt)`; it replaces the generic
+  spin-and-drop for every sim aircraft): the machine keeps its momentum and tumbles (its own roll, a nose-down pitch),
+  burning and smoking from its damage points, tears off a breakable part or two (SHRIKE right wing / left fin, REAPER outer
+  left wing / left tail, SHAHED a tip fin) as falling debris; a SHAHED's warhead goes in the air 60% of the time. On land
+  a charred wreck (lamps and seams off, every surface sooted) burns and smokes for a while (gone after 150 s, 12 at most),
+  in the sea it sinks, on a deck nothing stays. AW.reset clears wrecks and debris.
+- **Catapult (jets.json "never leaves the cat")**: not the cat code. On the TERRAIN islands the ALBATROSS starts bow-on to a
+  shore 60 m off; `turnIntoClear` wanted a 700 m lane, the nearest was 120° round, and she kept re-planning the turn, so the
+  shooter never fired. It now takes a 480 m lane (the cat itself still needs 400 m). The player F-14's death at the end of
+  the stroke was ngc/bugsweep's (b44b44d + f81d1dc: live deck attitude on the shuttle, the parked Hornets moved outboard,
+  the escorts on the port cat) - cherry-picked here unchanged so the AI could be tested, plus bugsweep's snap.mjs (waits on
+  the game clock).

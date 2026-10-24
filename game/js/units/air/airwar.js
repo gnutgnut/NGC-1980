@@ -181,17 +181,20 @@ export function createAirWar(W, ctx, H) {
       if (u.goingHome && Math.hypot(A.pos.x - u.home.x, A.pos.z - u.home.z) < 260) { u.dead = true; W.E.mat += AIR.COST[u.type] * 0.5; return; }   // recovered aboard
       if (u.type === 'reaper') spotting(u);
     }
-    P.update(dt, ENV[u.side]);
+    // (airai-polish) the pilot flies in steps of at most 1/30 s: its loops are tuned at 60 Hz, and at the 3-8 fps of a
+    // loaded machine (or a headless test) one 0.2 s step per frame set the approach porpoising and the wave-off into the sea
+    const nSub = Math.min(8, Math.ceil(dt * 30 - 1e-6)) || 1, h = dt / nSub, evs = AW._evs || (AW._evs = []); evs.length = 0;
+    for (let i = 0; i < nSub; i++) { const ev = P.update(h, ENV[u.side]); if (ev) for (const e of ev) evs.push(e); if (A.dead) break; }
     if (A.dead) {   // flew into something
       u.dying = true; u.hp = 0; u.v.multiplyScalar(0.3);
       if (u.side === 1) feed(`${u.name} ${A.dead === 'water' ? 'WENT IN THE WATER' : 'CRASHED'}`, 'bad');
     }
     if (P.recovered) { u.recT = (u.recT || 0) + dt; if (u.recT > 2.5) { u.dead = true; AW.gone(u); feed(`${u.name} RECOVERED  -  ${P.trapped ? P.trapped.wire + ' WIRE' : 'ON DECK'}`, 'good'); W.P.mat += 15; } }
-    pose(u, dt);
+    pose(u, dt, evs);
   };
   AW.gone = u => { if (u.ai) u.ai.gone = true; };   // (airai-polish) a section's pilots let go of a lost or recovered jet
   function _anchor(u, x, y, z) { const a = u._anc || (u._anc = { x: 0, y: 0, z: 0 }); a.x = x; a.y = Math.max(0, y); a.z = z; return a; }
-  function pose(u, dt) {
+  function pose(u, dt, evs = u.sim.events) {
     const A = u.sim, m = u.mesh;
     m.position.copy(A.pos); m.quaternion.copy(A.q); A.crewLook = u.ai ? u.ai.look : null; u.parts.animate(A, dt, W.time);
     // exhaust, vapour, damage smoke
@@ -213,7 +216,7 @@ export function createAirWar(W, ctx, H) {
     }
     if (A.bayT > 0) A.bayT = Math.max(0, A.bayT - dt);
     // events worth a sound: the cat stroke, a trap
-    for (const e of A.events) {
+    for (const e of evs) {
       if (e.e === 'catshot' && hear(A.pos.x, A.pos.y, A.pos.z, 500) > 0) { sfx.catShot?.(); for (let i = 0; i < 14; i++) fx.mix?.spawn(A.pos.x + rnd(-2, 2), A.pos.y - 1.5, A.pos.z + rnd(-2, 2), rnd(-2, 2), rnd(1, 4), rnd(-2, 2), rnd(1, 2), 1, 4, .95, .95, .95, 0.5, -0.5, 1.5, 0.5); }
       if (e.e === 'trap' && hear(A.pos.x, A.pos.y, A.pos.z, 400) > 0) sfx.thump?.(0.6);
     }
