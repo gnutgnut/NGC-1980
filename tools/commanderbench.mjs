@@ -105,11 +105,11 @@ function run(H, AI, env, secs, ctlBase = { throttle: 1, gov: 'AUTO', fuel: true 
   const { createTomcatSim } = await import('../game/js/units/air/tomcatfm.js');
   const { createWingman } = await import('../game/js/units/commander/wingman.js');
   // the ALBATROSS as airbench.mjs has it: 120 x 28 m deck 8 m up, island to starboard, sailing
-  function carrierWorld(c) {
+  function carrierWorld(c, terr = () => 0) {
     const loc = (x, z) => { const dx = x - c.x, dz = z - c.z, co = Math.cos(c.yaw), si = Math.sin(c.yaw); return [dx * co - dz * si, dx * si + dz * co]; };
     const deckAt = (x, z) => { const [lx, lz] = loc(x, z); let hw = 14 * 0.97, h = -1e9; if (lz < -44) hw *= Math.max(0, (lz + 66) / 22); if (Math.abs(lx) < hw && lz > -66 && lz < 60) h = 8; if (Math.abs(lx - 10.5) < 2.9 && Math.abs(lz - 6) < 9) h = 25; return h; };
     return {
-      c, terrain: () => 0, groundY: (x, z) => Math.max(0, deckAt(x, z)), water: (x, z) => deckAt(x, z) < 0,
+      c, terrain: (x, z) => Math.max(0, terr(x, z)), groundY: (x, z) => Math.max(0, terr(x, z), deckAt(x, z)), water: (x, z) => deckAt(x, z) < 0 && terr(x, z) < 0,
       surfVel: (x, z) => deckAt(x, z) > 0 ? { vx: -Math.sin(c.yaw) * c.speed, vz: -Math.cos(c.yaw) * c.speed, w: 0, cx: c.x, cz: c.z } : null,
       carrier: () => ({ x: c.x, z: c.z, yaw: c.yaw, deck: 8, vx: -Math.sin(c.yaw) * c.speed, vz: -Math.cos(c.yaw) * c.speed, speed: c.speed, w: 0 }),
       anchor: () => ({ x: c.x, y: 8, z: c.z }), foes: function* () {}, missiles: function* () {}, inFlight: () => 0, fire: () => {},
@@ -138,7 +138,36 @@ function run(H, AI, env, secs, ctlBase = { throttle: 1, gov: 'AUTO', fuel: true 
     const P = createWingman(A, 'HORNET', 'HORNET'); const st0 = P.state; let minY = 1e9;
     for (let t = 0; t < 60; t += DT) { P.update(DT, W); W.tick(DT); minY = Math.min(minY, A.pos.y); if (A.dead) break; }
     check('wingman HORNET: low and dirty off the bow -> climbs, cleans up', st0 === 'climb' && !A.dead && A.gearCmd === 0 && A.pos.y > 150, `${st0} -> ${P.state}, y ${A.pos.y.toFixed(0)}, gear ${A.gearCmd}, min ${minY.toFixed(0)} m`);
+  }  // COMMANDER part 2: the archipelago's real islands (world.js islandH, the TERRAIN rebuild: they reach into the pattern).
+  // The carrier in the sea at places with islands round her, every heading quadrant; recalled from CAP, the wingman flies
+  // the pattern (laid on the side clear of the islands), waves off for the ground if it comes up on the approach, traps.
+  {
+    const { islandH } = await import('../game/js/world.js');
+    const spots = []; for (let x = -900; x <= 900 && spots.length < 10; x += 150) for (let z = -700; z <= 700 && spots.length < 10; z += 175) {
+      let wet = true; for (let a = 0; a < 6.28 && wet; a += 0.5) for (const r of [0, 70, 140]) if (islandH(x + Math.cos(a) * r, z + Math.sin(a) * r) > -1.5) wet = false;
+      let near = 0; for (let a = 0; a < 6.28; a += 0.3) for (const r of [250, 400, 550]) if (islandH(x + Math.cos(a) * r, z + Math.sin(a) * r) > 8) near++;
+      if (wet && near >= 3) spots.push([x, z]);
+    }
+    let runs = 0, crashes = 0, traps = 0, terrWO = 0, minClr = 1e9; const bad = [];
+    spots.forEach(([x, z], i) => {
+      const kind = i % 3 === 2 ? 'TOMCAT' : 'HORNET', yaw = (i * 2.1) % 6.283;
+      const W = carrierWorld({ x, z, yaw, speed: 5 }, islandH);
+      const A = kind === 'HORNET' ? createJetSim(9) : createTomcatSim(9);
+      A.reset(x + 500 * Math.cos(i), 0, z + 500 * Math.sin(i), i * 0.7, { running: true, airborne: true, alt: 260, speed: 80 }); for (const e of A.eng) e.n = 0.85; A.gearCmd = 0; A.flapSel = 0;
+      const P = createWingman(A, kind, kind); let t = 0, recalled = false;
+      for (; t < 900; t += DT) {
+        if (!recalled && t > 20) { P.recall(); recalled = true; }
+        P.update(DT, W); W.tick(DT);
+        if (!A.onGround && P.state !== 'trapped') { const h = A.pos.y - W.groundY(A.pos.x, A.pos.z); if (W.terrain(A.pos.x, A.pos.z) > 0.5) minClr = Math.min(minClr, h); }
+        if (A.dead || P.recovered) break;
+      }
+      runs++; if (A.dead) { crashes++; bad.push(`${kind} @${x},${z} yaw ${yaw.toFixed(1)}: ${A.dead} at ${A.pos.toArray().map(Math.round)}`); } if (P.recovered) traps++; terrWO += P.why === 'TERRAIN' ? 1 : 0;
+    });
+    check('wingman over the islands: no crash into the ground', runs >= 6 && crashes === 0, `${runs} recoveries, ${crashes} crashed${bad.length ? ': ' + bad.join(' | ') : ''}`);
+    check('wingman over the islands: traps aboard', traps >= runs - 1, `${traps}/${runs} trapped`);
+    check('wingman over the islands: clears the islands it overflies (> 25 m)', minClr > 25, minClr.toFixed(0) + ' m');
   }
+
 }
 // ------------------------------------------------------------------ more than one Huey: swapping whole states (swapstate.js)
 // main.js keeps one set of Huey objects (the sim, the AI crew) and swaps the state of every other Huey out through them
