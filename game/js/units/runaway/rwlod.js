@@ -109,7 +109,7 @@ export function createStriderLOD(parent, max = 128) {
     },
     end() {
       meshes.body.count = meshes.glow.count = meshes.legL.count = meshes.legR.count = n; meshes.dead.count = nd; meshes.deadLeg.count = ndl;
-      for (const m of Object.values(meshes)) m.instanceMatrix.needsUpdate = true;
+      for (const m of Object.values(meshes)) { m.visible = m.count > 0; if (m.visible) m.instanceMatrix.needsUpdate = true; }
       if (phase.size > seen.size + 64) for (const id of [...phase.keys()]) if (!seen.has(id)) phase.delete(id);
     },
     dispose() { parent.remove(group); for (const m of Object.values(meshes)) m.dispose(); },

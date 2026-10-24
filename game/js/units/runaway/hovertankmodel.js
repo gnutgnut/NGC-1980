@@ -148,8 +148,11 @@ export function buildHoverTank(opt = {}) {
         wreck = { t: 0, y0: T.p[1], pitch: 0.035 * Math.cos(k), roll: 0.05 * Math.sin(k), turret: T.turretYaw };
         setBodyMat(group, M.burnt, M.glowOff); for (const f of fans) f.visible = false;
       }
-      wreck.t = Math.min(1, wreck.t + dt / 0.6);
-      const gy = groundY ?? (T.p[1] + RW7.SKIRT_Y), restY = gy - RW7.SKIRT_Y - 0.14, e = wreck.t * wreck.t;
+      wreck.t = Math.min(1, wreck.t + dt / 0.6); wreck.age = (wreck.age || 0) + dt;
+      // (killed over the sea: no cushion, no buoyancy worth the name - it settles and goes under in half a minute, nose first)
+      const wet = groundY !== undefined && groundY <= 0.06, sink = wet ? Math.min(1, wreck.age / 30) : 0;
+      const gy = groundY ?? (T.p[1] + RW7.SKIRT_Y), restY = gy - RW7.SKIRT_Y - 0.14 - sink * sink * 4.5, e = wreck.t * wreck.t;
+      if (wet) { wreck.pitch = -0.035 - 0.25 * sink; group.visible = sgroup.visible = sink < 1; }
       _e.set(0, T.yaw, 0, 'YXZ'); _q.setFromEuler(_e); group.quaternion.slerp(_q, e);
       group.position.y = wreck.y0 + (restY - wreck.y0) * e; group.rotateX(wreck.pitch * e); group.rotateZ(wreck.roll * e);
       turret.rotation.y = wreck.turret; gun.rotation.x = -0.09 * e;

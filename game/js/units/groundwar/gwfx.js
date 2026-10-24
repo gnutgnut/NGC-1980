@@ -102,15 +102,17 @@ export function createGroundFx({ root, fx, GS, hAt }) {
   };
 
   // ------------------------------------------------------------------------------------------- the machines' chatter
-  const CHIRP = { contact: 'contact', flank: 'ack', assault: 'contact', retreat: 'down', regroup: 'ack', 'LINK LOST': 'lost', defend: 'ack' };
-  F.chatter = (rwa, ear) => {
+  // notify(B, S, st): the squad decision for the war's feed (groundwar.js decides what the radio net would hear)
+  const CHIRP = { contact: 'contact', flank: 'ack', assault: 'contact', retreat: 'down', regroup: 'ack', 'LINK LOST': 'lost', defend: 'ack', AIR: 'contact' };
+  F.chatter = (rwa, ear, notify) => {
     for (const B of GS.battles) {
       const log = B.rw.log; if (!log) continue;
       if (B.logI === undefined) B.logI = log.length;
       for (; B.logI < log.length; B.logI++) {
-        const L = log[B.logI], kind = CHIRP[L.st]; if (!kind || !rwa) continue;
+        const L = log[B.logI], kind = CHIRP[L.st]; if (!kind) continue;
         const S = B.rw.squads.find(q => q.id === L.sq); if (!S || S.cx === undefined) continue;
-        if (Math.hypot(S.cx - ear.x, S.cz - ear.z) > 140) continue;
+        if (notify) notify(B, S, L.st);
+        if (!rwa || Math.hypot(S.cx - ear.x, S.cz - ear.z) > 140) continue;
         rwa.event({ e: 'chirp', kind, x: S.cx, y: (S.members[0]?.y ?? 0) + 1.9, z: S.cz });
       }
       if (log.length > 400) { log.splice(0, log.length - 200); B.logI = Math.min(B.logI, log.length); }   // (the AI's log would grow all war)

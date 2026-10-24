@@ -211,7 +211,6 @@ export function createGroundWar(ctx) {
     if (!rwa) { try { rwa = new RwAudio(sfx.ctx, sfx.master); rwa.out.gain.value = 0.7; } catch (e) { rwa = null; return; } }
     rwa.listener(ear.x, ear.y, ear.z);
     for (const e of evs) if (e.x !== undefined && (e.e !== 'step' || Math.hypot(e.x - ear.x, e.z - ear.z) < 45)) rwa.event(e);
-    GFX.chatter(rwa, ear);   // ngc/rwground-polish: the machines' squad decisions as chirp phrases
     if ((sndT -= dt) <= 0) {
       sndT = 0.1; let n = 0;
       for (const u of GS.units) {
@@ -227,6 +226,15 @@ export function createGroundWar(ctx) {
     clearTimeout(silenceTimer); silenceTimer = setTimeout(() => { if (rwa) rwa.loops([]); }, 300);
   }
   GW.silence = () => { if (rwa) rwa.loops([]); };
+  // ngc/rwground-polish: what our Marines (or the player, close by) see the machines do, on the feed - throttled per island
+  function squadNews(B, S, st) {
+    const I = B.I, ours = GS.units.some(u => u.alive && u.side === 1 && u.able && u.B === B);
+    if (!ours && Math.hypot(ear.x - S.cx, ear.z - S.cz) > 450) return;   // (nobody of ours there to see it)
+    if (st === 'retreat') note(I, 'THE MACHINES ARE FALLING BACK', 'good');
+    else if (st === 'LINK LOST') note(I, 'STRIDER LINK NODE DOWN  -  THE SQUAD FREEZES', 'good');
+    else if (st === 'flank') note(I, 'MACHINES WORKING ROUND OUR FLANK');
+    else if (st === 'assault') note(I, 'THE MACHINES ARE ASSAULTING');
+  }
   // ngc/rwground-polish: main.js drawMap hook - ground units, wrecks, landing craft and fights on the map
   GW.drawMap = (c2d, px, py, big, fog) => GFX.drawMap(c2d, px, py, big, fog, W.time, GW.lcacs, W.islands);
   const near = (x, z, r) => Math.hypot(x - ear.x, z - ear.z) < r;
@@ -583,7 +591,7 @@ export function createGroundWar(ctx) {
     updateLCACs(dt);
     renderUnits(dt);
     effects(evs);
-    GFX.tracersUpdate(ear); GFX.unitsUpdate(dt, ear, GW.views);   // ngc/rwground-polish
+    GFX.tracersUpdate(ear); GFX.unitsUpdate(dt, ear, GW.views); GFX.chatter(rwa, ear, squadNews);   // ngc/rwground-polish
     flushTallies(dt);
     sound(dt, evs);
   };

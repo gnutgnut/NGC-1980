@@ -256,11 +256,18 @@ export function createGroundSim(o) {
     }
   }
   // walkers and tracks keep out of the sea: a commanded velocity that would take them into water within `look` m stops
+  // (ngc/rwground-polish: blocked by the water's edge, slide along it - the commanded direction turned 30 or 60 deg
+  // either way, the side nearer the wanted line first - instead of standing at the shoreline for the rest of the war)
+  const DRY_TURN = [0.52, -0.52, 1.05, -1.05];   // (no further: past 60 deg it would make no headway - it stops)
   function dry(u, v, look) {
     const l = Math.hypot(v[0], v[1]); if (l < 0.05) return v;
-    const x = u.x + v[0] / l * look, z = u.z + v[1] / l * look;
-    if (hAt(x, z) < (u.kind === 'mbt' ? 0.4 : 0.15)) { v[0] = 0; v[1] = 0; }
-    return v;
+    const lim = u.kind === 'mbt' ? 0.4 : 0.15, ux = v[0] / l, uz = v[1] / l;
+    if (hAt(u.x + ux * look, u.z + uz * look) >= lim) return v;
+    for (const a of DRY_TURN) {
+      const c = Math.cos(a), s = Math.sin(a), rx = ux * c - uz * s, rz = ux * s + uz * c;
+      if (hAt(u.x + rx * look, u.z + rz * look) >= lim && hAt(u.x + rx * look * 2, u.z + rz * look * 2) >= lim) { const k = l * Math.max(0.4, c); v[0] = rx * k; v[1] = rz * k; return v; }
+    }
+    v[0] = 0; v[1] = 0; return v;
   }
   // a point in the sea pulled in toward the island's middle until it is on dry ground
   function landward(B, p) {

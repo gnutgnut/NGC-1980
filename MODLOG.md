@@ -2103,3 +2103,58 @@ What: fish schools round the camera, water clarity seen from above, the view und
   record is dropped while `u.able` is still true (the same frame he went down): set it after one step.
 - **Next**: the rich carrier walks at his rifleman's walk, not the carry speed (the body follows the soldier sim);
   a grenade in flight is not drawn; a man killed with a cooked grenade could drop it.
+
+## 2026-10-24 — NGC-1980 RUNAWAY ground units + ground war, polish batch 2 (branch ngc/rwground-polish)
+Models, damage, AI, feedback and performance for the STRIDERs, RW-7s, seized MBTs and the fights on the islands. Combat
+stays game-level (no weapon figures changed). New files: `units/runaway/rwlod.js`, `units/groundwar/gwfx.js`, scene
+`tools/scenes/rwpolish.mjs`. Shared files: `main.js` one line in `drawMap` (`war.ground.drawMap(...)`), nothing in war.js.
+- **Far STRIDER LOD, instanced** (rwlod.js): past 160 m (hysteresis 15 m) every STRIDER in the war is drawn by six
+  InstancedMeshes (body, seams, left / right leg, wreck body / legs): the close model's silhouette simplified (carapace,
+  wedge head, rifle across the body, digitigrade legs posed by the thigh / shin / hock lengths in strider.js), legs
+  swinging at the hips at the sim's step rates (100 steps / min walking, 210 running), the body gliding level; fallen
+  machines on their side, wrecks dark. The far battles' kinematic ('lite') STRIDERs were HIDDEN before (a gap noted in
+  rwwar): now they show out to 1.4 km. Same view of a 21-unit fight: 372 draw calls vs 561 with full models.
+- **Damage states and wrecks.** STRIDER: a limb shot away is gone below its stump (thigh / upper arm stay, sparks off
+  the stump), a blinded head's lenses go dark, a dead machine is scorched with dead seams, its carcass stays 4 min
+  (was 150 s). RW-7: a wrecked fan's rotor is gone from its duct and the duct smokes; hull below 60 % smokes, blacker
+  the worse; the wreck dumps its cushion and drops onto its crushed skirt one corner low, burnt, gun sagging; killed
+  over the sea it settles and goes under nose first in 30 s. MBT: engine out / hull below 60 % smokes from the deck; a
+  shot-through gun droops; the wreck is burnt out with the gun on its stops; two kills in five (by hull number) are
+  catastrophic - the turret is thrown off the ring onto the deck beside it, a second fireball and a pillar of fire from
+  the ring. Vehicle wrecks stay 10 min. (rwkit `burnt` / `scorched` / `glowOff` materials: the vertex colours
+  multiplied down, `setBodyMat`.)
+- **Animation.** MBT main gun: the tube runs back 0.35 m and out, the hull rocks on its suspension along the gun line,
+  the muzzle blast raises a ring of dust; RW-7 coilgun: the rail assembly kicks back 0.55 m; dust behind moving tracks;
+  the RW-7's skirt blows dust off the ground or spray off the sea all round (it had none).
+- **AI** (squadai.js). Air: a known aircraft that fired in the last 5 s within 350 m (or anything within 90 m) puts the
+  squad under air attack (log 'AIR'): walkers not shooting back at it take cover FROM IT (chooseCover with the aircraft as
+  the threat), crouched; nobody stays within 7 m of a squad mate; hover tanks jink round their position instead of
+  sitting still. Defend with no threat known: a perimeter round the point, each walker on its own bearing facing out
+  (all eight stood on the pad's centre before). groundsim `dry()`: blocked by the water's edge a unit slides along it
+  (30 / 60 deg) instead of standing at the shoreline for the rest of the war (a Marine squad landed on a shore did).
+- **Feedback.** Tracers (gwfx.js): an instanced pool of camera-facing ribbons, >= ~1.5 px wide at any range, fading to
+  the tail; red-orange for the 1980 side (M60 one in four, rifles ~one in eight), cyan for the machines (coil darts
+  always, seized rifles / coax one in four-five), white-hot for tank rounds. Map: Marines (cyan dots), STRIDERs (red
+  diamonds), armour (red blocks with a heading tick, RW-7 / M1A2 / T-90M labels on the big map), wrecks (grey crosses),
+  LCACs, and a pulsing orange CONTACT ring round every island with both sides on it; theirs only where the fog lets you
+  see. Feed: THE MACHINES ARE FALLING BACK / STRIDER LINK NODE DOWN - THE SQUAD FREEZES / MACHINES WORKING ROUND OUR
+  FLANK / THE MACHINES ARE ASSAULTING (when our Marines are on the island or you are within 450 m; 30 s per island).
+- **Sound** (rwaudio.js). The Marines' M16s, M60s and M203s were SILENT in the ground war (rwaudio knew only the sandbox's
+  'rifle' / 'mg' ammo names): mapped, plus the M203's hollow bloop. The machines' FM chirp phrases now play in the game
+  (they only ever played in the sandbox): contact, flank, assault, withdraw, LINK LOST, AIR, from the squad AI's
+  decision log near the camera. Death sounds: a STRIDER's servos wind down with a broken last phrase; an RW-7's
+  capacitors whine down; an MBT's turbine runs down under a cook-off crackle.
+- **Tests.** runawaybench 50/50 (new: air attack - hidden from the aircraft 19 % vs 0 % with no aircraft, nearest squad
+  mate 18 m vs 2.9 m); groundwarbench 33/33 (21.8 ms CPU per simulated s, 21 units); scenes rwpolish 6/6 (tracers in a
+  fight + a controlled burst, LOD stand-ins, draw calls, three MBT wrecks with one catastrophic, RW-7 wreck, smoking RW-7,
+  arm stump, air reaction, big map), groundwar 10/10, smoke 5/5, runaway / runawaycloseup / runawaylive / rwmodels /
+  striderfall all clean, mv22landing and ch46capture (see below). Baseline groundwar.mjs failed 'both sides fire' once
+  (the STRIDERs fired exactly 20, wants > 20: the Marines killed the last two fast) - flaky, pre-existing.
+- **Gotchas.** Dead vehicles are never stepped (groundsim skips them), so a killed RW-7 hung at hover height: the wreck
+  pose lives in the model. GL lines are one pixel - at the game's 0.45 render scale tracers vanished: ribbons. Additive
+  ribbons over a bright island washed out to white lasers: normal blending, vertex alpha fade. In a scene, the parked
+  Huey's `PL.landed` keeps the player out of the machines' targets when over the sea.
+- **Untested / next.** By ear: the death sounds and chirps (headless only checks for errors). Marines far away are still
+  the 6-mesh stand-ins (not instanced); RW-7 / MBT have no far LOD (few of them). Cover from aircraft is weak against
+  one circling overhead (walls don't hide from above) - forests (the world's trees) aren't cover points yet. The hover
+  tank wreck is not an obstacle for the AI or the collision world (the collision agent's).
