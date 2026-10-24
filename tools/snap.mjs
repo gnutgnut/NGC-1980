@@ -160,6 +160,7 @@ async function main() {
     result.browser = exe;
     browser = await puppeteer.launch({
       executablePath: exe,
+      protocolTimeout: 1800000,   // (ngc/bugsweep) puppeteer's default 180 s cut every longer waitFor short: a 400 s wait timed out at 180 s
       headless: args.headful ? false : 'new',
       defaultViewport: { width: W, height: H, deviceScaleFactor: 1 },
       args: [
@@ -184,6 +185,25 @@ async function main() {
     const fail = (msg) => { log('FAIL', msg); result.expects.push({ ok: false, msg }); };
     let lastShot = null;
 
+    // ngc/bugsweep: 'wait' and 'key hold' run on the GAME clock (__G.war.time) when the page has one: the headless build
+    // runs 1-10 fps on a loaded machine and the frame step is capped at 0.1 s, so a wall-clock wait gave the game a
+    // fraction of the time the scene meant (the main cause of the scene table's flakes). Ends early only when the game
+    // clock is stopped (title, pause: after the wall time and 1 s without a tick) or after 20x the wall time.
+    // SNAP_WALL=1 restores wall-clock waits.
+    const gclock = () => page.evaluate(() => (window.__G && __G.war && typeof __G.war.time === 'number') ? __G.war.time : null).catch(() => null);
+    async function gameSleep(ms) {
+      ms = +ms; const t0 = Date.now(); let last = process.env.SNAP_WALL ? null : await gclock();
+      if (last === null) { await sleep(ms); return 'wall'; }
+      let el = 0, tick = Date.now();
+      for (;;) {
+        await sleep(Math.min(50, Math.max(5, ms)));
+        const now = Date.now(), g = await gclock();
+        if (g !== null && g !== last) { el += g > last ? g - last : Math.max(0, g); last = g; tick = now; }
+        if (el >= ms / 1000) return 'game';
+        if (now - t0 >= ms && now - tick > 1000) return 'game clock stopped';
+        if (now - t0 > Math.max(ms * 20, ms + 120000)) return 'cap';
+      }
+    }
     const ctx = {
       page, log,
       async goto(q) {
@@ -192,13 +212,14 @@ async function main() {
         await page.goto(u, { waitUntil: 'load' });
         await page.bringToFront();
       },
-      wait: async (ms) => { log('wait', `${ms} ms`); await sleep(+ms); },
+      wait: async (ms) => { log('wait', `${ms} ms`); await gameSleep(ms); },
       async key(action, code, ms) {
         action = action || 'tap';
         log('key', `${action} ${code}${ms ? ' ' + ms + 'ms' : ''}`);
         if (action === 'down') await page.keyboard.down(code);
         else if (action === 'up') await page.keyboard.up(code);
-        else if (action === 'tap' || action === 'hold') { await page.keyboard.down(code); await sleep(+ms || 60); await page.keyboard.up(code); }
+        else if (action === 'tap') { await page.keyboard.down(code); await sleep(+ms || 60); if (!process.env.SNAP_WALL) await Promise.race([page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(1))))).catch(() => 0), sleep(10000)]); await page.keyboard.up(code); }   // (ngc/bugsweep) a tap lasts at least one game frame: at 0-2 fps a 60 ms tap fell between frames and the game, which reads the keys each frame, never saw it
+        else if (action === 'hold') { await page.keyboard.down(code); await gameSleep(+ms || 60); await page.keyboard.up(code); }
         else throw new Error('key action must be down|up|tap|hold');
       },
       async click(x, y) { log('click', `${x},${y}`); await page.mouse.click(+x, +y); },
@@ -218,8 +239,28 @@ async function main() {
       },
       async waitFor(expr, timeout = 10000) {
         log('waitFor', `${expr} (≤${timeout} ms)`);
-        try { await page.waitForFunction(expr, { timeout: +timeout, polling: 50 }); return true; }
-        catch { fail(`waitFor timed out: ${expr}`); return false; }
+        // (ngc/bugsweep) the timeout is GAME time when the page has a game clock (__G.war.time): a scene's 30 s for an AI
+        // leg is 30 s of the game, however slowly the loaded machine renders it. It ends on wall time only while the game
+        // clock is stopped (title, pause), and at a wall cap of 3-20x. SNAP_WALL=1: plain wall-clock timeout.
+        timeout = +timeout;
+        if (!process.env.SNAP_WALL && (await gclock()) !== null) {
+          const t0 = Date.now(), cap = Math.max(3 * timeout, Math.min(20 * timeout, 600000));
+          let last = await gclock(), el = 0, tick = Date.now();
+          for (;;) {
+            const ok = await page.evaluate(`!!(${expr})`).catch(() => false);
+            if (ok) return true;
+            const now = Date.now(), g = await gclock();
+            if (g !== null && g !== last) { el += g > last ? g - last : Math.max(0, g); last = g; tick = now; }
+            if (el * 1000 >= timeout || (now - t0 >= timeout && now - tick > 1000) || now - t0 > cap) break;
+            await sleep(50);
+          }
+          fail(`waitFor timed out: ${expr}`); return false;
+        }
+        // no game clock yet (page loading, dev pages): wall time, at least 60 s - the load at ~150 took 28 s to boot the game
+        // (polled here: page.waitForFunction rejects at once when the page's context is replaced while it boots)
+        const tw = process.env.SNAP_WALL ? timeout : Math.max(timeout, 60000), tw0 = Date.now();
+        while (Date.now() - tw0 < tw) { if (await page.evaluate(`!!(${expr})`).catch(() => false)) return true; await sleep(50); }
+        fail(`waitFor timed out: ${expr}`); return false;
       },
       async shot(sname) {
         sname = (sname || `shot${result.shots.length + 1}`).replace(/[^\w.-]+/g, '_');
