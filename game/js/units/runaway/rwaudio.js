@@ -84,7 +84,7 @@ export class RwAudio {
   }
   event(e) {
     if (!this.ctx) return;
-    const k = e.x !== undefined ? this.near(e.x, e.y ?? this.L[1], e.z, { step: 45, shot: 500, mainGun: 900, blast: 900, impact: 120, hit: 140, fall: 80, thud: 80, getup: 60, chirp: 70, pd: 300, stumble: 60 }[e.e] || 300) : 1;
+    const k = e.x !== undefined ? this.near(e.x, e.y ?? this.L[1], e.z, { step: 45, shot: 500, mainGun: 900, blast: 900, impact: 120, hit: 140, fall: 80, thud: 80, getup: 60, chirp: 70, pd: 300, stumble: 60, destroyed: 260 }[e.e] || 300) : 1;
     if (k <= 0.01) return; const v = k * k;
     switch (e.e) {
       case 'step': {
@@ -95,7 +95,10 @@ export class RwAudio {
         break;
       }
       case 'shot': {
-        const a = e.ammo;
+        // (ngc/rwground-polish: the ground war's 1980 rounds by their own names - the Marines' M16s, M60s and M203s were
+        // silent: m16 -> rifle, m60 -> mg; the M203's hollow 'bloop')
+        const a = e.ammo === 'm16' ? 'rifle' : e.ammo === 'm60' ? 'mg' : e.ammo;
+        if (a === 'm203') { this.burst(320, 90, 0.12, 0.3 * v, 'lowpass', 1.2); this.tone(260, 120, 0.09, 0.12 * v, 'sine'); break; }
         if (a === 'xm7') { this.burst(2400, 400, 0.12, 0.35 * v, 'bandpass', 0.8); this.burst(180, 60, 0.15, 0.25 * v, 'lowpass'); }
         else if (a === 'needle') { this.burst(6000, 3000, 0.04, 0.2 * v, 'highpass', 1); this.tone(5200, 1800, 0.05, 0.05 * v, 'sine'); }
         else if (a === 'rifle') { this.burst(2000, 500, 0.1, 0.3 * v, 'bandpass', 0.8); }
@@ -114,6 +117,13 @@ export class RwAudio {
       case 'stumble': this.burst(1800, 600, 0.12, 0.06 * v, 'bandpass', 3); break;
       case 'chirp': this.chirp(e.kind, k); break;
       case 'pd': this.burst(5000, 2000, 0.18, 0.25 * v, 'bandpass', 1.5); this.tone(4000, 3500, 0.15, 0.04 * v, 'square'); break;
+      // ngc/rwground-polish: a machine dies - a STRIDER's servos wind down in a falling whine with a broken last phrase;
+      // a vehicle's capacitors / turbine run down under the blast (the blast itself is the war's boom)
+      case 'destroyed':
+        if (e.kind === 'strider') { this.tone(2400, 90, 1.4, 0.07 * v, 'sawtooth'); this.chirp('lost', k * 0.8, 0.15); }
+        else if (e.kind === 'hovertank') { this.tone(900, 40, 2.2, 0.1 * v, 'sawtooth'); this.burst(5000, 1500, 0.6, 0.12 * v, 'highpass', 0.5, 0.3); }
+        else if (e.kind === 'mbt') { this.tone(420, 30, 2.6, 0.08 * v, 'triangle'); this.burst(2600, 500, 1.2, 0.18 * v, 'bandpass', 0.7, 0.9); }
+        break;
     }
   }
 }

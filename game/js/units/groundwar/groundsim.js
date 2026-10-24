@@ -473,7 +473,8 @@ export function createGroundSim(o) {
       const u = GS.units[i]; if (u.alive) continue;
       u.deadT += dt;
       // (ngc/infdepth: with care on, a Marine's body stays 7 min: lootable)
-      if (u.deadT > (u.kind === 'marine' ? (o.care ? 420 : 120) : 150)) { GS.units.splice(i, 1); if (u.B) { const k = u.B.units.indexOf(u); if (k >= 0) u.B.units.splice(k, 1); } ev('remove', { id: u.id, u }); }
+      // (ngc/rwground-polish: a burnt-out tank stays 10 min, a STRIDER's carcass 4: the island shows what happened on it)
+      if (u.deadT > (u.kind === 'marine' ? (o.care ? 420 : 120) : u.vehicle ? 600 : 240)) { GS.units.splice(i, 1); if (u.B) { const k = u.B.units.indexOf(u); if (k >= 0) u.B.units.splice(k, 1); } ev('remove', { id: u.id, u }); }
     }
     return GS.events;
   };
