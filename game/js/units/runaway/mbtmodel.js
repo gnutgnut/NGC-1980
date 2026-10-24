@@ -7,7 +7,7 @@
 // IFF strips, crude machine glyph stencils painted over the old national markings.
 // Local frame: origin on the ground under the hull centre, -z forward. API: buildMBT(type) -> { group, update(T, dt, time), parts }
 import * as THREE from 'three';
-import { Kit, RW, rwMats, stencilTex, decal } from './rwkit.js';
+import { Kit, RW, rwMats, stencilTex, decal, setBodyMat } from './rwkit.js';
 import { MBT } from './mbt.js';
 
 const LOOK = {
@@ -212,15 +212,38 @@ export function buildMBT(type, opt = {}) {
   if (opt.tag && typeof document !== 'undefined') for (const s of [-1, 1]) { const d = decal(stencilTex(opt.tag, { w: 256, h: 64, color: '#d8f6ff', font: 'bold 42px monospace' }), 0.9, 0.22, s * (type === 'm1a2' ? 1.775 : 1.48), 0.42, type === 'm1a2' ? 0.9 : 0.6, [0, s * Math.PI / 2, 0]); turret.add(d); }
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(P.W * 1.15, P.hullL * 1.1).rotateX(-Math.PI / 2), M.shadow); shadow.renderOrder = -1; shadow.position.y = 0.04; group.add(shadow);
   const glows = []; group.traverse(o => { if (o.isMesh && o.material === M.glow) glows.push(o); });
+  let recoil = 0, rock = 0, wreck = null;
+  const gunZ = gun.position.z, ring = turret.position.clone();
   return {
     group, parts: { hull, turret, gun, wheels, sprockets, body },
+    // ngc/rwground-polish: the main gun fires - the tube runs back in its cradle (~0.35 m) and out again, the hull
+    // rocks back on its suspension and settles
+    recoil() { recoil = 1; rock = 1; },
     update(T, dt, time) {
       const D = T.drive;
       group.position.set(D.p[0], D.p[1], D.p[2]); group.rotation.set(0, D.yaw, 0);
-      body.rotation.set(D.pitch, 0, -D.roll, "XYZ");
-      turret.rotation.y = T.turretYaw; gun.rotation.x = T.gunPitch;
+      recoil = Math.max(0, recoil - dt / 0.5); rock = Math.max(0, rock - dt / 1.1);
+      const rk = Math.sin((1 - rock) * Math.PI * 2.5) * rock * 0.018 * Math.cos(T.turretYaw);   // (the kick along the gun's line)
+      body.rotation.set(D.pitch - rk, 0, -D.roll + Math.sin((1 - rock) * Math.PI * 2.5) * rock * 0.018 * Math.sin(T.turretYaw), "XYZ");
+      turret.rotation.y = T.turretYaw; gun.rotation.x = T.gunPitch - (T.hp && T.hp.gun <= 0 ? 0.08 : 0);   // (a damaged gun droops: its elevation gear shot through)
+      gun.position.z = gunZ + 0.35 * Math.min(1, recoil * 4) * recoil;
       for (let s = 0; s < 2; s++) { const a = -D.wheelSpin[s] / P.wheelR; for (const w of wheels[s]) w.rotation.x = a; sprockets[s].rotation.x = -D.wheelSpin[s] / (P.wheelR * 1.15); }
-      for (const g of glows) g.material = T.alive ? M.glow : M.glowDim;
+      if (T.alive) { for (const g of glows) g.material = M.glow; return; }
+      // ---- the wreck: burnt out, seams dead, the gun down on its stops; a catastrophic kill (the ammunition went: about
+      // two in five, by the hull number) throws the turret off its ring onto the deck beside it
+      if (!wreck) {
+        const k = (T.id ?? 0) * 2.399, cat = ((T.id ?? 0) * 7 + 3) % 5 < 2;
+        wreck = { t: 0, cat, side: Math.sin(k) > 0 ? 1 : -1, yaw: T.turretYaw + 0.6 * Math.cos(k) };
+        setBodyMat(group, M.burnt, M.glowOff);
+      }
+      wreck.t = Math.min(1, wreck.t + dt / 0.9);
+      const e = 1 - (1 - wreck.t) * (1 - wreck.t);
+      gun.rotation.x = T.gunPitch + (-0.12 - T.gunPitch) * e;
+      if (wreck.cat) {
+        const s = wreck.side, hop = Math.sin(wreck.t * Math.PI) * 3.2;
+        turret.position.set(ring.x + s * 2.4 * e, ring.y + hop - 0.55 * e, ring.z + 0.8 * e);
+        turret.rotation.set(0.18 * e, wreck.yaw + 1.4 * e * s, s * 0.95 * e, 'YXZ');
+      } else turret.rotation.y = wreck.yaw;
     },
   };
 }

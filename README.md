@@ -357,6 +357,9 @@ fight, F follows a unit, O toggles the AI overlay, click for sound) and on the t
 `node tools/runawaybench.mjs` checks locomotion on 20° slopes, push recovery, hover physics, the tanks' dimensions and
 the squad behaviours in plain node; scenes `runaway.mjs`, `runawaycloseup.mjs`, `runawaylive.mjs`, `rwmodels.mjs`,
 `striderfall.mjs` photograph them.
+In the war (ngc/rwground-polish): tracers over a fight (red-orange ours, cyan theirs), the ground units, wrecks, landing
+craft and a pulsing CONTACT ring on the minimap and the big map (M), burnt-out wrecks that stay ten minutes, limbs shot off,
+smoking hulls, the machines breaking for cover from a helicopter working them over; scene `rwpolish.mjs`.
 
 ## Credits
 

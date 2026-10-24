@@ -235,6 +235,36 @@ if (sec('D')) {
     let froze = false, down = false; for (let t = 0; t < 2; t += 1 / 30) { B.step(1 / 30); if (S.freeze > 0) froze = true; if (S.linkDown > 0) down = true; }
     check('link node destroyed: the squad freezes and loses the link', froze && down && B.ai.log.some(l => l.st === 'LINK LOST'), `freeze ${froze}, link down ${down}, new node ${S.leaderNow}`);
   }
+  // ngc/rwground-polish: an aircraft working a squad over - the walkers that aren't shooting back go to cover from IT
+  // (hidden from where it is, crouched) and spread out (nobody within 7 m of a squad mate). A helicopter orbits 140 m
+  // out at 35 m, firing; the squad starts bunched on the farm plain (2 m apart). Baseline: the same squad, no aircraft.
+  {
+    const run = (withAir, seed) => {
+      const B = createSandbox({ seed });
+      const ms = [0, 1, 2, 3].map(i => B.addStrider(-20 + i * 2, 40 + (i % 2) * 2, 0));
+      B.addSquad(ms, { type: 'hold' });
+      const base = B.targets, air = { id: 'heli', side: 1, kind: 'air', x: 0, y: 0, z: 0, vx: 0, vz: 0, h: 3, alive: true, firing: 0, cover: 0 };
+      if (withAir) B.targets = () => [...base(), air];
+      let hid = 0, n = 0, spread = 0, sn = 0, air_ = 0;
+      for (let t = 0; t < 30; t += 1 / 30) {
+        const a = t * 0.12; air.x = -17 + Math.cos(a) * 140; air.z = 41 + Math.sin(a) * 140; air.y = B.world.height(air.x, air.z) + 35; air.vx = -Math.sin(a) * 17; air.vz = Math.cos(a) * 17;
+        B.step(1 / 30);
+        if (t < 12 || Math.round(t * 30) % 10) continue;
+        const live = ms.filter(m => m.alive && m.up);
+        for (const m of live) {
+          if (/^air/.test(m.ai.state)) air_++;
+          if (m.ai.aimId === 'heli' && m.ai.fire) continue;   // (the one shooting back)
+          n++; if (!B.world.los(air.x, air.y, air.z, m.x, m.y + 0.75, m.z) || !B.world.los(air.x, air.y, air.z, m.x, m.y + 1.4, m.z)) hid++;
+          let nd = 1e9; for (const q of live) if (q !== m) nd = Math.min(nd, Math.hypot(q.x - m.x, q.z - m.z)); spread += nd; sn++;
+        }
+      }
+      return { hid: hid / Math.max(1, n), spread: spread / Math.max(1, sn), air: air_ };
+    };
+    const A = [1980, 7].map(s => run(true, s)), Z = [1980, 7].map(s => run(false, s));
+    const hidA = (A[0].hid + A[1].hid) / 2, hidZ = (Z[0].hid + Z[1].hid) / 2, spA = (A[0].spread + A[1].spread) / 2, spZ = (Z[0].spread + Z[1].spread) / 2;
+    check('air attack: walkers take cover from the aircraft', hidA > hidZ + 0.15 && A.every(r => r.air > 0), `hidden from it ${(100 * hidA).toFixed(0)}% (no aircraft: ${(100 * hidZ).toFixed(0)}%)`, '+15 points');
+    check('air attack: the squad spreads out', spA > 6 && spA > spZ + 1.5, `nearest squad mate ${spA.toFixed(1)} m (no aircraft: ${spZ.toFixed(1)} m)`, '> 6 m');
+  }
   // combined arms: armour keeps away from AT gunners; the fight costs
   {
     let wall = 0, simS = 0, stats = null; const armour = [];

@@ -93,8 +93,23 @@ export function rwMats() {
     glowRed: new THREE.MeshBasicMaterial({ color: 0xff5040 }),
     fan: new THREE.MeshBasicMaterial({ color: 0x2a3036, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }),
     shadow: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
+    // ngc/rwground-polish: damage states - the same vertex colours multiplied down: a burnt-out wreck (soot over
+    // everything, the ceramic gone grey-brown) and a scorched machine (darkened, still recognisable)
+    burnt: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, color: 0x3b3632 }),
+    scorched: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, color: 0x8c8780 }),
+    glowOff: new THREE.MeshBasicMaterial({ color: 0x1b2226 }),
   };
   return MATS;
+}
+// ngc/rwground-polish: swap every body mesh under `root` to a damage material (rwMats().burnt / scorched, or back to
+// .body) and every seam to `glow` when given. Meshes with other materials (decals, fans, shadows) are left alone.
+export function setBodyMat(root, mat, glow) {
+  const M = rwMats();
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    if (o.material === M.body || o.material === M.burnt || o.material === M.scorched) o.material = mat;
+    else if (glow && (o.material === M.glow || o.material === M.glowDim || o.material === M.glowOff || o.material === M.glowRed || o.material === M.glowHot)) o.material = glow;
+  });
 }
 
 // Place an object so that its local +Y runs from a to b (local origin at a) with local +Z toward `fwd` (projected

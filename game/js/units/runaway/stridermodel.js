@@ -6,7 +6,7 @@
 // puck and cyan IFF strip bolted on, or the RW coil carbine.
 // API: buildStrider({ weapon: 'xm7' | 'coil', tag }) -> { group, update(S, dt, time), parts, setLit(on) }
 import * as THREE from 'three';
-import { Kit, RW, rwMats, placeSeg, placeBasis, stencilTex, decal } from './rwkit.js';
+import { Kit, RW, rwMats, placeSeg, placeBasis, stencilTex, decal, setBodyMat } from './rwkit.js';
 import { STRIDER } from './strider.js';
 
 const C = RW, META_L = Math.hypot(STRIDER.HOCK_UP, STRIDER.HOCK_BACK);
@@ -202,7 +202,7 @@ export function buildStrider(opt = {}) {
   let lit = true;
   const api = {
     group, parts, shadow,
-    setLit(on, mat) { if (lit === on && !mat) return; lit = on; for (const g of glows) g.material = mat || (on ? M.glow : M.glowDim); },
+    setLit(on, mat) { if (lit === on && !mat) return; lit = on; for (const g of glows) if (!g.userData.off) g.material = mat || (on ? M.glow : M.glowDim); },
     update(S, dt, time) {
       const p = S.pose(), B = p.basis, T = p.torso;
       placeBasis(parts.pelvis, p.pelvis, B.f, B.u);
@@ -227,7 +227,26 @@ export function buildStrider(opt = {}) {
       if (!S.alive) api.setLit(false);
       else if (S.dmgTaken > 20 || S.glitch.gyro > 0 || S.glitch.arms > 0) api.setLit(Math.sin(time * 37 + S.id) > -0.6 || Math.sin(time * 5.3) > 0.2);
       else api.setLit(true);
+      api.damage(S);
+      if (S.hp.armL <= 0) parts.upper[0].scale.y = 0.55; if (S.hp.armR <= 0) parts.upper[1].scale.y = 0.55;   // (stumps)
     },
+    // ngc/rwground-polish: damage you can read - a limb shot away is gone below its stump (the thigh / upper arm
+    // stays), a blinded sensor head goes dark, a destroyed machine is scorched and its seams die
+    damage(S) {
+      const legL = S.hp.legL <= 0, legR = S.hp.legR <= 0, armL = S.hp.armL <= 0, armR = S.hp.armR <= 0;
+      const key = (legL ? 1 : 0) + (legR ? 2 : 0) + (armL ? 4 : 0) + (armR ? 8 : 0) + (S.blind ? 16 : 0) + (S.alive ? 0 : 32);
+      if (key === dmgKey) return; dmgKey = key;
+      const legs = [legL, legR], arms = [armL, armR];
+      for (let i = 0; i < 2; i++) {
+        parts.shin[i].visible = parts.meta[i].visible = parts.foot[i].visible = !legs[i];
+        parts.fore[i].visible = !arms[i];
+      }
+      api.stumps = [legL && 'legL', legR && 'legR', armL && 'armL', armR && 'armR'].filter(Boolean);
+      if (S.blind) parts.head.traverse(o => { if (o.isMesh && glows.includes(o)) { o.userData.off = true; o.material = M.glowOff; } });
+      if (!S.alive) setBodyMat(group, M.scorched, M.glowOff);
+    },
+    stumps: [],
   };
+  let dmgKey = 0;
   return api;
 }
