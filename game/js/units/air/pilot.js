@@ -32,7 +32,7 @@ const _d = new THREE.Vector3(), _t = new THREE.Vector3(), _r = new THREE.Vector3
 export const PILOTS = {
   TOMCAT: {
     climbEAS: 150, capEAS: 128, corner: 170, fightTop: 200, vmin: 82, gmax: 6.5, gfight: 6.8, tactic: 'energy', aoaApp: 10.5 * D2R, capAlt: 240, capR: 520,
-    radar: 1700, leash: 1900, bingo: 1900, patAlt: 110, gs: 3.5 * D2R, landX: -4.5, catX: 4.5, abFight: true,
+    radar: 1700, leash: 1900, bingo: 1900, patAlt: 110, gs: 3.5 * D2R, landX: -4.5, catX: -2.5, abFight: true,   // (ngc/bugsweep) catX: the port bow cat - the starboard one (4.5) is fouled by the two Hornets SEAWORLD parks on the starboard bow, solid now: the right main ran into one at the end of the stroke (55 g, breakup)
     weapons: [   // game ranges for a 1.3 km map: long shots with the AIM-54 / AIM-7, the AIM-9 close, then the gun
       { w: 'aim54', rmin: 650, rmax: 1500, cone: 0.35, life: 10, v0: 25, every: 4 },
       { w: 'aim7', rmin: 380, rmax: 1000, cone: 0.3, life: 8, v0: 20, every: 3 },

@@ -38,8 +38,8 @@ export default async function (h) {
     // the deck-edge lifts: a Hornet spotted on lift 1 and a soldier beside it ride down to the hangar door and back up
     await h.key('tap', 'KeyY'); await h.wait(600);
     await h.expect("__G.G.craft === 'foot'", 'out of the Huey on the deck');
-    await h.eval('(() => { const P = __G.war.carrier.parts; return { lifts: P.lifts.map(L => [L.i, L.y, L.target]), deckOnLift: P.localDeck(15.0, -23.3), deckOnHornet: P.localDeck(18.9, -17), deckHornet2: P.localDeck(9.2, -31), deckTomcat: P.localDeck(9.0, 27.5), deckClear: P.localDeck(-6, 0) }; })()');
-    await h.expect('(() => { const P = __G.war.carrier.parts; return P.localDeck(18.9, -17) > 9.5 && P.localDeck(9.2, -31) > 9.5 && P.localDeck(9.0, 27.5) > 9.5 && Math.abs(P.localDeck(-6, 0) - 8) < 1e-6; })()', 'parked aircraft stand up out of the deck (deckY)');
+    await h.eval('(() => { const P = __G.war.carrier.parts; return { lifts: P.lifts.map(L => [L.i, L.y, L.target]), deckOnLift: P.localDeck(15.0, -23.3), deckOnHornet: P.localDeck(18.9, -17), deckHornet2: P.localDeck(13.0, -30), deckTomcat: P.localDeck(9.0, 27.5), deckClear: P.localDeck(-6, 0) }; })()');
+    await h.expect('(() => { const P = __G.war.carrier.parts; return P.localDeck(18.9, -17) > 9.5 && P.localDeck(13.0, -30) > 9.5 && P.localDeck(9.0, 27.5) > 9.5 && Math.abs(P.localDeck(-6, 0) - 8) < 1e-6; })()', 'parked aircraft stand up out of the deck (deckY)');
     await h.eval('(__F.place(15.2, -23.2, -Math.PI / 2), 1)'); await h.wait(800);
     await h.eval('__F.loc()');
     await h.expect('Math.abs(__F.loc().on) < 0.1 && Math.abs(__F.loc().under - 8) < 0.01 && __G.foot.W.onGround', 'standing on lift 1, up');

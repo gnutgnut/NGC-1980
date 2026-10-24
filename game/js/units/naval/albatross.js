@@ -468,7 +468,7 @@ export function buildAlbatross(side = 1, opts = {}) {
   for (const [x, z] of [[4.2, -25], [6.4, 24], [12.4, 15.8], [-12.6, 2], [-12.4, -40]]) fireBottle(kit, x, z);
   for (let i = 0; i < 4; i++) kit.box(0.6, 0.15, 3.2, 0x2a2a2a, -13.0 + i * 0.7, DECK + 0.08, 6 + i * 0.4, 0, 0.1, 0);   // tow bars stacked at the edge
   // parked aircraft: two Hornets forward of the island (tails over the starboard edge), two Tomcats aft (oversweep)
-  const hornets = [[8.9, -47, 0.62], [9.2, -33.2, 0.62]], cats = [[9.0, 27, 0.06], [9.3, 46.5, -0.1]];
+  const hornets = [[12.6, -47, 0.62], [13.0, -33.2, 0.62]], cats = [[9.0, 27, 0.06], [9.3, 46.5, -0.1]];
   const hornetMesh = instanced(hornetGeo(), hornets, 2.05); hornetMesh.name = 'parked-hornets'; g.add(hornetMesh);
   if (opts.buildTomcat) { const tm = instanced(tomcatGeo(opts.buildTomcat), cats, 0); tm.name = 'parked-tomcats'; g.add(tm); for (const [x, z, yw] of cats) chocks(kit, x, z, yw, 2.6, 0.9, -6.4); }
   for (const [x, z, yw] of hornets) chocks(kit, x, z, yw, 1.6, 0.6, -4.6);

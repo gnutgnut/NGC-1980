@@ -369,7 +369,11 @@ export function createAirframe(P, GRAV = 9.0) {
       A.nz = 1; A.nx = (DK.CAT_V ** 2 / (2 * stroke)) / GRAV;
     }
     deckWorld(c, A.catX, DK.CAT_Z0 - C.s, A.pos); A.pos.y = deckH(c, A.pos.x, A.pos.z) + P.REST_H - (C.state === 'hold' ? 0.12 : 0);
-    A.q.setFromEuler(_e.set(C.state === 'hold' ? -0.012 : 0.0, c.yaw, 0, 'YXZ'));
+    // (ngc/bugsweep) on the shuttle the jet lies on the deck as it pitches and rolls (NAVAL / SEAWORLD's live sea, the heel
+    // in a turn): held level on a deck rolled 2.5 deg, the low main gear was 0.3 m into the deck when the shot ended and the
+    // first free step threw it off at 46 g (overstress, breakup) - every Tomcat launched while the carrier was heeling died
+    const ca = c.att;
+    A.q.setFromEuler(_e.set((C.state === 'hold' ? -0.012 : 0.0) + (ca ? ca.pitch : 0), c.yaw, ca ? ca.roll : 0, 'YXZ'));
     surfaceVel(env, A.pos.x, A.pos.z, A.vel); A.vel.x += fx * C.v; A.vel.z += fz * C.v;   // vy: the deck's (a flying carrier climbs)
     A.w.set(0, 0, 0); A.wow = [0.12, 0.13, 0.13]; A.onGround = true;
     A.surf.stab += clamp(P.CAT_STAB - A.surf.stab, -0.7 * h, 0.7 * h);   // trimmed nose-up for the rotation off the bow

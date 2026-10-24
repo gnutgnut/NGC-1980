@@ -38,7 +38,7 @@ export function createAirWar(W, ctx, H) {
       surfVel: W.surfVel,
       carrier: () => {
         const c = carrierOf(side); if (!c) return null;
-        return { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: CARRIER.DECK + c.p.y, vx: c.v.x, vz: c.v.z, speed: c.speed, w: c.w || 0 };
+        return { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: CARRIER.DECK + c.p.y, vx: c.v.x, vz: c.v.z, speed: c.speed, w: c.w || 0, att: c.att, deckAt: W.deckAt ? (x, z) => W.deckAt(c, x, z) : null };   // (ngc/bugsweep: + the live deck - the cat held the AI's jets on the flat deck height while the gear met the heaving, rolling one)
       },
       foes: function* (s) {
         for (const u of W.units) if (u.side !== s && u.p && !u.dims && !u.dead && !u.dying && !u.gone) yield u;

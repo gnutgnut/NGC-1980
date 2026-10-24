@@ -49,7 +49,7 @@ export function createJetPlay(ctx) {
   const cmPose = { get vel() { return J.vel; }, toWorld: (l, o) => { _cmv.set(l[0], l[1], l[2]).applyQuaternion(J.q).add(J.pos); o.x = _cmv.x; o.y = _cmv.y; o.z = _cmv.z; return o; }, dirWorld: (l, o) => { _cmv.set(l[0], l[1], l[2]).normalize().applyQuaternion(J.q); o.x = _cmv.x; o.y = _cmv.y; o.z = _cmv.z; return o; } };
   const env = {
     groundY: ctx.groundY, water: ctx.waterAt, surfVel: war.surfVel, mods: null,
-    carrier: () => { const c = war.carrier; return c && c.sinking === undefined ? { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: ctx.CARRIER.DECK + c.p.y, deckAt: war.deckAt ? (x, z) => war.deckAt(c, x, z) : null } : null; },   // NAVAL: deckAt = the deck moving with the sea
+    carrier: () => { const c = war.carrier; return c && c.sinking === undefined ? { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: ctx.CARRIER.DECK + c.p.y, deckAt: war.deckAt ? (x, z) => war.deckAt(c, x, z) : null, att: c.att } : null; },   // NAVAL: deckAt = the deck moving with the sea
   };
 
   // ---------------------------------------------------------------- life cycle

@@ -71,7 +71,7 @@ export function createTomcatPlay(ctx) {
   const env = {
     groundY: ctx.groundY, water: ctx.waterAt, surfVel: war.surfVel, mods: null,
     surf: ctx.surf ? (x, z) => ctx.surf(x, z) : null,   // TERRAIN: tyre grip / rolling drag by surface (ground.js surfAt)
-    carrier: () => { const c = war.carrier; return c && c.sinking === undefined ? { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: ctx.CARRIER.DECK + c.p.y, deckAt: war.deckAt ? (x, z) => war.deckAt(c, x, z) : null } : null; },
+    carrier: () => { const c = war.carrier; return c && c.sinking === undefined ? { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: ctx.CARRIER.DECK + c.p.y, deckAt: war.deckAt ? (x, z) => war.deckAt(c, x, z) : null, att: c.att } : null; },
   };
   const stores = () => A.stores, count = w => A.stores.filter(s => s.on && s.w === WOF[w]).length;
 
