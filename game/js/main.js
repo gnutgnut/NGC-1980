@@ -1000,7 +1000,9 @@ const RSTAT = { strikes: 0, last: null, bumps: 0 };
 function heliContacts(dt, piloted) {
   rotorHitT -= dt; heliBumpT -= dt;
   const tell = (t, s) => piloted ? say(t, s) : feed(t, 'bad');
-  if (H.omega > 3 && rotorHitT <= 0) {
+  // (landed: the deck crew / the spawn put her there - a parked jet in the Huey's spot is not a strike every frame; blades
+  // already gone: nothing left to strike with)
+  if (H.omega > 3 && rotorHitT <= 0 && !H.landed && D.hp.rotor > 0.02) {
     H.worldPoint(UH1H.HUB, _hub);
     let r = CW.disc(_hub.x, _hub.y, _hub.z, UH1H.R, heliC, _dsc);
     if (!r && !H.landed) { const g = GR.discHit(_hub.x, _hub.y, _hub.z, UH1H.R); if (g) r = { body: { cls: 'solid', owner: g.s ? { kind: g.what } : null, what: g.what }, depth: 9, x: g.x, z: g.z }; }   // buildings, walls, masts, island structures (in flight)

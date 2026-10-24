@@ -25,29 +25,33 @@ export default async function (h) {
   await h.eval(`(window.__C = {
     pos: V => V.sim ? { x: V.sim.pos[0], z: V.sim.pos[2] } : (o => ({ x: o[0], z: o[2] }))(V.fm.origin()),
     spd: V => V.sim ? Math.hypot(V.sim.vel[0], V.sim.vel[2]) : Math.hypot(V.fm.vel[0], V.fm.vel[2]),
-    // a straight, flat, clear line through the home pad (no parked vehicle, tree, wall within 2.6 m of it)
-    line: (L = 34) => { const I = __G.HOME_B.isl, p = I.pad, T = __G.terrainH;
-      for (let k = 0; k < 24; k++) { const a = k * Math.PI / 12, dx = Math.cos(a), dz = Math.sin(a); let ok = true;
-        for (let s = -L; s <= L && ok; s += 2) { const x = p.x + dx * s, z = p.z + dz * s; if (Math.abs(T(x, z) - T(p.x, p.z)) > 1.2 || !__G.GR.clearAt(x, z, 2.8)) ok = false; }
-        if (ok) return { a, dx, dz, x0: p.x - dx * L, z0: p.z - dz * L, x1: p.x + dx * L, z1: p.z + dz * L, mx: p.x, mz: p.z, yaw: Math.atan2(-dx, -dz) }; }
+    // a straight, flat, clear line on the home island near its pad (no parked vehicle, tree, wall within 2.8 m of it,
+    // the fenced cave shaft 13.5 m away, the ground within 1.2 m of the middle's height), nearest the pad first
+    line: (L = 32) => { const I = __G.HOME_B.isl, p = I.pad, T = __G.terrainH, C = [];
+      for (let i = -9; i <= 9; i++) for (let j = -9; j <= 9; j++) C.push([p.x + i * 6, p.z + j * 6]);
+      C.sort((a, b) => Math.hypot(a[0] - p.x, a[1] - p.z) - Math.hypot(b[0] - p.x, b[1] - p.z));
+      for (const [mx, mz] of C) { const h0 = T(mx, mz); if (h0 < 2) continue;
+        for (let k = 0; k < 12; k++) { const a = k * Math.PI / 12, dx = Math.cos(a), dz = Math.sin(a); let ok = true;
+          for (let s = -L; s <= L && ok; s += 2) { const x = mx + dx * s, z = mz + dz * s; if (Math.abs(T(x, z) - h0) > 1.2 || !__G.GR.clearAt(x, z, 2.8) || __G.BASES.some(b => Math.hypot(b.x - x, b.z - z) < 13.5)) ok = false; }
+          if (ok) return { a, dx, dz, x0: mx - dx * L, z0: mz - dz * L, x1: mx + dx * L, z1: mz + dz * L, mx, mz, yaw: Math.atan2(-dx, -dz) }; } }
       return null; },
     look: (x, z, d = 26, hh = 12, a = 0.8) => { const y = __G.terrainH(x, z); window.__cam = { at: [x + Math.cos(a) * d, y + hh, z + Math.sin(a) * d], look: [x, y + 1, z] }; return true; },
     rec: null, track: (f, ms = 100) => { clearInterval(__C.tI); __C.rec = { n: 0 }; __C.tI = setInterval(() => { try { f(__C.rec); __C.rec.n++; } catch (e) { __C.rec.err = String(e); } }, ms); },
     stop: () => { clearInterval(__C.tI); return __C.rec; },
   }, 1)`);
   await h.key('tap', 'KeyY'); await h.wait(500);   // out of the Huey: it stays on the deck, rotor turning (the AI tests run without us)
-  await h.expect("__G.G.craft === 'foot'", 'on foot on the ALBATROSS deck');
-  await h.eval(`(window.__L = __C.line()) && { a: +__L.a.toFixed(2), mid: [Math.round(__L.mx), Math.round(__L.mz)] }`, 'a clear line through the home pad');
-  await h.expect('!!window.__L', 'found a clear 68 m line through the home pad');
+  await h.expect("__G.G.craft === 'foot'", 'on foot on the ALBATROSS deck'); await h.eval("(__G.foot.view = 'third', __G.marine.view = 'third', 1)");   // (no first-person arms over the scene's camera)
+  await h.eval(`(window.__L = __C.line()) && { a: +__L.a.toFixed(2), mid: [Math.round(__L.mx), Math.round(__L.mz)] }`, 'a clear line on the home island');
+  if (!await h.expect('!!window.__L', 'found a clear 64 m line on the home island')) return;
 
   // ---------------------------------------------------------------- 1. a jeep into a tank
   await h.eval(`(() => { const L = __L, P = __G.pool;
     const T = __G.m60C.spawnAt({ x: L.mx, z: L.mz, yaw: L.yaw + Math.PI / 2 });   // across the line
     window.__T0 = __C.pos(T);
-    const J = P.spawnM151({ x: L.x0 + L.dx * 6, z: L.z0 + L.dz * 6, yaw: L.yaw + Math.PI, exact: true }, { running: true }); window.__J = J;
+    const J = P.spawnM151({ x: L.x0 + L.dx * 6, z: L.z0 + L.dz * 6, yaw: L.yaw, exact: true }, { running: true }); window.__J = J;
     P.autopilot(J, [{ x: L.mx, z: L.mz }, { x: L.x1, z: L.z1 }], 9, { avoid: false });
     __C.look(L.mx, L.mz, 24, 9, L.a + 1.9);
-    __C.track(r => { const j = __C.pos(J), t = __C.pos(__G.m60C), s = (j.x - t.x) * L.dx + (j.z - t.z) * L.dz; r.vmax = Math.max(r.vmax || 0, __C.spd(J)); r.sMax = Math.max(r.sMax ?? -99, s); r.tmove = Math.hypot(t.x - __T0.x, t.z - __T0.z); r.jv = __C.spd(J); const c = __G.CW.contact(J._cwb, __G.m60C._cwb); r.pen = Math.max(r.pen || 0, c ? c.depth : 0); });
+    __C.track(r => { const j = __C.pos(J), t = __C.pos(__G.m60C), s = (j.x - t.x) * L.dx + (j.z - t.z) * L.dz; r.vmax = Math.max(r.vmax || 0, __C.spd(J)); r.sMax = Math.max(r.sMax ?? -99, s); r.tmove = Math.hypot(t.x - __T0.x, t.z - __T0.z); r.jv = __C.spd(J); const c = J._cwb && __G.m60C._cwb ? __G.CW.contact(J._cwb, __G.m60C._cwb) : null; r.pen = Math.max(r.pen || 0, c ? c.depth : 0); });
     return { jeep: __C.pos(J), tank: __T0 }; })()`, 'M60A3 parked across the line, an M151A2 driving at it');
   await h.waitFor('__C.rec && __C.rec.vmax > 6 && __C.rec.jv < 0.6 && __C.rec.n > 30', 90000);
   await h.wait(1200);
@@ -59,23 +63,23 @@ export default async function (h) {
 
   // ---------------------------------------------------------------- 2. the tank pushes a parked car
   await h.eval(`(() => { const L = __L, P = __G.pool; __J.stow();
-    const T = __G.m60C.spawnAt({ x: L.x0 + L.dx * 4, z: L.z0 + L.dz * 4, yaw: L.yaw + Math.PI, state: 'hot' });
+    const T = __G.m60C.spawnAt({ x: L.x0 + L.dx * 4, z: L.z0 + L.dz * 4, yaw: L.yaw, state: 'hot' });
     const B = P.spawnBeetle({ x: L.x0 + L.dx * 17, z: L.z0 + L.dz * 17, yaw: L.yaw + Math.PI / 2, exact: true }, {}); window.__B = B; window.__B0 = __C.pos(B); window.__TT0 = __C.pos(T);
     T.order([[L.x1 - L.dx * 6, L.z1 - L.dz * 6]], { speed: 3.5, arrive: 3 });
     __C.look(L.x0 + L.dx * 18, L.z0 + L.dz * 18, 28, 10, L.a + 1.4);
-    __C.track(r => { const b = __C.pos(B), t = __C.pos(T); r.carMove = (b.x - __B0.x) * L.dx + (b.z - __B0.z) * L.dz; r.tankMove = (t.x - __TT0.x) * L.dx + (t.z - __TT0.z) * L.dz; r.gap = (b.x - t.x) * L.dx + (b.z - t.z) * L.dz; r.minGap = Math.min(r.minGap ?? 99, r.gap); });
+    __C.track(r => { const b = __C.pos(B), t = __C.pos(T); r.carMove = (b.x - __B0.x) * L.dx + (b.z - __B0.z) * L.dz; r.tankMove = (t.x - __TT0.x) * L.dx + (t.z - __TT0.z) * L.dz; r.gap = (b.x - t.x) * L.dx + (b.z - t.z) * L.dz; r.minGap = Math.min(r.minGap ?? 99, r.gap); const c = B._cwb && T._cwb ? __G.CW.contact(B._cwb, T._cwb) : null; r.pen = Math.max(r.pen || 0, c ? c.depth : 0); r.cb = !!(B._cwb && B._cwb.enabled); r.asleep = B.asleep; });
     return { car: __B0, tank: __TT0, carMass: Math.round(B.sim.massNow) }; })()`, 'M60A3 ordered down the line, a Beetle parked across it');
   await h.waitFor('__C.rec && (__C.rec.carMove > 6 || __C.rec.tankMove > 40)', 120000);
   await h.wait(800);
   await h.eval('__C.stop()', 'the tank and the car');
   await h.shot('2-tank-pushes-car');
   await h.expect('__C.rec.carMove > 3', 'the car was shoved along the line by the tank');
-  await h.expect('__C.rec.minGap > 2.4', 'the car stayed in front of the tank (not driven through)');
+  await h.expect('__C.rec.pen < 0.7', 'the tank never drove through it (worst overlap under 0.7 m at the headless frame rate): shoved ahead, then aside');
 
   // ---------------------------------------------------------------- 3. two AI vehicles head-on
   await h.eval(`(() => { const L = __L, P = __G.pool; __G.m60C.stow(); __B.stow();
-    const A = P.spawnM151({ x: L.x0 + L.dx * 4, z: L.z0 + L.dz * 4, yaw: L.yaw + Math.PI, exact: true }, { running: true });
-    const B = P.spawnM151({ x: L.x1 - L.dx * 4, z: L.z1 - L.dz * 4, yaw: L.yaw, exact: true }, { running: true });
+    const A = P.spawnM151({ x: L.x0 + L.dx * 4, z: L.z0 + L.dz * 4, yaw: L.yaw, exact: true }, { running: true });
+    const B = P.spawnM151({ x: L.x1 - L.dx * 4, z: L.z1 - L.dz * 4, yaw: L.yaw + Math.PI, exact: true }, { running: true });
     window.__A = A; window.__Bj = B; window.__gA = { x: L.x1 - L.dx * 2, z: L.z1 - L.dz * 2 }; window.__gB = { x: L.x0 + L.dx * 2, z: L.z0 + L.dz * 2 };
     P.autopilot(A, [{ x: L.mx, z: L.mz }, __gA], 7); P.autopilot(B, [{ x: L.mx + 0.3 * L.dz, z: L.mz - 0.3 * L.dx }, __gB], 7);
     __C.look(L.mx, L.mz, 30, 14, L.a + 1.6);
@@ -130,7 +134,7 @@ export default async function (h) {
     J.reset(hp.x, GR.deckH(hp.x, hp.z), hp.z, c.yaw, { running: true, speed: 0 });
     const sv = __G.war.surfVel(hp.x, hp.z) || { vx: 0, vz: 0 }, sp = 4.6; J.vel.set(sv.vx - Math.sin(c.yaw) * sp, 0, sv.vz - Math.cos(c.yaw) * sp);
     __G.JP.pbrake = false; __G.JP.thr = 0; window.__jc0 = __G.jetC.contacts;
-    const m = GR.toWorld(c, __lane + 22, 8 + 9, {}); window.__cam = { at: [m.x, GR.deckH(m.x, m.z) + 9, m.z], look: [hp.x + (GR.toWorld(c, __lane, 8, {}).x - hp.x) * 0.6, GR.deckH(hp.x, hp.z) + 1.5, hp.z + (GR.toWorld(c, __lane, 8, {}).z - hp.z) * 0.6] };
+    const m = GR.toWorld(c, __lane - 18, 8 + 12, {}); window.__cam = { at: [m.x, GR.deckH(m.x, m.z) + 7, m.z], look: [hp.x + (GR.toWorld(c, __lane, 8, {}).x - hp.x) * 0.6, GR.deckH(hp.x, hp.z) + 1.5, hp.z + (GR.toWorld(c, __lane, 8, {}).z - hp.z) * 0.6] };
     return { craft: __G.G.craft, jet: [Math.round(J.pos.x), Math.round(J.pos.z)] }; })()`, 'a Hornet rolling at 9 kt down the lane toward the parked Tomcats tail');
   await h.expect("__G.G.craft === 'jet' && !__G.JP.J.cat", 'in the Hornet, off the catapult, rolling');
   await h.waitFor('__G.jetC.lastContact || !__G.JP.alive', 30000);

@@ -424,6 +424,7 @@ export function createWheeledCraft(ctx, type, o = {}) {
   // (a tank driving into it, the contact response) as an impulse into the sim at the contact point
   V.cwClass = 'veh'; V.mass = () => S.massNow;
   V.push = (jx, jz, x, z) => { if (!V.exists || V.slung) return; V.wake(); S.impulse([x, S.pos[1] + HT * 0.35, z], [jx, 0, jz]); };
+  V.shove = (dx, dz) => { if (!V.exists || V.slung) return; const l = Math.hypot(dx, dz), k = l > 0.3 ? 0.3 / l : 1; V.wake(); S.transport(dx * k, 0, dz * k, 0); };   // (out of what it overlaps: a kinematic shift, as a deck carries it)
   V.bounds = () => {
     if (!V.exists || V.slung) return null;
     const c = -S.heading, cx = S.pos[0] + S.fwdv[0] * -zc, cz = S.pos[2] + S.fwdv[2] * -zc;

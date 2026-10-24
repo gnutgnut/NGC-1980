@@ -219,8 +219,9 @@ export function createCollisionWorld(opt = {}) {
 
   // ------------------------------------------------------------------ contact response
   // Every moving body against everything near it, each pair once. Impulse along the normal with the masses (a body
-  // without push / shove counts as immovable), restitution 0.15, positional correction for what overlaps: shoves for
-  // kinematic bodies, a separating-velocity bias for sims (they move themselves). hit() events by closing speed.
+  // without push / shove counts as immovable), restitution 0.15, positional correction for what overlaps: a shove where
+  // the body takes one (kinematic units; sims that can be shifted), else a separating-velocity bias. hit() events by
+  // closing speed.
   const _c = { nx: 0, nz: 0, depth: 0, x: 0, z: 0 }, _cf = { nx: 0, nz: 0, depth: 0, x: 0, z: 0 };
   const E = 0.15, SLOP = 0.02, BETA = 0.6;
   const invM = b => (b.static || !(b.push || b.shove) || !(b.mass < INF)) ? 0 : 1 / b.mass;

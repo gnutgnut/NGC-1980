@@ -567,6 +567,7 @@ export function createArmorCraft(ctx, type = 'm60', id = type) {
   // heavier or a vehicle that rammed it, as an impulse into trackfm at the contact point (a wreck is not moved)
   D.cwClass = 'trk'; D.mass = () => fm.mass;
   D.push = (jx, jz, x, z) => { if (!D.exists || D.dead) return; D.wake(); fm.origin(_o); fm.impulse([x, _o[1] + 1, z], [jx, 0, jz]); };
+  D.shove = (dx, dz) => { if (!D.exists || D.dead) return; const l = Math.hypot(dx, dz), k = l > 0.3 ? 0.3 / l : 1; D.wake(); fm.pos[0] += dx * k; fm.pos[2] += dz * k; };
 
   // ---------------------------------------------------------------- keys
   D.key = code => {
