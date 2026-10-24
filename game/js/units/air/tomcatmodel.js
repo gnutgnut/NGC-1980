@@ -211,11 +211,27 @@ export function buildTomcatModel(side = 1, { modex = 201 } = {}) {
   tube(arch(-6.18, 1.39, 0.615, 0.74), 0.03, frameM, cv, 'canopyBow'); tube(arch(-4.85, 1.65, 0.655, 0.74), 0.028, frameM, cv, 'canopyMidBow');
   for (const s of [-1, 1]) tube(cr.map(([z, , hw, b]) => [s * (hw + 0.01), b + 0.01, z]), 0.035, frameM, cv, 'canopySill');
   // ---- two crew: pilot and RIO on GRU-7A seats, olive flight suits, white helmets, dark visors
+  // (airai-polish) the crew as figures, matching the cockpit's RIO: shoulders and arms in the harness (torso pads, LPU
+  // collar), HGU-33 white helmet with the visor down and a squadron stripe, oxygen mask and hose; the heads turn to
+  // where the crew look (A.crewLook, a world point: the bandit, the lead, the ship) or scan the sky. Names are the ones
+  // tomcatplay.js hides from the cockpit view (helmet / visor / torso / seatBack / headbox).
+  const harnM = M(0x2a2d24), maskM = M(0x6d7064), lpuM = M(0xb8a24a), stripeM = M(0xd0a020);
+  const heads = [];
   for (const [z, h] of [[-5.5, 0.02], [-4.2, 0.0]]) {
     mesh(boxG(0.56, 1.0, 0.18, 0, 0.25 + h, z + 0.42), seatM, g, 'seatBack'); mesh(boxG(0.5, 0.28, 0.22, 0, 0.92 + h, z + 0.4), seatM, g, 'headbox');
-    mesh(boxG(0.44, 0.52, 0.3, 0, 0.42 + h, z + 0.12), crewM, g, 'torso');
-    mesh(new THREE.SphereGeometry(0.15, 10, 8).translate(0, 1.05 + h, z), helmM, g, 'helmet');
-    mesh(new THREE.SphereGeometry(0.152, 10, 6, -Math.PI * 0.75, Math.PI * 0.5, Math.PI * 0.35, Math.PI * 0.3).translate(0, 1.05 + h, z), visorM, g, 'visor');
+    mesh(merge([boxG(0.42, 0.42, 0.28, 0, 0.5 + h, z + 0.14), boxG(0.5, 0.12, 0.26, 0, 0.73 + h, z + 0.15)]), crewM, g, 'torso');   // chest, shoulders
+    mesh(merge([boxG(0.06, 0.46, 0.04, -0.13, 0.52 + h, z - 0.005), boxG(0.06, 0.46, 0.04, 0.13, 0.52 + h, z - 0.005), boxG(0.44, 0.06, 0.04, 0, 0.36 + h, z - 0.005)]), harnM, g, 'torso');   // harness straps
+    mesh(boxG(0.3, 0.05, 0.1, 0, 0.8 + h, z + 0.06), lpuM, g, 'torso');   // LPU collar
+    for (const sx of [-1, 1]) {   // upper arms down along the sides, forearms forward to the stick / throttles (or the RIO's consoles)
+      mesh(boxG(0.1, 0.32, 0.12, sx * 0.27, 0.56 + h, z + 0.12).rotateX(0.15), crewM, g, 'torso');
+      mesh(boxG(0.09, 0.09, 0.32, sx * 0.25, 0.4 + h, z - 0.08), crewM, g, 'torso');
+    }
+    const hd = new THREE.Group(); hd.position.set(0, 1.0 + h, z); g.add(hd); heads.push({ g: hd, yaw: 0, pitch: 0, rio: heads.length === 1 });
+    mesh(new THREE.SphereGeometry(0.15, 12, 9).translate(0, 0.05, 0.01), helmM, hd, 'helmet');
+    mesh(boxG(0.03, 0.012, 0.15, 0, 0.198, 0.02), stripeM, hd, 'helmet');
+    mesh(new THREE.SphereGeometry(0.153, 12, 6, -Math.PI * 0.78, Math.PI * 0.56, Math.PI * 0.33, Math.PI * 0.25).translate(0, 0.05, 0.01), visorM, hd, 'visor');
+    mesh(new THREE.ConeGeometry(0.065, 0.12, 8).rotateX(-Math.PI / 2).translate(0, -0.04, -0.15), maskM, hd, 'helmet');
+    mesh(cylZ(0.022, 0.022, 0.3, 6).rotateX(0.9).translate(0.05, -0.17, -0.06), maskM, hd, 'helmet');   // the mask's hose
   }
   mesh(boxG(0.95, 0.08, 0.5, 0, 0.66, -6.45), darkM, g, 'glareshield');
   mesh(boxG(0.85, 0.32, 0.12, 0, 0.66, -4.6), darkM, g, 'rioPanel');
@@ -335,7 +351,24 @@ export function buildTomcatModel(side = 1, { modex = 201 } = {}) {
     for (const k in stores) stores[k].visible = false;
     if (A.stores && A.stores.length !== undefined) for (const s of A.stores) { const m = stores[s.w + '@' + s.st]; if (m) m.visible = !!s.on; }
     for (const o of shell) o.visible = !inside;
+    // the crew's heads: toward A.crewLook (world) through the jet's own pose (g.position / g.quaternion, set by the caller
+    // before animate), else a slow scan of the sky (the RIO mostly heads down on his TID)
+    let ly = null, lp = 0;
+    if (A.crewLook) {
+      _lk.copy(A.crewLook).sub(g.position).applyQuaternion(_qi.copy(g.quaternion).invert());
+      ly = Math.atan2(-_lk.x, -_lk.z); lp = Math.atan2(_lk.y, Math.hypot(_lk.x, _lk.z));
+    }
+    for (const H of heads) {
+      let yw, pt;
+      if (ly !== null) { yw = ly; pt = lp; }
+      else if (H.rio) { const ph = time * 0.21 + 1.3; yw = Math.sin(ph) > 0.75 ? Math.sign(Math.sin(ph * 3.1)) * 1.4 : 0.1 * Math.sin(time * 0.7); pt = Math.sin(ph) > 0.75 ? 0.15 : -0.45; }
+      else { yw = 0.9 * Math.sin(time * 0.33) * Math.sin(time * 0.11 + 1); pt = 0.12 + 0.12 * Math.sin(time * 0.27); }
+      yw = THREE.MathUtils.clamp(yw, -2.0, 2.0); pt = THREE.MathUtils.clamp(pt, -0.6, 0.85);
+      const k = Math.min(1, dt * 3.5); H.yaw += (yw - H.yaw) * k; H.pitch += (pt - H.pitch) * k;
+      H.g.rotation.set(H.pitch, H.yaw, 0, 'YXZ');
+    }
   }
+  const _lk = V(), _qi = new THREE.Quaternion();
   // world-space-free helpers for the game: where the nozzles and wingtips are (for exhaust and vapour)
   const _t = V();
   function wingTipLocal(side, out = V()) {

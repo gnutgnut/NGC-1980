@@ -433,6 +433,7 @@ export function createWar(ctx) {
   function updateAir(u, dt, pl) {
     if (u.rot) { ROT.update(u, dt, pl, W.peace); return; }   // NGC-1980 hook: rotary units fly themselves (dying too)
     u.ph += dt;
+    if (u.dying && (u.sim || u.drone) && W.air.dying && W.air.dying(u, dt)) return;   // AIR (airai-polish): the sim aircraft fall, burn, break up and leave wrecks (units/air/airwar.js)
     if (u.dying) {
       u.v.y -= 15 * dt; u.p.addScaledVector(u.v, dt); u.mesh.rotation.y += dt * 8; u.mesh.rotation.z += dt * 2;
       fx.add.spawn(u.p.x, u.p.y, u.p.z, rnd(-1, 1), rnd(0, 2), rnd(-1, 1), rnd(0.25, 0.5), 1.4, 0.4, 1, rnd(.4, .6), .1, 0.9, -1, 1); fx.trail(u.p.x, u.p.y, u.p.z, 1.3);

@@ -30,6 +30,9 @@ export default async function (h) {
     out.tris = tris; out.meshes = meshes; window.__chk = out; return out; })()`);
   await h.expect(`Object.entries(__chk).filter(([k]) => k.startsWith('tyre')).every(([, v]) => Math.abs(v[0] + 2.5) < 0.04)`);
   await h.expect(`Math.hypot(__chk.hookTip[1] + 2.35, __chk.hookTip[2] - 8.0) < 0.15`);
+  // (airai-polish) the crew figures: helmets, visors, masks, harness (the heads scan when nobody gives them a look)
+  await h.eval(`(() => { const A = __A; Object.assign(A.cam, { yaw: 2.0, pitch: 0.35, dist: 5 }); A.cam.t.set(0, 1, -4.9); Object.assign(A.S, { canopy: 0 }); return 1; })()`);
+  await h.wait(350); await h.shot('tomcat_crew');
   for (const m of ['shrike', 'reaper', 'shahed']) {
     await h.goto(`dev/air.html?model=${m}&ui=0`);
     await h.waitFor('window.__A', 10000);
@@ -37,6 +40,11 @@ export default async function (h) {
     for (const [n, cam] of [['front34', `2.4,0.35,${d}`], ['top', `0.2,1.45,${d * 1.1}`], ['rear', `0.6,0.2,${d * 0.9}`]]) {
       await h.eval(`(() => { const A = __A, [y, p, dd] = '${cam}'.split(',').map(Number); Object.assign(A.cam, { yaw: y, pitch: p, dist: dd }); A.S.gear = 0; A.S.eng = [{ n: 0.95, nozzle: 0.6, ab: 0 }]; return 1; })()`);
       await h.wait(350); await h.shot(`${m}_${n}`);
+    }
+    // (airai-polish) damage state, killed (lights / glow / seams out), the far level of detail
+    for (const [q, n] of [['&dmg=0.3', 'damaged'], ['&dmg=0.3&dead=1', 'dead'], ['&lod=far', 'farLOD']]) {
+      await h.goto(`dev/air.html?model=${m}&ui=0${q}&cam=2.4,0.35,${d}`);
+      await h.waitFor('window.__A', 10000); await h.wait(350); await h.shot(`${m}_${n}`);
     }
   }
 }

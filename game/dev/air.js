@@ -44,6 +44,10 @@ const orbitCam = () => { camera.position.set(Math.sin(cam.yaw) * Math.cos(cam.pi
 if (MODEL) {
   const builders = { tomcat: () => buildTomcatModel(1), shrike: () => RM.buildShrikeModel(), reaper: () => RM.buildReaperModel(), shahed: () => RM.buildShahedModel() };
   const model = builders[MODEL](); scene.add(model.group);
+  // (airai-polish) &lod=far shows the far level of detail close up; &dmg=<hp fraction> a damage state; &dead=1 killed
+  if (Q.get('lod') === 'far' && model.far) { scene.remove(model.group); scene.add(model.far); }
+  if (Q.get('dmg') !== null && model.setDamage) model.setDamage(+Q.get('dmg'));
+  if (Q.get('dead') === '1' && model.kill) model.kill();
   const ground = { tomcat: -2.5, shrike: RW.SHRIKE.GEAR[0][1], reaper: RW.REAPER.GEAR[0][1], shahed: -0.6 }[MODEL];
   const deck = new THREE.Mesh(new THREE.PlaneGeometry(80, 80).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x3c4045 })); deck.position.y = ground; scene.add(deck);
   const grid = new THREE.GridHelper(80, 80, 0x667080, 0x50565e); grid.position.y = ground + 0.002; scene.add(grid);
