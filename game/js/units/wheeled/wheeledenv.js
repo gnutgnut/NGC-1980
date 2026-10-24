@@ -20,11 +20,12 @@
 //   cliff probed by the tyres alone kicks; as an obstacle it stops the vehicle).
 import { makeTerrainEnv } from './index.js';
 import { SURF } from './tyre.js';
+import { SURFACE } from '../../world/terrain.js';   // TERRAIN (wave 3): the islands' surfaces and their tyre names
 
 const CK = (i, j) => i * 4194304 + j;   // cell key (|i|, |j| < 2e6 m)
 const S_TARMAC = SURF.tarmac, S_DIRT = SURF.dirt, S_DECK = SURF.deck;
 const LIFT = { tarmac: 0.14, lane: 0.13, street: 0.12, dirt: 0.10 };   // world/chunkgen.js LIFT
-const FROM_GR = { road: SURF.tarmac, deck: SURF.deck, rock: SURF.rock, grass: SURF.grass, sand: SURF.sand, mud: SURF.mud, water: SURF.sand, hole: SURF.rock };
+const FROM_GR = { road: SURF.tarmac, deck: SURF.deck, rock: SURF.rock, grass: SURF.grass, sand: SURF.sand, mud: SURF.mud, water: SURF.sand, hole: SURF.rock };   // (TERRAIN: the rest - wetsand, shingle, marsh, dirt - by terrain.js SURFACE .tyre; under water, the sea bed)
 
 export function createWorldEnv(o) {
   const { GR, terrainH, holes = [], world = {} } = o;
@@ -51,7 +52,7 @@ export function createWorldEnv(o) {
     if (s === undefined) {
       const cx = i + 0.5, cz = j + 0.5, r = world.roadAt ? world.roadAt(cx, cz) : null;
       if (r && r.surface && r.road >= 0 || r && r.road === -1) { s = r.surface === 'dirt' ? S_DIRT : S_TARMAC; if (r.bridge) BR.set(k, r.y + (LIFT[r.type] ?? 0.12)); }
-      else { GR.sample(cx, cz, _s); s = FROM_GR[_s.surface] ?? SURF.grass; if (s === SURF.sand && _s.h < 0.8) s = S_DIRT; }   // wet sand at the tide line and under the shallows is firm (the soft dry sand is above it): a beach a jeep can drive into the surf on
+      else { GR.sample(cx, cz, _s); s = FROM_GR[_s.surface === 'water' && _s.bed ? _s.bed : _s.surface] ?? SURF[SURFACE[_s.surface === 'water' && _s.bed ? _s.bed : _s.surface]?.tyre] ?? SURF.grass; if (s === SURF.sand && _s.h < 0.8) s = S_DIRT; }   // wet sand at the tide line and under the shallows is firm (the soft dry sand is above it): a beach a jeep can drive into the surf on
       SU.set(k, s);
     }
     return s;

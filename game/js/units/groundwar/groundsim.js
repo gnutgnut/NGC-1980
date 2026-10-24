@@ -27,6 +27,7 @@ import { createMBT, MBT } from '../runaway/mbt.js';
 import { AMMO, normalizeHit } from '../runaway/hit.js';
 import { WPN } from '../runaway/sandbox.js';
 import { rng } from '../runaway/rwworld.js';
+import { zoneSurf, inGrid, SURFACE } from '../../world/terrain.js';   // TERRAIN (wave 3): the one surface table
 // ngc/infdepth: the near Marines on the real rifleman + medical sims, and casualty care (corpsman, buddy aid, CCP)
 import { createRichMarine, ROLE_KIT } from './richmarine.js';
 import { drillAt, AI_RELEASE_T } from '../infantry/carepose.js';   // ngc/infdepth-fix: the M67 drill's timing (the views pose it)
@@ -83,7 +84,8 @@ export function createGroundSim(o) {
   const hAt = (x, z) => { const I = maps.at(x, z); return I && maps.has(I) ? maps.get(I).height(x, z) : terrainH(x, z); };
   const envLand = { height: hAt };
   const envHover = { height: (x, z) => Math.max(hAt(x, z), 0) };
-  const armorEnv = { height: hAt, surface: (x, z) => { const h = hAt(x, z); if (h < 1.2) return 'sand'; const e = 1, s = Math.hypot(hAt(x + e, z) - hAt(x - e, z), hAt(x, z + e) - hAt(x, z - e)) / 2; return s > 0.7 ? 'rock' : (Math.sin(x * 0.05) * Math.cos(z * 0.047) > 0.3 ? 'dirt' : 'grass'); }, water: (x, z) => (hAt(x, z) < 0 ? 0 : -Infinity) };
+  // TERRAIN (wave 3): the islands' own soils (world/terrain.js) where the zone grid reaches; the old guess elsewhere
+  const armorEnv = { height: hAt, surface: (x, z) => { if (inGrid(x, z)) return SURFACE[zoneSurf(x, z)].soil; const h = hAt(x, z); if (h < 1.2) return 'sand'; const e = 1, s = Math.hypot(hAt(x + e, z) - hAt(x - e, z), hAt(x, z + e) - hAt(x, z - e)) / 2; return s > 0.7 ? 'rock' : (Math.sin(x * 0.05) * Math.cos(z * 0.047) > 0.3 ? 'dirt' : 'grass'); }, water: (x, z) => (hAt(x, z) < 0 ? 0 : -Infinity) };
 
   // ngc/infdepth: casualty care (wounded call out and crawl to cover, the corpsman, buddy aid, drags to the CCP)
   function worldAt(x, z) { const I = maps.at(x, z); return I && maps.has(I) && maps.get(I).ready ? maps.get(I).world : null; }
@@ -256,11 +258,18 @@ export function createGroundSim(o) {
     }
   }
   // walkers and tracks keep out of the sea: a commanded velocity that would take them into water within `look` m stops
+  // (ngc/rwground-polish: blocked by the water's edge, slide along it - the commanded direction turned 30 or 60 deg
+  // either way, the side nearer the wanted line first - instead of standing at the shoreline for the rest of the war)
+  const DRY_TURN = [0.52, -0.52, 1.05, -1.05];   // (no further: past 60 deg it would make no headway - it stops)
   function dry(u, v, look) {
     const l = Math.hypot(v[0], v[1]); if (l < 0.05) return v;
-    const x = u.x + v[0] / l * look, z = u.z + v[1] / l * look;
-    if (hAt(x, z) < (u.kind === 'mbt' ? 0.4 : 0.15)) { v[0] = 0; v[1] = 0; }
-    return v;
+    const lim = u.kind === 'mbt' ? 0.4 : 0.15, ux = v[0] / l, uz = v[1] / l;
+    if (hAt(u.x + ux * look, u.z + uz * look) >= lim) return v;
+    for (const a of DRY_TURN) {
+      const c = Math.cos(a), s = Math.sin(a), rx = ux * c - uz * s, rz = ux * s + uz * c;
+      if (hAt(u.x + rx * look, u.z + rz * look) >= lim && hAt(u.x + rx * look * 2, u.z + rz * look * 2) >= lim) { const k = l * Math.max(0.4, c); v[0] = rx * k; v[1] = rz * k; return v; }
+    }
+    v[0] = 0; v[1] = 0; return v;
   }
   // a point in the sea pulled in toward the island's middle until it is on dry ground
   function landward(B, p) {
@@ -473,7 +482,8 @@ export function createGroundSim(o) {
       const u = GS.units[i]; if (u.alive) continue;
       u.deadT += dt;
       // (ngc/infdepth: with care on, a Marine's body stays 7 min: lootable)
-      if (u.deadT > (u.kind === 'marine' ? (o.care ? 420 : 120) : 150)) { GS.units.splice(i, 1); if (u.B) { const k = u.B.units.indexOf(u); if (k >= 0) u.B.units.splice(k, 1); } ev('remove', { id: u.id, u }); }
+      // (ngc/rwground-polish: a burnt-out tank stays 10 min, a STRIDER's carcass 4: the island shows what happened on it)
+      if (u.deadT > (u.kind === 'marine' ? (o.care ? 420 : 120) : u.vehicle ? 600 : 240)) { GS.units.splice(i, 1); if (u.B) { const k = u.B.units.indexOf(u); if (k >= 0) u.B.units.splice(k, 1); } ev('remove', { id: u.id, u }); }
     }
     return GS.events;
   };

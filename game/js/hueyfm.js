@@ -414,7 +414,10 @@ export function createHueySim(GRAV = 9.81) {
       // rotation included, shared by load) with a slip anchor so it holds still
       const vl = _w.dot(_fwd), vs = _w.dot(_lat), share = N / Math.max(N, H._nsum || 0, 1) * 0.5 / h;
       slip[i][0] += vl * h; slip[i][1] += vs * h;
-      const fl = -(vl + slip[i][0] * 6) * effMass(_r, _fwd, m) * share, fs = -(vs + slip[i][1] * 6) * effMass(_r, _lat, m) * share, ml = 0.45 * N, ms = 0.7 * N;
+      // TERRAIN (wave 3): env.surf(x, z) -> { skid } scales the skid shoes' grip by what they stand on (ploughing in sand
+      // and shingle, gliding on mud and wet grass); no env.surf (the benches): concrete, as before
+      const kS = env.surf ? env.surf(_p.x, _p.z).skid ?? 1 : 1;
+      const fl = -(vl + slip[i][0] * 6) * effMass(_r, _fwd, m) * share, fs = -(vs + slip[i][1] * 6) * effMass(_r, _lat, m) * share, ml = 0.45 * N * kS, ms = 0.7 * N * kS;
       if (Math.abs(fl) > ml) slip[i][0] = 0; if (Math.abs(fs) > ms) slip[i][1] = 0;
       _f.set(0, N, 0).addScaledVector(_fwd, clamp(fl, -ml, ml)).addScaledVector(_lat, clamp(fs, -ms, ms));
       _Fw.add(_f); _Tw.add(_t.copy(_r).cross(_f));

@@ -158,6 +158,12 @@ export function createSquadAI(world, opt = {}) {
     for (const k of en) if (k.conf > 0.3 && dist2(k.x, k.z, cx, cz) < 350) theirs += AI_T.THREAT[k.kind] * (k.kind === 'at' && ms.some(m => m.vehicle) ? 1.5 : 1);
     S.ratio = theirs > 0 ? own / theirs : 99;
     const near = en.filter(k => k.conf > 0.35 && dist2(k.px, k.pz, cx, cz) < 320);
+    // ngc/rwground-polish: an aircraft working the squad over (it fired in the last few seconds and is within reach, or
+    // it is right on top of them): the walkers break for cover from IT and spread out, the hover tanks keep moving
+    let air = null, airD = 1e9;
+    for (const k of en) if (k.kind === 'air' && k.conf > 0.4 && AI.time - k.t < 4) { const d = dist2(k.px ?? k.x, k.pz ?? k.z, cx, cz); if ((d < 350 && (k.firing ?? 99) < 5) || d < 90) if (d < airD) { airD = d; air = k; } }
+    if (air && !S.air) AI.log.push({ t: AI.time, sq: S.id, st: 'AIR', note: 'aircraft on us: cover + disperse' });
+    S.air = air ? { id: air.id, x: air.px ?? air.x, y: air.y ?? world.height(air.x, air.z) + 30, z: air.pz ?? air.z } : null;
     const O = S.order;
     // the main threat axis
     let tx = 0, tz = 0, tw = 0; for (const k of near) { const w = threatOf(k, cx, cz); tx += k.px * w; tz += k.pz * w; tw += w; }
@@ -245,9 +251,9 @@ export function createSquadAI(world, opt = {}) {
     }
     return best;
   }
-  function chooseCover(S, m, anchorX, anchorZ, maxR = 32) {
-    const thr = S.threat; if (!thr) return null;
-    const ty = world.height(thr[0], thr[1]) + 1.5;
+  function chooseCover(S, m, anchorX, anchorZ, maxR = 32, from = null) {
+    const thr = from ? [from.x, from.z] : S.threat; if (!thr) return null;   // (from: cover from somewhere else - an aircraft)
+    const ty = from ? from.y : world.height(thr[0], thr[1]) + 1.5;
     let best = null, bs = -1e9;
     for (const cp of world.coverPoints(anchorX, anchorZ, maxR, [])) {
       if (cp.taken && cp.taken !== m.id && cp.takenT > AI.time) continue;
@@ -376,7 +382,16 @@ export function createSquadAI(world, opt = {}) {
         const ox = O.x ?? cx, oz = O.z ?? cz, rr = O.r ?? 30;
         const ang = S.threat ? Math.atan2(S.threat[1] - oz, S.threat[0] - ox) : n * 1.3;
         if (!a.cover || AI.time - (a.coverT || 0) > 15) { a.cover = chooseCover(S, m, ox + Math.cos(ang + (n - 1) * 0.5) * rr * 0.6, oz + Math.sin(ang + (n - 1) * 0.5) * rr * 0.6, rr); a.coverT = AI.time; }
-        dest = a.cover ? [a.cover.x, a.cover.z] : [ox, oz]; a.state = 'defend';
+        // (ngc/rwground-polish: no threat known yet - no cover to pick against it - so a perimeter: each walker on its own
+        // bearing round the point, facing out, instead of the whole squad bunching on the point itself)
+        if (a.cover) dest = [a.cover.x, a.cover.z];
+        else {
+          const N = Math.max(1, ms.filter(q => !q.vehicle).length), b = (n / N) * 2 * Math.PI + (S.id.length % 7);
+          let px = ox + Math.cos(b) * rr * 0.55, pz = oz + Math.sin(b) * rr * 0.55;
+          for (let i = 0; i < 6 && world.isWater(px, pz); i++) { px = (px + ox) / 2; pz = (pz + oz) / 2; }
+          dest = [px, pz]; if (!tgt) a.face = Math.atan2(-(px - ox), -(pz - oz));
+        }
+        a.state = 'defend';
       } else {
         // fire and manoeuvre: team (bound index % 2) bounds forward to the next cover; the other suppresses
         const boundI = Math.floor(S.stateT / AI_T.BOUND_T), moving = boundI % 2 === a.team && S.stateT > 3;
@@ -398,6 +413,28 @@ export function createSquadAI(world, opt = {}) {
         dest = a.cover ? [a.cover.x, a.cover.z] : a.openDest;
         a.run = moving; a.state = moving ? 'bound' : 'cover / suppress';
         if (moving && dest && dist2(dest[0], dest[1], m.x, m.z) > 3 && a.supp < 0.5) a.fire = a.fire && false;
+      }
+    }
+    // ngc/rwground-polish: under air attack - every walker that isn't the one shooting back at the aircraft (or a
+    // flanker committed to its run) goes to the nearest cover from the aircraft's side, crouched, and nobody stays
+    // bunched: a squad mate within 7 m steps off; a hover tank never sits still (it jinks round its position)
+    if (S.air && st !== 'retreat') {
+      if (!m.vehicle) {
+        const shootingAir = a.aimId === S.air.id && a.fire;
+        if (!shootingAir && !(st === 'flank' && a.flanker)) {
+          if (!a.airCover || AI.time - (a.airCoverT || 0) > 8) { a.airCover = chooseCover(S, m, m.x, m.z, 20, S.air); a.airCoverT = AI.time; }
+          if (a.airCover) { a.cover = a.airCover; dest = [a.airCover.x, a.airCover.z]; a.run = true; a.state = 'air: to cover'; }
+        }
+        let nb = null, nd = 7;
+        for (const q of ms) if (q !== m && !q.vehicle) { const d = dist2(q.x, q.z, m.x, m.z); if (d < nd) { nd = d; nb = q; } }
+        if (nb && !(dest && a.cover && dist2(dest[0], dest[1], m.x, m.z) < 1.5)) {
+          const ax = m.x - nb.x, az = m.z - nb.z, al = Math.hypot(ax, az) || 1, k = (7.5 - nd) + 1;
+          const b = dest || [m.x, m.z]; dest = [b[0] + ax / al * k, b[1] + az / al * k]; if (world.isWater(dest[0], dest[1])) dest = b;
+          if (a.state !== 'air: to cover') a.state = 'air: disperse';
+        }
+      } else if (m.kind === 'hovertank') {
+        if (!dest || dist2(dest[0], dest[1], m.x, m.z) < 6) { const ang = AI.time * 0.35 + m.id; let jx = m.x + Math.cos(ang) * 16, jz = m.z + Math.sin(ang) * 16; if (world.isWater(jx, jz)) { jx = m.x - Math.cos(ang) * 16; jz = m.z - Math.sin(ang) * 16; } dest = [jx, jz]; }
+        a.run = true; a.state = 'air: jinking';
       }
     }
     // suppression: too much incoming and caught moving in the open -> nearest cover now

@@ -19,6 +19,8 @@ import { RwAudio } from '../runaway/rwaudio.js';
 import { FIGURES } from '../air/rotary/figures.js';
 import { createCasevac } from './casevac.js';   // ngc/infdepth
 import { careHands, throwHands } from '../infantry/carepose.js';   // ngc/infdepth-fix
+import { createStriderLOD } from '../runaway/rwlod.js';   // ngc/rwground-polish
+import { createGroundFx } from './gwfx.js';   // ngc/rwground-polish
 
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -30,7 +32,8 @@ export const GW_T = {
   DECK_RATE: 0.12,                                  // materiel / s of armour the KRAKEN's vehicle deck readies (game)
   STRIDERS: 8, SQUAD: 4,                            // per MV-22 load; per squad
   CAP_RW: 12, CAP_MAR: 9,                           // s to take a pad (the war's CAP_TIME for the old troops: 10 / 9)
-  DRAW: { strider: 700, hovertank: 1100, mbt: 1100, marine: 520, marineFull: 140 },
+  DRAW: { strider: 1400, hovertank: 1100, mbt: 1100, marine: 520, marineFull: 140 },
+  LOD_STRIDER: 160,                                 // ngc/rwground-polish: full STRIDER model inside this, instanced stand-ins out to DRAW
   RICH_R: 120, RICH_MAX: 14,                        // ngc/infdepth: Marines this close to the camera run the real sims
 };
 
@@ -104,7 +107,8 @@ export function createGroundWar(ctx) {
   // ngc/infdepth: the Marines near the camera on the real rifleman + medical sims (rich), casualty care, casevac
   const GS = createGroundSim({ terrainH, islands: W.islands, hooks: { targetsFor, extSeg, extBlast, patients: B => CV.patients(B) }, rich: { r: GW_T.RICH_R, max: GW_T.RICH_MAX }, care: true });
   const CV = createCasevac({ GS, W, PL: () => ctx.player(), feed });
-  const GW = { sim: GS, root, views: new Map(), proxies: [], landings: [], lcacs: [], hoverT: GW_T.HOVER_AT, mbtT: GW_T.MBT_AT, playerFiredT: 99, bank: 0, kills: new Map(), godPlayer: false, T: GW_T, CV };
+  const LOD = createStriderLOD(root, 160), GFX = createGroundFx({ root, fx, GS, hAt: (x, z) => GS.hAt(x, z) });   // ngc/rwground-polish
+  const GW = { LOD, GFX, sim: GS, root, views: new Map(), proxies: [], landings: [], lcacs: [], hoverT: GW_T.HOVER_AT, mbtT: GW_T.MBT_AT, playerFiredT: 99, bank: 0, kills: new Map(), godPlayer: false, T: GW_T, CV };
 
   // ------------------------------------------------------------------------------------------- views
   function viewOf(u) {
@@ -144,11 +148,20 @@ export function createGroundWar(ctx) {
   const _pose = { stance: 'stand', stanceFrom: 'stand', stanceTo: 'stand', stanceT: 1, speed: 0, gaitPhase: 0, aimPitch: 0, down: false, cls: 'rifle', ads: 0, gait: 'walk' }, _rp = {};
   function renderUnits(dt) {
     const cx = ear.x, cy = ear.y, cz = ear.z;
+    LOD.begin();
     for (const u of GS.units) {
       const d = Math.hypot(u.x - cx, u.y - cy, u.z - cz), draw = GW_T.DRAW[u.kind];
       const fogOk = u.side === 1 || u.fogVis !== false;
-      const show = d < draw && fogOk && !(u.kind === 'strider' && u.lite) && !u.hidden;
+      let show = d < draw && fogOk && !u.hidden;
       let V = GW.views.get(u.id);
+      // ngc/rwground-polish: a STRIDER past the close range (or one only moving kinematically in a far battle) is an
+      // instanced stand-in (rwlod.js): four draw calls for every far machine in the war
+      if (u.kind === 'strider' && show && (u.lite || d > GW_T.LOD_STRIDER + (u.lodFull ? 15 : 0))) {
+        u.lodFull = false;
+        const s = u.sim, st = !u.alive ? 'dead' : u.lite || s.up ? 'up' : 'down';
+        LOD.add(u.id, u.x, u.y, u.z, u.yaw, Math.hypot(u.vx, u.vz), st, dt);
+        show = false;
+      } else if (u.kind === 'strider') u.lodFull = show;
       if (!show) { if (V) { V.group.visible = false; if (V.shadow && V.shadow !== V.group) V.shadow.visible = false; } continue; }
       V = viewOf(u); V.group.visible = true; if (V.shadow && V.shadow !== V.group) V.shadow.visible = true;
       if (u.kind === 'strider') V.update(u.sim, dt, W.time);
@@ -180,6 +193,7 @@ export function createGroundWar(ctx) {
       }
       if (u.kind !== 'marine' && !u.alive && !u.dimmed) { u.dimmed = true; }
     }
+    LOD.end();
   }
   // ngc/infdepth: what the casualty care says, near the player: shouts, the corpsman, men back on their feet
   const careT = new Map();
@@ -222,6 +236,17 @@ export function createGroundWar(ctx) {
     clearTimeout(silenceTimer); silenceTimer = setTimeout(() => { if (rwa) rwa.loops([]); }, 300);
   }
   GW.silence = () => { if (rwa) rwa.loops([]); };
+  // ngc/rwground-polish: what our Marines (or the player, close by) see the machines do, on the feed - throttled per island
+  function squadNews(B, S, st) {
+    const I = B.I, ours = GS.units.some(u => u.alive && u.side === 1 && u.able && u.B === B);
+    if (!ours && Math.hypot(ear.x - S.cx, ear.z - S.cz) > 450) return;   // (nobody of ours there to see it)
+    if (st === 'retreat') note(I, 'THE MACHINES ARE FALLING BACK', 'good');
+    else if (st === 'LINK LOST') note(I, 'STRIDER LINK NODE DOWN  -  THE SQUAD FREEZES', 'good');
+    else if (st === 'flank') note(I, 'MACHINES WORKING ROUND OUR FLANK');
+    else if (st === 'assault') note(I, 'THE MACHINES ARE ASSAULTING');
+  }
+  // ngc/rwground-polish: main.js drawMap hook - ground units, wrecks, landing craft and fights on the map
+  GW.drawMap = (c2d, px, py, big, fog) => GFX.drawMap(c2d, px, py, big, fog, W.time, GW.lcacs, W.islands);
   const near = (x, z, r) => Math.hypot(x - ear.x, z - ear.z) < r;
   function effects(evs) {
     for (const e of evs) {
@@ -241,6 +266,7 @@ export function createGroundWar(ctx) {
         case 'pd': if (near(e.x, e.z, 600)) { const [fx0, fy0, fz0] = e.from; for (let i = 0; i <= 10; i++) { const k = i / 10; fx.add.spawn(fx0 + (e.x - fx0) * k, fy0 + (e.y - fy0) * k, fz0 + (e.z - fz0) * k, 0, 0, 0, 0.06, 0.4, 0.2, 0.85, 0.98, 1, 1); } if (e.ok) fx.flash(e.x, e.y, e.z, 0.5); } break;
         case 'thud': if (near(e.x, e.z, 300)) for (let i = 0; i < 6; i++) fx.mix.spawn(e.x + rnd(-1, 1), e.y - 0.6, e.z + rnd(-1, 1), rnd(-2, 2), rnd(0, 1), rnd(-2, 2), rnd(0.8, 1.6), 0.8, 2.5, .55, .5, .42, 0.4, 0.5, 1.5, 0.3); break;
         case 'destroyed': destroyedFx(e); break;
+        case 'mainGun': { const V = GW.views.get(e.id); if (V && V.recoil && V.group.visible) V.recoil(); if (e.kind === 'mbt' && near(e.x, e.z, 600)) { const gy = GS.hAt(e.x, e.z); for (let i = 0; i < 14; i++) { const a = rnd(6.283), sp = rnd(5, 11); fx.mix.spawn(e.x - e.dx * 4 + Math.cos(a) * 2, Math.max(gy, 0) + 0.4, e.z - e.dz * 4 + Math.sin(a) * 2, Math.cos(a) * sp + e.dx * 4, rnd(0.3, 1.2), Math.sin(a) * sp + e.dz * 4, rnd(1.5, 3), 1.2, 5, .62, .56, .46, 0.4, 0.3, 1.3, 0.5); } } break; }   // (ngc/rwground-polish: recoil, and the muzzle blast raises a ring of dust)
         case 'remove': dropView(e.id); break;
         case 'arrived': if (e.I) { const u = GS.units.find(q => q.id === e.id); if (u) attachProxy(u, e.I); if (e.kind === 'hovertank') note(e.I, 'RW-7 HOVER TANK COMING ASHORE'); } break;
       }
@@ -252,6 +278,10 @@ export function createGroundWar(ctx) {
     fx.explode(e.x, e.y, e.z, vehicle ? 2.6 : 0.9, { debris: vehicle ? 14 : 4, fire: vehicle ? 90 : 0, color: e.side === 2 ? 0xc8c6be : 0x46553b });
     ctx.boomAt(e.x, e.y, e.z, vehicle ? 1.0 : 0.4);
     if (vehicle) fx.burn(e.x, e.y, e.z, 80, 1.6);
+    // ngc/rwground-polish: a catastrophic MBT kill (mbtmodel.js throws the turret) - the ammunition cooks off: a second,
+    // bigger fireball out of the turret ring and a pillar of fire; a STRIDER's death is its power-down whine
+    if (e.kind === 'mbt' && ((e.id * 7 + 3) % 5) < 2 && near(e.x, e.z, 1500)) { fx.explode(e.x, e.y + 1.2, e.z, 3.4, { debris: 18, fire: 140 }); for (let i = 0; i < 26; i++) fx.add.spawn(e.x + rnd(-0.6, 0.6), e.y + 1, e.z + rnd(-0.6, 0.6), rnd(-1.2, 1.2), rnd(10, 22), rnd(-1.2, 1.2), rnd(0.5, 1.1), 2.2, 4, 1, rnd(0.45, 0.7), 0.15, 0.9, 6, 0.8); ctx.boomAt(e.x, e.y, e.z, 1.4); }
+    if (rwa) rwa.event({ e: 'destroyed', kind: e.kind, x: e.x, y: e.y, z: e.z });
     if (e.side === 2) {
       ctx.addScore(e.kind === 'strider' ? 150 : e.kind === 'hovertank' ? 600 : 800);
       if (vehicle) feed(`${e.I ? e.I.name + ': ' : ''}${e.kind === 'hovertank' ? 'RW-7 HOVER TANK' : (e.mbtType === 't90m' ? 'SEIZED T-90M' : 'SEIZED M1A2')} DESTROYED`, 'good');
@@ -571,6 +601,7 @@ export function createGroundWar(ctx) {
     updateLCACs(dt);
     renderUnits(dt);
     effects(evs);
+    GFX.tracersUpdate(ear); GFX.unitsUpdate(dt, ear, GW.views); GFX.chatter(rwa, ear, squadNews);   // ngc/rwground-polish
     flushTallies(dt);
     sound(dt, evs);
   };
@@ -578,7 +609,7 @@ export function createGroundWar(ctx) {
     for (const id of [...GW.views.keys()]) dropView(id);
     for (const L of GW.lcacs) root.remove(L.view.group); GW.lcacs.length = 0;
     for (const L of GW.landings) L.Q.dispose(); GW.landings.length = 0;
-    GW.proxies.length = 0; GW.kills.clear(); GS.reset(); CV.reset(); GW.hoverT = GW_T.HOVER_AT; GW.mbtT = GW_T.MBT_AT; GW.bank = 0; GW.silence();
+    LOD.begin(); LOD.end(); GW.proxies.length = 0; GW.kills.clear(); GS.reset(); CV.reset(); GW.hoverT = GW_T.HOVER_AT; GW.mbtT = GW_T.MBT_AT; GW.bank = 0; GW.silence();
   };
   return GW;
 }

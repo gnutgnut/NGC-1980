@@ -5,7 +5,7 @@
 // Local frame = the sim's body frame: origin at the hull centre 0.55 m above the skirt hem, -z forward.
 // API: buildHoverTank() -> { group, update(T, dt, time), parts }
 import * as THREE from 'three';
-import { Kit, RW, rwMats, stencilTex, decal } from './rwkit.js';
+import { Kit, RW, rwMats, stencilTex, decal, setBodyMat } from './rwkit.js';
 import { RW7 } from './hovertank.js';
 
 const C = RW;
@@ -122,17 +122,41 @@ export function buildHoverTank(opt = {}) {
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(RW7.W * 1.2, RW7.L * 1.15).rotateX(-Math.PI / 2), M.shadow); shadow.renderOrder = -1;
   const sgroup = new THREE.Group(); sgroup.add(shadow);
   const glows = []; group.traverse(o => { if (o.isMesh && o.material === M.glow) glows.push(o); });
-  let spin = [0, 0, 0, 0], headA = 0;
-  return {
+  let spin = [0, 0, 0, 0], headA = 0, recoil = 0, wreck = null;
+  const gunZ = gun.position.z, _q = new THREE.Quaternion(), _e = new THREE.Euler();
+  const api = {
     group, shadow: sgroup, parts: { hull, turret, gun, head, pd, fans },
+    // ngc/rwground-polish: the coilgun's slug kicks the rail assembly back into the turret (it runs out again in 0.7 s)
+    recoil() { recoil = 1; },
     update(T, dt, time, groundY) {
       group.position.set(T.p[0], T.p[1], T.p[2]); group.quaternion.set(T.q[0], T.q[1], T.q[2], T.q[3]);
       turret.rotation.y = T.turretYaw; gun.rotation.x = T.gunPitch;
-      for (let i = 0; i < 4; i++) { spin[i] += T.fan[i] * 70 * dt * (i % 2 ? 1 : -1); fans[i].rotation.y = spin[i]; }
-      headA += dt * 1.7; head.rotation.y = Math.sin(headA) * 0.9 + (T.alive ? 0 : 0);
+      recoil = Math.max(0, recoil - dt / 0.7); gun.position.z = gunZ + 0.55 * Math.min(1, recoil * 3) * recoil;
+      for (let i = 0; i < 4; i++) {
+        spin[i] += T.fan[i] * 70 * dt * (i % 2 ? 1 : -1); fans[i].rotation.y = spin[i];
+        // a fan the hits wrecked: the rotor is gone from its duct (smoke from it: groundwar's damage effects)
+        fans[i].visible = !(T.fanHp && T.fanHp[i] <= 0);
+      }
+      headA += dt * 1.7; head.rotation.y = T.alive ? Math.sin(headA) * 0.9 : head.rotation.y;
       glowMat.opacity = T.alive ? 0.22 * Math.min(1, (T.fan[0] + T.fan[1] + T.fan[2] + T.fan[3]) / 3) : 0;
       if (groundY !== undefined) { sgroup.position.set(T.p[0], groundY + 0.04, T.p[2]); sgroup.rotation.y = T.yaw; }
-      const lit = T.alive; for (const g of glows) g.material = lit ? M.glow : M.glowDim;
+      if (T.alive) { const lit = true; for (const g of glows) g.material = lit ? M.glow : M.glowDim; return; }
+      // ---- the wreck: the cushion dumps, the hull drops onto its crushed skirt with one corner low (the cell that
+      // burst), soot over the ceramic, the seams dead, the coilgun sagging in its trunnions
+      if (!wreck) {
+        const k = (T.id ?? 0) * 2.399;
+        wreck = { t: 0, y0: T.p[1], pitch: 0.035 * Math.cos(k), roll: 0.05 * Math.sin(k), turret: T.turretYaw };
+        setBodyMat(group, M.burnt, M.glowOff); for (const f of fans) f.visible = false;
+      }
+      wreck.t = Math.min(1, wreck.t + dt / 0.6); wreck.age = (wreck.age || 0) + dt;
+      // (killed over the sea: no cushion, no buoyancy worth the name - it settles and goes under in half a minute, nose first)
+      const wet = groundY !== undefined && groundY <= 0.06, sink = wet ? Math.min(1, wreck.age / 30) : 0;
+      const gy = groundY ?? (T.p[1] + RW7.SKIRT_Y), restY = gy - RW7.SKIRT_Y - 0.14 - sink * sink * 4.5, e = wreck.t * wreck.t;
+      if (wet) { wreck.pitch = -0.035 - 0.25 * sink; group.visible = sgroup.visible = sink < 1; }
+      _e.set(0, T.yaw, 0, 'YXZ'); _q.setFromEuler(_e); group.quaternion.slerp(_q, e);
+      group.position.y = wreck.y0 + (restY - wreck.y0) * e; group.rotateX(wreck.pitch * e); group.rotateZ(wreck.roll * e);
+      turret.rotation.y = wreck.turret; gun.rotation.x = -0.09 * e;
     },
   };
+  return api;
 }

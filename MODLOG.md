@@ -2532,6 +2532,117 @@ the terrain rebuild (ngc/terrain) will change which lots take them.
   experimental too), foot 12/12, rescue 2/2. jets.json, damage.json, jetsystems, jettrap, vehicle, tomcat and armorgame
   fail the same checks on the untouched experimental tree on this heavily loaded headless machine (1-8 fps: timing).
 
+
+## 2026-10-24 — NGC-1980 TERRAIN (wave 3 #1, branch ngc/terrain): real islands and one surface table
+What: the 17 control-zone islands rebuilt in `game/js/world/terrain.js` (pure, node-safe), replacing the old dome
+islands (`hills * 0.7 + 9` under a radial land mask, cliffs all round). Island positions and `I.r` are unchanged (the war,
+nav, AA rings and every scene depend on them); the coastline now sits at ~1.0 r (was ~0.78 r), so land area is up ~60%.
+- **Geology per island** (granite / volcanic / limestone / sandstone): rock and sand colours, ruggedness, tors, cliff height.
+- **Shores** blended by angle: BEACH (in a cove on the big islands - a bay with a stream valley behind it - or on a spit
+  on the small ones; the low fuel islands are sandy cays with a ring of beach and salt marsh inside), CLIFF (6-20 m faces
+  on the exposed side of the high islands, deep water at the foot, 1-3 sea stacks off each), ROCKY (low bank, shingle strand).
+  Beaches face open water (fetch scored round each island; never into the narrow channels, never across the cave strip
+  or IRONHOLD's shipyard). Beach profile: shoreface 1 in 14-22 to ~2.5 m, shelf 1 in 8 beyond (offshore the shore
+  weights are blurred so the shelves spread naturally), swash zone, berm at 1.5-1.9 m, two dune ridges (blowouts, a gap
+  where the stream / the beach exit cuts through), then the island's ground.
+- **Inland**: a plateau at the pad / base height (so the pads, shaft aprons and ground over the caves sit on natural
+  ground), rolling ground, 1-3 ridged peaks off the pad (volcanic main peak with a crater), granite tors, stream valleys
+  from the bays (floor 1 in 12, ending before the base apron). Near-camera relief: grass hummocks, boulders on rock.
+- **Grid**: everything is baked once per thread into a 1.25 m grid over +-760 m (heights + surface ids), 0.45-0.95 s
+  (node / headless); `zoneH` is a bilinear lookup, so `rawH` in the zone got ~6x cheaper (islandH 1025^2: 739 -> 111 ms).
+- **Surfaces** (`SURF_NAMES`): grass, sand, wetsand, rock, mud, dirt, shingle, marsh, from height, slope, shore kind,
+  dune / valley / tor flags and noise. `SURFACE[name]` = { mu, crr, sink, speed, skid, tyre, soil, foot }: Wong (Theory of
+  Ground Vehicles, tables 1.2 / 1.4 / 2.1) ranges, values INFERRED inside them; skid = steel skid shoe vs concrete, INFERRED.
+  Who reads it: ground.js (`GR.sample` now also gives skid and the sea bed `bed`; new `GR.surfaceAt` / `GR.surfAt`),
+  foot (speed / footsteps via marinesim SURF_MAP), the TEST CAR, armour (armorworld `o.surface` -> trackfm SOILS: marsh is
+  bog), the ground war's AI tracks (groundsim), the Huey's skids (hueyfm `env.surf`: skid grip x skid factor), the
+  Tomcat's tyres (airframe `env.surf`: mu and rolling drag on soft ground; concrete / deck / benches unchanged, Hornet
+  fingerprint bit-identical). Roads stay WORLD's provider (road / dirt), pads and shaft aprons 'road'.
+- **Landing beaches** replace the concrete LANDING HARDS: `beaches()` gives each cove's waterline point, inland axis, top
+  of the sand, run-in; same shape as a hard, so `HARDS` in main.js now holds them and armordelivery's hard path lands the
+  LCM-8 on the island's main beach (toe in ~0.55 m of water, ramp -15 deg). The main beach's exit is a dirt track up the
+  valley / to the plateau, no mud or dunes on it; villages, lots and cottages keep off the landing corridor (net.js).
+  `GR.beach` prefers the terrain's beaches. landinghard.js / buildHardMesh are no longer used (left for the armour files).
+- **WORLD refit**: villages are found on the new ground as before (net.js zoneNet on rawH); the zone lanes are now graded
+  on the ground main.js makes (shaft apron, pad, ground over the cave), start on the pad apron at its height between the
+  war's sites (AA diagonals, HQ / production slots), are routed round the shaft; main.js keeps road beds across apron blends.
+  Non-cave pad blend r1 52 -> 44 (main PADS, net padOf).
+- **Rendering**: heightmap at 1.25 m (1025^2), a surface-weight texture (RGBA8 linear: sand, rock, mud, dirt; grass the
+  rest), island id in the decor texture's blue channel for the geology colours; a FINE 1.25 m grid +-50 m round the camera
+  while it is under 70 m above the ground, stitched to the 2.5 m grid (edge vertices take the coarse edge's height); the
+  main grid has a hole under it (separate index range drawn only when the fine grid is off). Land colour only where land.
+  Trees only on grass / dirt. Minimap shows sand, rock, marsh.
+Tests: `scenes/terrain.mjs` 13/13 (load cost, beaches, surface API, pads / shafts / caves, zone roads 0/97 off the ground,
+zone buildings 0/84 floating or buried, LCM-8 plan on every island, views); `scenes/terrainfps.mjs` before / after;
+smoke 5/5; wheeledgame 27/27, wheeleddeliver 6/6, foot 12/12, cave 2/2, naval 5/5, fish 10/10 (its shallow-spot search now looks round the island, nearest the ALBATROSS), armorgame 17/19 (same 2 failures as the base build: M113 deck carry, LCM-8 'beached' timing; the scene now drives the lane from its start and stops before getting out); wheeled tyres read the terrain surfaces too (wheeledenv). Sea nav after the change: 1970 of 4096 cells wet (was 2806), one connected sea; benches all green (armorgame 20/20, groundwar 33/33, foot, huey 41/41, tomcat 32/32 + Hornet bit-identical,
+naval 22/22, infantry 90/90, runaway 48/48, wheeled, tank 73/73, world, worldsolid 9/9, cave).
+FPS (headless SwiftShader, res 0.45, the same 4 fixed views, base = 7f56098 run back to back, ms/frame):
+  low over home shore 231.7 -> 191.9, 180 m over home 281.9 -> 206.5, low pass at CITADEL 142.1 -> 131.1,
+  chase cam at home 251.7 -> 239.6 (JS sim/prep/render ms lower or equal; triangles +4%, draw calls -10..-40%). Run to
+  run noise on the shared machine is +-20%: read it as "no regression". The first fine-grid version (80 m, overdrawn by the
+  main grid with a discard) cost ~+25%; the hole and the 50 m / low-only rule took that back.
+Gotchas: the polar shore profiles need `mix(h, E, sm(0.62, 0.3, t))` or the centre gets a seam; a beach weight wider than
+its bay notch puts sand along the bay's flanks in radial wedges; villages love the flattest land, which is the landing
+beach (reserved now); the zone lane from the pad crossed an AA slot and stopped the M60.
+Untested / next: islands are still 110-260 m across (real scale would mean moving them: the war's job); no streams of
+water (valley floors are mud); the waterfish agent should read `zoneH` (sea bed), `shoreAt` and `beaches()` for shallows.
+
+## 2026-10-24 — NGC-1980 RUNAWAY ground units + ground war, polish batch 2 (branch ngc/rwground-polish)
+Models, damage, AI, feedback and performance for the STRIDERs, RW-7s, seized MBTs and the fights on the islands. Combat
+stays game-level (no weapon figures changed). New files: `units/runaway/rwlod.js`, `units/groundwar/gwfx.js`, scene
+`tools/scenes/rwpolish.mjs`. Shared files: `main.js` one line in `drawMap` (`war.ground.drawMap(...)`), nothing in war.js.
+- **Far STRIDER LOD, instanced** (rwlod.js): past 160 m (hysteresis 15 m) every STRIDER in the war is drawn by six
+  InstancedMeshes (body, seams, left / right leg, wreck body / legs): the close model's silhouette simplified (carapace,
+  wedge head, rifle across the body, digitigrade legs posed by the thigh / shin / hock lengths in strider.js), legs
+  swinging at the hips at the sim's step rates (100 steps / min walking, 210 running), the body gliding level; fallen
+  machines on their side, wrecks dark. The far battles' kinematic ('lite') STRIDERs were HIDDEN before (a gap noted in
+  rwwar): now they show out to 1.4 km. Same view of a 21-unit fight: 372 draw calls vs 561 with full models.
+- **Damage states and wrecks.** STRIDER: a limb shot away is gone below its stump (thigh / upper arm stay, sparks off
+  the stump), a blinded head's lenses go dark, a dead machine is scorched with dead seams, its carcass stays 4 min
+  (was 150 s). RW-7: a wrecked fan's rotor is gone from its duct and the duct smokes; hull below 60 % smokes, blacker
+  the worse; the wreck dumps its cushion and drops onto its crushed skirt one corner low, burnt, gun sagging; killed
+  over the sea it settles and goes under nose first in 30 s. MBT: engine out / hull below 60 % smokes from the deck; a
+  shot-through gun droops; the wreck is burnt out with the gun on its stops; two kills in five (by hull number) are
+  catastrophic - the turret is thrown off the ring onto the deck beside it, a second fireball and a pillar of fire from
+  the ring. Vehicle wrecks stay 10 min. (rwkit `burnt` / `scorched` / `glowOff` materials: the vertex colours
+  multiplied down, `setBodyMat`.)
+- **Animation.** MBT main gun: the tube runs back 0.35 m and out, the hull rocks on its suspension along the gun line,
+  the muzzle blast raises a ring of dust; RW-7 coilgun: the rail assembly kicks back 0.55 m; dust behind moving tracks;
+  the RW-7's skirt blows dust off the ground or spray off the sea all round (it had none).
+- **AI** (squadai.js). Air: a known aircraft that fired in the last 5 s within 350 m (or anything within 90 m) puts the
+  squad under air attack (log 'AIR'): walkers not shooting back at it take cover FROM IT (chooseCover with the aircraft as
+  the threat), crouched; nobody stays within 7 m of a squad mate; hover tanks jink round their position instead of
+  sitting still. Defend with no threat known: a perimeter round the point, each walker on its own bearing facing out
+  (all eight stood on the pad's centre before). groundsim `dry()`: blocked by the water's edge a unit slides along it
+  (30 / 60 deg) instead of standing at the shoreline for the rest of the war (a Marine squad landed on a shore did).
+- **Feedback.** Tracers (gwfx.js): an instanced pool of camera-facing ribbons, >= ~1.5 px wide at any range, fading to
+  the tail; red-orange for the 1980 side (M60 one in four, rifles ~one in eight), cyan for the machines (coil darts
+  always, seized rifles / coax one in four-five), white-hot for tank rounds. Map: Marines (cyan dots), STRIDERs (red
+  diamonds), armour (red blocks with a heading tick, RW-7 / M1A2 / T-90M labels on the big map), wrecks (grey crosses),
+  LCACs, and a pulsing orange CONTACT ring round every island with both sides on it; theirs only where the fog lets you
+  see. Feed: THE MACHINES ARE FALLING BACK / STRIDER LINK NODE DOWN - THE SQUAD FREEZES / MACHINES WORKING ROUND OUR
+  FLANK / THE MACHINES ARE ASSAULTING (when our Marines are on the island or you are within 450 m; 30 s per island).
+- **Sound** (rwaudio.js). The Marines' M16s, M60s and M203s were SILENT in the ground war (rwaudio knew only the sandbox's
+  'rifle' / 'mg' ammo names): mapped, plus the M203's hollow bloop. The machines' FM chirp phrases now play in the game
+  (they only ever played in the sandbox): contact, flank, assault, withdraw, LINK LOST, AIR, from the squad AI's
+  decision log near the camera. Death sounds: a STRIDER's servos wind down with a broken last phrase; an RW-7's
+  capacitors whine down; an MBT's turbine runs down under a cook-off crackle.
+- **Tests.** runawaybench 50/50 (new: air attack - hidden from the aircraft 19 % vs 0 % with no aircraft, nearest squad
+  mate 18 m vs 2.9 m); groundwarbench 33/33 (21.8 ms CPU per simulated s, 21 units); scenes rwpolish 6/6 (tracers in a
+  fight + a controlled burst, LOD stand-ins, draw calls, three MBT wrecks with one catastrophic, RW-7 wreck, smoking RW-7,
+  arm stump, air reaction, big map), groundwar 10/10, smoke 5/5, runaway / runawaycloseup / runawaylive / rwmodels /
+  striderfall all clean; after merging experimental: smoke 5/5, groundwar 10/10, rwpolish 6/6, ch46capture 5/5,
+  benches 50/50 and 33/33. mv22landing (before the merge) landed and took SANDBAR but missed one wall-clock wait at load
+  average ~140 (experimental has since polled those waits). Baseline groundwar.mjs failed 'both sides fire' once
+  (the STRIDERs fired exactly 20, wants > 20: the Marines killed the last two fast) - flaky, pre-existing.
+- **Gotchas.** Dead vehicles are never stepped (groundsim skips them), so a killed RW-7 hung at hover height: the wreck
+  pose lives in the model. GL lines are one pixel - at the game's 0.45 render scale tracers vanished: ribbons. Additive
+  ribbons over a bright island washed out to white lasers: normal blending, vertex alpha fade. In a scene, the parked
+  Huey's `PL.landed` keeps the player out of the machines' targets when over the sea.
+- **Untested / next.** By ear: the death sounds and chirps (headless only checks for errors). Marines far away are still
+  the 6-mesh stand-ins (not instanced); RW-7 / MBT have no far LOD (few of them). Cover from aircraft is weak against
+  one circling overhead (walls don't hide from above) - forests (the world's trees) aren't cover points yet. The hover
+  tank wreck is not an obstacle for the AI or the collision world (the collision agent's).
 ## 2026-10-24 — NGC-1980: THE COMMANDER, part 2 - every unit in the war, several of each type, one reserve (branch ngc/commander2)
 - **Every unit out is a target** (main.js `updateExt`, `war.ext`). war.js shot only at the unit you are in (PL); now every
   other unit of the fleet that is out - a Huey parked or flown home by her crew, a Hornet / Tomcat parked on deck or on CAP
