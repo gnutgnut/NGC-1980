@@ -2574,7 +2574,7 @@ nav, AA rings and every scene depend on them); the coastline now sits at ~1.0 r 
   Trees only on grass / dirt. Minimap shows sand, rock, marsh.
 Tests: `scenes/terrain.mjs` 13/13 (load cost, beaches, surface API, pads / shafts / caves, zone roads 0/97 off the ground,
 zone buildings 0/84 floating or buried, LCM-8 plan on every island, views); `scenes/terrainfps.mjs` before / after;
-smoke 5/5; benches all green (armorgame 20/20, groundwar 33/33, foot, huey 41/41, tomcat 32/32 + Hornet bit-identical,
+smoke 5/5; wheeledgame 27/27, wheeleddeliver 6/6, foot 12/12, cave 2/2, naval 5/5, fish 10/10 (its shallow-spot search now looks round the island, nearest the ALBATROSS), armorgame 17/19 (same 2 failures as the base build: M113 deck carry, LCM-8 'beached' timing; the scene now drives the lane from its start and stops before getting out); wheeled tyres read the terrain surfaces too (wheeledenv). Sea nav after the change: 1970 of 4096 cells wet (was 2806), one connected sea; benches all green (armorgame 20/20, groundwar 33/33, foot, huey 41/41, tomcat 32/32 + Hornet bit-identical,
 naval 22/22, infantry 90/90, runaway 48/48, wheeled, tank 73/73, world, worldsolid 9/9, cave).
 FPS (headless SwiftShader, res 0.45, the same 4 fixed views, base = 7f56098 run back to back, ms/frame):
   low over home shore 231.7 -> 191.9, 180 m over home 281.9 -> 206.5, low pass at CITADEL 142.1 -> 131.1,
