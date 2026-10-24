@@ -21,9 +21,13 @@ export default async function (h) {
     const SL = __G.sealife, S = SL.sim;
     window.__fishNear = (x, z, r) => S.fish().filter(f => Math.hypot(f.x - x, f.z - z) < r);
     window.__mean = (a, k) => a.length ? a.reduce((s, f) => s + f[k], 0) / a.length : 0;
-    // a spot off HOME ISLAND's east coast: the first water 2.5-4 m deep going out from the centre, and deep water further out
+    // a spot off HOME ISLAND's coast (east first): the first water 2.5-4 m deep going out from the centre, and deep water further out
     const I = __G.ISLANDS[0]; let sh = null, dp = null;
-    for (let d = 40; d < 260 && !dp; d += 1) { const x = I.x + d, z = I.z, hh = __G.terrainH(x, z); if (!sh && hh < -2.5 && hh > -4) sh = [x, z]; if (sh && hh < -11) dp = [x, z]; }
+    // (TERRAIN: the islands have real shelves now and a neighbour's shallows can lie due east: try the directions round)
+    //  the pair nearest the ALBATROSS (the later parts film her hull: the fish sim lives round the last camera)
+    let bd = 1e9; for (let k = 0; k < 16; k++) { const ca = Math.cos(k * Math.PI / 8), sa = Math.sin(k * Math.PI / 8); let s1 = null, d1 = null;
+      for (let d = 40; d < 260 && !d1; d += 1) { const x = I.x + ca * d, z = I.z + sa * d, hh = __G.terrainH(x, z); if (!s1 && hh < -2.5 && hh > -4) s1 = [x, z]; if (s1 && hh < -11) d1 = [x, z]; }
+      if (d1) { const q = Math.hypot(s1[0] - __G.war.carrier.p.x, s1[1] - __G.war.carrier.p.z); if (q < bd) { bd = q; sh = s1; dp = d1; } } }
     window.__SH = sh; window.__DP = dp;
     // the Huey waits high and out of the way (it starts on the ALBATROSS)
     __G.H.reset(new T.Vector3(I.x - 60, 140, I.z - 120), 0, false, 1); __G.HI.setCollective(0.475);

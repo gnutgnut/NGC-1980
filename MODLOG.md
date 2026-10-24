@@ -2531,3 +2531,58 @@ the terrain rebuild (ngc/terrain) will change which lots take them.
   the whole fleet), marinelife 10/11 (the miss is its TEST CAR step: the car is gone since ngc/wheeledgame, fails on
   experimental too), foot 12/12, rescue 2/2. jets.json, damage.json, jetsystems, jettrap, vehicle, tomcat and armorgame
   fail the same checks on the untouched experimental tree on this heavily loaded headless machine (1-8 fps: timing).
+
+
+## 2026-10-24 — NGC-1980 TERRAIN (wave 3 #1, branch ngc/terrain): real islands and one surface table
+What: the 17 control-zone islands rebuilt in `game/js/world/terrain.js` (pure, node-safe), replacing the old dome
+islands (`hills * 0.7 + 9` under a radial land mask, cliffs all round). Island positions and `I.r` are unchanged (the war,
+nav, AA rings and every scene depend on them); the coastline now sits at ~1.0 r (was ~0.78 r), so land area is up ~60%.
+- **Geology per island** (granite / volcanic / limestone / sandstone): rock and sand colours, ruggedness, tors, cliff height.
+- **Shores** blended by angle: BEACH (in a cove on the big islands - a bay with a stream valley behind it - or on a spit
+  on the small ones; the low fuel islands are sandy cays with a ring of beach and salt marsh inside), CLIFF (6-20 m faces
+  on the exposed side of the high islands, deep water at the foot, 1-3 sea stacks off each), ROCKY (low bank, shingle strand).
+  Beaches face open water (fetch scored round each island; never into the narrow channels, never across the cave strip
+  or IRONHOLD's shipyard). Beach profile: shoreface 1 in 14-22 to ~2.5 m, shelf 1 in 8 beyond (offshore the shore
+  weights are blurred so the shelves spread naturally), swash zone, berm at 1.5-1.9 m, two dune ridges (blowouts, a gap
+  where the stream / the beach exit cuts through), then the island's ground.
+- **Inland**: a plateau at the pad / base height (so the pads, shaft aprons and ground over the caves sit on natural
+  ground), rolling ground, 1-3 ridged peaks off the pad (volcanic main peak with a crater), granite tors, stream valleys
+  from the bays (floor 1 in 12, ending before the base apron). Near-camera relief: grass hummocks, boulders on rock.
+- **Grid**: everything is baked once per thread into a 1.25 m grid over +-760 m (heights + surface ids), 0.45-0.95 s
+  (node / headless); `zoneH` is a bilinear lookup, so `rawH` in the zone got ~6x cheaper (islandH 1025^2: 739 -> 111 ms).
+- **Surfaces** (`SURF_NAMES`): grass, sand, wetsand, rock, mud, dirt, shingle, marsh, from height, slope, shore kind,
+  dune / valley / tor flags and noise. `SURFACE[name]` = { mu, crr, sink, speed, skid, tyre, soil, foot }: Wong (Theory of
+  Ground Vehicles, tables 1.2 / 1.4 / 2.1) ranges, values INFERRED inside them; skid = steel skid shoe vs concrete, INFERRED.
+  Who reads it: ground.js (`GR.sample` now also gives skid and the sea bed `bed`; new `GR.surfaceAt` / `GR.surfAt`),
+  foot (speed / footsteps via marinesim SURF_MAP), the TEST CAR, armour (armorworld `o.surface` -> trackfm SOILS: marsh is
+  bog), the ground war's AI tracks (groundsim), the Huey's skids (hueyfm `env.surf`: skid grip x skid factor), the
+  Tomcat's tyres (airframe `env.surf`: mu and rolling drag on soft ground; concrete / deck / benches unchanged, Hornet
+  fingerprint bit-identical). Roads stay WORLD's provider (road / dirt), pads and shaft aprons 'road'.
+- **Landing beaches** replace the concrete LANDING HARDS: `beaches()` gives each cove's waterline point, inland axis, top
+  of the sand, run-in; same shape as a hard, so `HARDS` in main.js now holds them and armordelivery's hard path lands the
+  LCM-8 on the island's main beach (toe in ~0.55 m of water, ramp -15 deg). The main beach's exit is a dirt track up the
+  valley / to the plateau, no mud or dunes on it; villages, lots and cottages keep off the landing corridor (net.js).
+  `GR.beach` prefers the terrain's beaches. landinghard.js / buildHardMesh are no longer used (left for the armour files).
+- **WORLD refit**: villages are found on the new ground as before (net.js zoneNet on rawH); the zone lanes are now graded
+  on the ground main.js makes (shaft apron, pad, ground over the cave), start on the pad apron at its height between the
+  war's sites (AA diagonals, HQ / production slots), are routed round the shaft; main.js keeps road beds across apron blends.
+  Non-cave pad blend r1 52 -> 44 (main PADS, net padOf).
+- **Rendering**: heightmap at 1.25 m (1025^2), a surface-weight texture (RGBA8 linear: sand, rock, mud, dirt; grass the
+  rest), island id in the decor texture's blue channel for the geology colours; a FINE 1.25 m grid +-50 m round the camera
+  while it is under 70 m above the ground, stitched to the 2.5 m grid (edge vertices take the coarse edge's height); the
+  main grid has a hole under it (separate index range drawn only when the fine grid is off). Land colour only where land.
+  Trees only on grass / dirt. Minimap shows sand, rock, marsh.
+Tests: `scenes/terrain.mjs` 13/13 (load cost, beaches, surface API, pads / shafts / caves, zone roads 0/97 off the ground,
+zone buildings 0/84 floating or buried, LCM-8 plan on every island, views); `scenes/terrainfps.mjs` before / after;
+smoke 5/5; wheeledgame 27/27, wheeleddeliver 6/6, foot 12/12, cave 2/2, naval 5/5, fish 10/10 (its shallow-spot search now looks round the island, nearest the ALBATROSS), armorgame 17/19 (same 2 failures as the base build: M113 deck carry, LCM-8 'beached' timing; the scene now drives the lane from its start and stops before getting out); wheeled tyres read the terrain surfaces too (wheeledenv). Sea nav after the change: 1970 of 4096 cells wet (was 2806), one connected sea; benches all green (armorgame 20/20, groundwar 33/33, foot, huey 41/41, tomcat 32/32 + Hornet bit-identical,
+naval 22/22, infantry 90/90, runaway 48/48, wheeled, tank 73/73, world, worldsolid 9/9, cave).
+FPS (headless SwiftShader, res 0.45, the same 4 fixed views, base = 7f56098 run back to back, ms/frame):
+  low over home shore 231.7 -> 191.9, 180 m over home 281.9 -> 206.5, low pass at CITADEL 142.1 -> 131.1,
+  chase cam at home 251.7 -> 239.6 (JS sim/prep/render ms lower or equal; triangles +4%, draw calls -10..-40%). Run to
+  run noise on the shared machine is +-20%: read it as "no regression". The first fine-grid version (80 m, overdrawn by the
+  main grid with a discard) cost ~+25%; the hole and the 50 m / low-only rule took that back.
+Gotchas: the polar shore profiles need `mix(h, E, sm(0.62, 0.3, t))` or the centre gets a seam; a beach weight wider than
+its bay notch puts sand along the bay's flanks in radial wedges; villages love the flattest land, which is the landing
+beach (reserved now); the zone lane from the pad crossed an AA slot and stopped the M60.
+Untested / next: islands are still 110-260 m across (real scale would mean moving them: the war's job); no streams of
+water (valley floors are mud); the waterfish agent should read `zoneH` (sea bed), `shoreAt` and `beaches()` for shallows.

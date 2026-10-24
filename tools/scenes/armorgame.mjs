@@ -35,7 +35,7 @@ export default async function (h) {
   await h.eval('({ from: __p0, now: __A.st(__A.T()) })');
   await h.expect('Math.hypot(__A.st(__A.T()).x - __p0.x, __A.st(__A.T()).z - __p0.z) > 5');
   // the road: the crew drives to the lane and along it (the AI driver; any key takes over)
-  await h.eval(`(() => { const G = window.__WORLD.roadGraph(__G.HOME_B.isl.x, __G.HOME_B.isl.z, 200), R = G.roads.find(r => r.kind === 'zone') || G.roads[0]; const pts = []; for (let i = 4; i < R.xs.length; i += 2) pts.push([R.xs[i], R.zs[i]]); window.__road = pts; window.__paved = 0; setInterval(() => { if (__A.T().fm.soil.includes('paved') && __A.T().fm.out.fwd > 1) __paved++; }, 200); __A.T().order(pts, { speed: 5, arrive: 4 }); return pts.length; })()`);
+  await h.eval(`(() => { const G = window.__WORLD.roadGraph(__G.HOME_B.isl.x, __G.HOME_B.isl.z, 200), R = G.roads.find(r => r.kind === 'zone') || G.roads[0]; const pts = []; for (let i = 4; i < R.xs.length; i += 2) pts.push([R.xs[i], R.zs[i]]); window.__road = pts; __A.T().spawnAt({ x: R.xs[1], z: R.zs[1], yaw: Math.atan2(R.xs[1] - R.xs[3], R.zs[1] - R.zs[3]) });   /* TERRAIN: from the lane's own start on the apron (the motor pool can sit behind the pad's AA guns) */ window.__paved = 0; setInterval(() => { if (__A.T().fm.soil.includes('paved') && __A.T().fm.out.fwd > 1) __paved++; }, 200); __A.T().order(pts, { speed: 5, arrive: 4 }); return pts.length; })()`);
   await h.key('tap', 'KeyV'); await h.wait(300);
   await h.waitFor(`Math.hypot(__A.T().fm.origin()[0] - __road[2][0], __A.T().fm.origin()[2] - __road[2][1]) < 12`, 60000);
   await h.eval('__A.st(__A.T())'); await h.shot('m60-on-the-road-chase');
@@ -49,7 +49,8 @@ export default async function (h) {
   await h.waitFor(`__A.T().driver.state !== 'driving'`, 90000);
   await h.eval('({ st: __A.st(__A.T()), climbed: +(__A.T().fm.origin()[1] - __y0).toFixed(1), maxPitchDeg: +(__pmax * 57.3).toFixed(1), drv: __A.T().driver.state })');
   await h.expect("__A.T().fm.origin()[1] - __y0 > 2 && __pmax > 0.1");
-  // out at the hatch
+  // out at the hatch (TERRAIN: the beach exit track is easy going now, so let it roll to a stop first)
+  await h.waitFor('Math.abs(__A.T().fm.out.fwd) < 0.3', 20000);
   await h.key('tap', 'KeyY'); await h.wait(600);
   await h.expect("__G.G.craft === 'foot' && Math.hypot(__G.foot.W.x - __A.T().fm.origin()[0], __G.foot.W.z - __A.T().fm.origin()[2]) < 5");
   await h.eval("(__G.foot.view = 'third', __G.foot.W.yaw += 2.5, 1)"); await h.wait(900); await h.shot('out-at-the-hatch');

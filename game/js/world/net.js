@@ -13,6 +13,7 @@
 // deep valley. world.js applies roadBed() inside islandH(), so the physics height, the terrain bake and the road
 // ribbons agree to the centimetre.
 import { rawH, BOUND, ISLANDS, forestAt } from '../world.js';
+import { beachesOf } from './terrain.js';   // TERRAIN (wave 3): the landing beaches are kept clear of villages and cottages
 import { hash2, rng } from './rng.js';
 import { townItems, farmItems } from './layout.js';   // lots and farm buildings (their platforms are part of the ground)
 
@@ -359,11 +360,21 @@ export function ensure(x, z) {
 // ------------------------------------------------------------------------------------------- the control zone
 // Rules that match main.js / war.js: the landing pad (island centre, or 30 m south of a cave island's centre), its flat
 // apron, the cave apron and the ground over the cave, the HQ / production building slots (structAngle).
-export const padOf = I => I.cave ? { x: I.x, z: I.z + 30, r0: 12, r1: 34 } : { x: I.x, z: I.z, r0: 30, r1: 52 };
+export const padOf = I => I.cave ? { x: I.x, z: I.z + 30, r0: 12, r1: 34 } : { x: I.x, z: I.z, r0: 30, r1: 44 };   // (TERRAIN: r1 52 -> 44, as main.js PADS)
 // on a cardinal direction (+-0.15 rad) from the pad, so the buildings sit between the AA slots on the diagonals
 export const structAngle = I => Math.floor(hash2(I.id, 77, 1) * 4) * Math.PI / 2 + (hash2(I.id, 78, 1) - 0.5) * 0.3;
+// TERRAIN: an island's main landing beach and the way up from it (the LCM-8 puts armour ashore there)
+function onLanding(I, x, z, pad) {
+  for (const B of beachesOf(I)) {
+    if (!B.main) continue;
+    const dx = x - B.x, dz = z - B.z, u = dx * B.fx + dz * B.fz, lat = -dx * B.fz + dz * B.fx;
+    if (u > -10 - pad && u < B.u1 + 25 + pad && Math.abs(lat) < B.w + 6 + pad) return true;
+  }
+  return false;
+}
 export function zoneReserved(I, x, z, pad = 0) {
   const p = padOf(I); if (Math.hypot(x - p.x, z - p.z) < p.r0 + 6 + pad) return true;
+  if (onLanding(I, x, z, pad * 0.5)) return true;
   if (I.cave) { if (Math.hypot(x - I.x, z - I.z) < 62 + pad) return true; if (Math.abs(x - I.x) < 90 + pad && Math.abs(z - I.z) < 24 + pad) return true; }
   if (I.name === 'IRONHOLD') { const a = Math.atan2(-I.z, -I.x); for (let d = 20; d < I.r + 40; d += 4) { const x1 = I.x + Math.cos(a) * d, z1 = I.z + Math.sin(a) * d; if (rawH(x1, z1) < 2.5) { if (Math.hypot(x - x1, z - z1) < 34 + pad) return true; break; } } }
   return false;
@@ -385,11 +396,34 @@ export function zoneNet() {
       if (!best || sc > best.sc) best = { x, z, y: h, sc };
     }
     if (!best) continue;
+    // TERRAIN (wave 3): the ground main.js will make of this island - the shaft apron, the pad, the ground over the cave
+    // (terrainH0, same constants) - so the zone roads are graded on it, and routed round the shaft
+    const padY = Math.min(I.cave ? 16 : 14, Math.max(I.cave ? 4 : 3, Math.round(rawH(I.x, I.z))));
+    const finalH = (x, z) => {
+      let h = rawH(x, z);
+      if (I.cave) h = padY + (h - padY) * sm(18, 60, Math.hypot(x - I.x, z - I.z));
+      const dp = Math.hypot(x - p.x, z - p.z); if (dp < p.r1) h = padY + (h - padY) * sm(p.r0, p.r1, dp);
+      if (I.cave) { const k = sm(0, 14, Math.hypot(Math.max(Math.abs(x - I.x) - 76, 0), Math.max(Math.abs(z - I.z) - 9, 0))); h = Math.max(h, padY) + (h - Math.max(h, padY)) * k; }
+      return h;
+    };
+    // the war's sites round the pad (war.js aaSlots: the AA guns on the diagonals; the HQ / production slots) are kept
+    // clear: the lane leaves the apron between them and is routed round them
+    const sites = [0, 1, 2, 3].map(k => { const aa = k * Math.PI / 2 + Math.PI / 4, r = I.cave ? 15 : 22; return [p.x + Math.cos(aa) * r, p.z + Math.sin(aa) * r]; });
+    { const a0 = structAngle(I); if (I.cave) sites.push([p.x - 17, p.z + 9], [p.x + 19, p.z + 6]); else sites.push([p.x + Math.cos(a0) * 17, p.z + Math.sin(a0) * 17], [p.x - Math.cos(a0) * 18, p.z - Math.sin(a0) * 18]); }
+    const routeH = (x, z) => (I.cave && Math.hypot(x - I.x, z - I.z) < 28) || sites.some(([qx, qz]) => Math.hypot(x - qx, z - qz) < 8) ? -5 : finalH(x, z);
     const V = site.village = { id: `z${I.id}`, x: best.x, z: best.z, y: best.y, size: 'village', R: 55, zone: true, I, seed: I.id * 131 + 7 };
     // road from the pad apron to the village
-    const a = Math.atan2(V.z - p.z, V.x - p.x), sx = p.x + Math.cos(a) * (p.r0 - 2), sz = p.z + Math.sin(a) * (p.r0 - 2);
-    const pts = route(sx, sz, V.x, V.z, { ds: 12, step: 6, wmax: 40, g: ROAD.lane.g, water: 80, res: 5, smooth: 2 });
-    const prof = pts && profile(pts, 'lane', undefined, V.y, { maxBridge: 0, pin1: 9 });
+    const aV = Math.atan2(V.z - p.z, V.x - p.x); let a = aV, bestD = 1e9;
+    for (let k = 0; k < 48; k++) {   // the start on the apron's edge nearest the village's direction that is clear of the sites (and not over the shaft)
+      const c = k / 48 * Math.PI * 2, x = p.x + Math.cos(c) * (p.r0 - 2), z = p.z + Math.sin(c) * (p.r0 - 2);
+      if (sites.some(([qx, qz]) => Math.hypot(x - qx, z - qz) < 11) || (I.cave && Math.hypot(x - I.x, z - I.z) < 30)) continue;
+      const d = Math.abs(Math.atan2(Math.sin(c - aV), Math.cos(c - aV))); if (d < bestD) { bestD = d; a = c; }
+    }
+    const sx = p.x + Math.cos(a) * (p.r0 - 2), sz = p.z + Math.sin(a) * (p.r0 - 2);
+    const pts = route(sx, sz, V.x, V.z, { ds: 12, step: 6, wmax: 40, g: ROAD.lane.g, water: 80, res: 5, smooth: 2, h: routeH });
+    // TERRAIN (wave 3): the lane leaves the pad apron at the pad's own height (main.js PADS / BASES: the island centre's
+    // ground, rounded and clamped), so its first metres lie on the concrete instead of floating over it
+    const prof = pts && profile(pts, 'lane', padY, V.y, { maxBridge: 0, pin0: 6, pin1: 9, h: finalH });
     if (prof) { prof.kind = 'zone'; prof.a = `zp${I.id}`; prof.b = V.id; const rd = addRoad(prof); site.roads.push(rd.id); node(prof.a, sx, sz, prof.ys[0]).roads.push({ road: rd.id, end: 0 }); node(V.id, V.x, V.z, V.y).roads.push({ road: rd.id, end: 1 }); }
     addDisc(V.x, V.z, V.y, 9, 'plaza'); addClear({ x0: V.x - 60, z0: V.z - 60, x1: V.x + 60, z1: V.z + 60, cx: V.x, cz: V.z, r: 52 });
     // a harbour lane on to the shore facing away from the island
@@ -403,8 +437,8 @@ export function zoneNet() {
         if (Math.hypot(x - p.x, z - p.z) < p.r0 + 8 || (I.cave && Math.hypot(x - I.x, z - I.z) < 45)) break;   // not across the pad or the shaft
       }
       if (!q) continue;
-      const pts2 = route(V.x, V.z, q[0], q[1], { ds: 10, step: 5, wmax: 25, g: ROAD.street.g, water: 80, res: 5, smooth: 2 });
-      const pr2 = pts2 && profile(pts2, 'street', V.y, q[2], { maxBridge: 0, pin0: 9, pin1: 8 });
+      const pts2 = route(V.x, V.z, q[0], q[1], { ds: 10, step: 5, wmax: 25, g: ROAD.street.g, water: 80, res: 5, smooth: 2, h: routeH });
+      const pr2 = pts2 && profile(pts2, 'street', V.y, q[2], { maxBridge: 0, pin0: 9, pin1: 8, h: finalH });
       if (!pr2) continue;
       pr2.kind = 'zone'; pr2.a = V.id; pr2.b = `zq${I.id}`; const rd = addRoad(pr2); site.roads.push(rd.id);
       node(V.id, V.x, V.z, V.y).roads.push({ road: rd.id, end: 0 }); node(pr2.b, q[0], q[1], q[2]).roads.push({ road: rd.id, end: 1 });
@@ -421,8 +455,8 @@ export function zoneNet() {
       if (ok === 4 && m > bs) { bs = m; bestA = a; }
     }
     if (bestA !== null && bs > 0.7) {
-      const ex = V.x + Math.cos(bestA) * 60, ez = V.z + Math.sin(bestA) * 60, pts = route(V.x, V.z, ex, ez, { ds: 10, step: 5, wmax: 20, g: ROAD.street.g, water: 80, res: 5, smooth: 2 });
-      const pr = pts && profile(pts, 'street', V.y, undefined, { maxBridge: 0, pin0: 9 });
+      const ex = V.x + Math.cos(bestA) * 60, ez = V.z + Math.sin(bestA) * 60, pts = route(V.x, V.z, ex, ez, { ds: 10, step: 5, wmax: 20, g: ROAD.street.g, water: 80, res: 5, smooth: 2, h: routeH });
+      const pr = pts && profile(pts, 'street', V.y, undefined, { maxBridge: 0, pin0: 9, h: finalH });
       if (pr) { pr.kind = 'zone'; pr.town = V.id; const rd = addRoad(pr); site.roads.push(rd.id); V.layout.streets.push(rd.id); }
     }
     // the lots, levelled into the ground like the wild villages (main.js bakes islandH after this)

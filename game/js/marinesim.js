@@ -27,7 +27,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const MOA = Math.PI / 10800;
 export const STEP = 1 / 120;   // the rifleman's recommended fixed step (soldier springs, sway, projectiles)
 // the ground host's surfaces -> the soldier's (Pandolf terrain factors, footstep sounds, bullet impact materials)
-export const SURF_MAP = { road: 'concrete', deck: 'metal', rock: 'rock', grass: 'grass', sand: 'sand', mud: 'mud', water: 'water', hole: 'rock' };
+export const SURF_MAP = { road: 'concrete', deck: 'metal', rock: 'rock', grass: 'grass', sand: 'sand', mud: 'mud', water: 'water', hole: 'rock',
+  dirt: 'dirt', wetsand: 'sand', shingle: 'rock', marsh: 'mud' };   // TERRAIN (wave 3): the islands' new surfaces (world/terrain.js SURFACE .foot)
 
 // MEDINV's state -> soldier.js medical modifiers (0..1 scales; see soldier.js MODS)
 export function soldierMods(M, out = {}) {

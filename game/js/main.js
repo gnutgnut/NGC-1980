@@ -36,14 +36,14 @@ import { createWorldSolid } from './world/solid.js';   // SEAWORLD: buildings as
 import { createInteriors } from './interiors/interiors.js';   // ngc/interiors: enterable buildings, doors / hatches, the ALBATROSS inside
 import { createSeats } from './interiors/seats.js';           // ngc/interiors: passenger seats in the Huey / CH-46, the people in the seats
 import { DOORS } from './interiors/doors.js';
-import { createWorldLife } from './world/life.js'; import { clearedAt } from './world/net.js';   // WORLD: the lived-in world (towns, roads, traffic, people, faction structures)
+import { createWorldLife } from './world/life.js'; import { clearedAt, roadBed } from './world/net.js';   // WORLD: the lived-in world (towns, roads, traffic, people, faction structures)
 // ARMOUR (wave 2): the M60A3 TTS and M113A2 as crafts on the island world, their sights, the LCM-8 delivery
 import { createArmorWorld } from './units/armor/armorworld.js';
 import { createArmorCraft } from './units/armor/armorcraft.js';
 import { createSight } from './units/armor/armorsight.js';
 import { createArmorDelivery } from './units/armor/armordelivery.js';
-import { planHards, hardsH, onHard } from './units/armor/landinghard.js';
-import { buildHardMesh } from './units/armor/lcm8.js';
+// TERRAIN (wave 3): the islands' real ground - geology, beaches, cliffs, dunes, valleys - and the one surface API every sim reads
+import { zoneSurf, zoneGrid, beaches as terrainBeaches, inGrid, SURFACE, SURF_NAMES, GEOLOGY, geologyOf, ZONE_C, bakeMs as TERRAIN_BAKE_MS } from './world/terrain.js';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -297,24 +297,23 @@ const CS = 1.6, CAVE_SINK = 0.15, CAVE_OX = 32.5, CAVE_DEPTH = 6, HOLE_R = 9, ST
 const TIER_NAMES = ['', 'LIGHT', 'MEDIUM', 'STRONG', 'HEAVY'];
 const BASES = ISLANDS.filter(I => I.cave).sort((a, b) => a.tier - b.tier).map(I => I.base = { kind: I.owner === 1 ? 'home' : 'enemy', name: I.name, tier: I.tier, x: I.x, z: I.z, h: clamp(Math.round(islandH(I.x, I.z)), 4, 16), isl: I });
 const HOME_B = BASES[0], PAD_H = HOME_B.h;
-const PADS = ISLANDS.map(I => I.pad = I.cave ? { x: I.x, z: I.z + 30, h: I.base.h, r0: 12, r1: 34, r: PAD_R, isl: I } : { x: I.x, z: I.z, h: clamp(Math.round(islandH(I.x, I.z)), 3, 14), r0: 30, r1: 52, r: PAD_R, isl: I });
+const PADS = ISLANDS.map(I => I.pad = I.cave ? { x: I.x, z: I.z + 30, h: I.base.h, r0: 12, r1: 34, r: PAD_R, isl: I } : { x: I.x, z: I.z, h: clamp(Math.round(islandH(I.x, I.z)), 3, 14), r0: 30, r1: 44, r: PAD_R, isl: I });   // TERRAIN: r1 52 -> 44 (beaches past the apron)
 const PAD = HOME_B.isl.pad;   // the home refuel pad
 const RES_MAX = 600;          // the fleet's fuel stores
 const stripW = (x, z, b) => smooth(0, 14, Math.hypot(Math.max(Math.abs(x - b.x) - STRIP_X, 0), Math.max(Math.abs(z - b.z) - STRIP_Z, 0)));
-const terrainH0 = (x, z) => {   // (ARMOUR: terrainH below is this plus the landing hards)
-  let h = islandH(x, z);
+const terrainH0 = (x, z) => {
+  const h0 = islandH(x, z); let h = h0;
   for (const b of BASES) h = lerp(b.h, h, smooth(BASE_R, 60, Math.hypot(x - b.x, z - b.z)));   // flat apron round the shaft
   for (const p of PADS) { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r1) h = lerp(p.h, h, smooth(p.r0, p.r1, d)); }   // flat pads
+  if (h !== h0) h = roadBed(x, z, h);   // TERRAIN: a road across an apron's blend keeps its bed (the ribbon lies on the ground)
   for (const b of BASES) h = lerp(Math.max(h, b.h), h, stripW(x, z, b));                      // ground over the cave
   return h;
 };
-// ARMOUR: a LANDING HARD on each island (landinghard.js): a concrete ramp at 1 in 5 from the sea bed up through the cliffs,
-// where an LCM-8 puts an M60A3 / M113A2 ashore and an M113 drives down to swim. Part of the terrain for everyone.
-const HARDS = planHards(ISLANDS, terrainH0, {
-  pads: PADS, holes: BASES, cleared: (x, z) => clearedAt(x, z),
-  keepOut: I => { if (I.name !== 'IRONHOLD') return []; const a = Math.atan2(-I.z, -I.x); for (let r = 20; r < I.r + 60; r += 2) { const x = I.x + Math.cos(a) * r, z = I.z + Math.sin(a) * r; if (terrainH0(x, z) < 2.5) return [{ x, z, r: 40 }]; } return []; },   // the RUNAWAY shipyard (war.js coastPoint)
-});
-const terrainH = (x, z) => hardsH(HARDS, x, z, terrainH0(x, z));
+// TERRAIN (wave 3): the concrete LANDING HARDS are gone - the islands have real beaches (world/terrain.js). HARDS keeps its
+// name (the armour scenes, the LCM-8 delivery and the M60's parking spot read it) and now holds the islands' LANDING
+// BEACHES, in the same shape: { I, name, x, z (waterline), fx, fz (inland), yaw, w, u0, u1 (top of the sand), y(u), at(u, lat) }.
+const HARDS = terrainBeaches();
+const terrainH = terrainH0;
 const holeOf = (x, z) => BASES.find(b => Math.hypot(x - b.x, z - b.z) < HOLE_R);
 const inHole = (x, z) => !!holeOf(x, z);
 const groundY = (x, z) => inHole(x, z) ? -1e4 : Math.max(terrainH(x, z), 0, war ? war.deckY(x, z) : -1e9);   // ship decks count as ground
@@ -347,18 +346,34 @@ sky.renderOrder = -10; zScene.add(sky);
 // The terrain is a grid that follows the camera. Its heights come from a heightmap baked once at load with one texel
 // per grid vertex (so the mesh matches terrainH exactly at every vertex), and a second small texture tells each pixel
 // which pad / shaft apron (if any) it is near, so the shader only ever shades one of them.
-const TG = 2.5, TN = Math.ceil(DRAW * 2.1 / TG), HM_N = Math.round(2 * BOUND / TG) + 1, DEC_C = 4, DEC_N = Math.ceil(2 * BOUND / DEC_C);
+// TERRAIN (wave 3): the heightmap is baked at the islands' own 1.25 m (HMC). The main grid (TG 2.5 m) reads every other
+// texel; a FINE grid at 1.25 m follows the camera out to 50 m (FINE_H; only while the camera is under ~70 m above the ground) so near the ground you see (and stand on) the same
+// relief the physics has: rocks, dune hummocks, the berm. A third texture holds the surface types (sand, rock, mud, dirt
+// weights; grass the rest), linearly filtered so the materials blend.
+const TG = 2.5, HMC = ZONE_C, TN = Math.ceil(DRAW * 2.1 / TG), HM_N = Math.round(2 * BOUND / HMC) + 1, DEC_C = 4, DEC_N = Math.ceil(2 * BOUND / DEC_C);
+const FINE_H = 50, FINE_N = Math.round(2 * FINE_H / HMC);
+const PROF_LOAD = {};
 const hmTex = (() => {
-  const a = new Float32Array(HM_N * HM_N);
-  for (let j = 0; j < HM_N; j++) for (let i = 0; i < HM_N; i++) a[j * HM_N + i] = terrainH(-BOUND + i * TG, -BOUND + j * TG);
+  zoneGrid(); PROF_LOAD.terrainBake = Math.round(TERRAIN_BAKE_MS());   // (the islands were baked on the first height query above)
+  const t1 = performance.now(), a = new Float32Array(HM_N * HM_N);
+  for (let j = 0; j < HM_N; j++) for (let i = 0; i < HM_N; i++) a[j * HM_N + i] = terrainH(-BOUND + i * HMC, -BOUND + j * HMC);
+  PROF_LOAD.hmBake = Math.round(performance.now() - t1);
   const t = new THREE.DataTexture(a, HM_N, HM_N, THREE.RedFormat, THREE.FloatType); t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t;
 })();
+const SURF_W = { grass: [0, 0, 0, 0], sand: [255, 0, 0, 0], wetsand: [255, 0, 0, 0], rock: [0, 255, 0, 0], mud: [0, 0, 255, 0], dirt: [0, 0, 0, 255], shingle: [0, 150, 0, 105], marsh: [0, 0, 150, 0] };
+const surfTex = (() => {   // r sand, g rock, b mud, a dirt (grass = the rest), per heightmap texel
+  const Z = zoneGrid(), off = Math.round((Z.E - BOUND) / Z.C), a = new Uint8Array(HM_N * HM_N * 4), W = SURF_NAMES.map(n => SURF_W[n]);
+  for (let j = 0; j < HM_N; j++) for (let i = 0; i < HM_N; i++) { const w = W[Z.s[(j + off) * Z.N + i + off]], k = (j * HM_N + i) * 4; a[k] = w[0]; a[k + 1] = w[1]; a[k + 2] = w[2]; a[k + 3] = w[3]; }
+  const t = new THREE.DataTexture(a, HM_N, HM_N, THREE.RGBAFormat); t.minFilter = t.magFilter = THREE.LinearFilter; t.needsUpdate = true; return t;
+})();
+const GEO_IDX = ISLANDS.map(I => geologyOf(I));
 const decorTex = (() => {   // r = nearest pad index + 1, g = nearest shaft index + 1 (0 = none near)
   const a = new Uint8Array(DEC_N * DEC_N * 4);
   for (let j = 0; j < DEC_N; j++) for (let i = 0; i < DEC_N; i++) {
     const x = -BOUND + (i + 0.5) * DEC_C, z = -BOUND + (j + 0.5) * DEC_C, k = (j * DEC_N + i) * 4;
     PADS.forEach((p, n) => { if (Math.hypot(x - p.x, z - p.z) < 33) a[k] = n + 1; });
     BASES.forEach((b, n) => { if (Math.hypot(x - b.x, z - b.z) < 25) a[k + 1] = n + 1; });
+    let bi = -1, bd = 1e9; ISLANDS.forEach((I, n) => { const d = Math.hypot(x - I.x, z - I.z) - I.r; if (d < bd) { bd = d; bi = n; } }); a[k + 2] = bd < 200 ? bi + 1 : 0;   // TERRAIN: b = the island (its geology's colours)
   }
   const t = new THREE.DataTexture(a, DEC_N, DEC_N, THREE.RGBAFormat); t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t;
 })();
@@ -402,6 +417,8 @@ const terrainGeo = new THREE.PlaneGeometry(TG * TN, TG * TN, TN, TN); terrainGeo
 const terrainUni = {
   uFog: { value: HORIZON }, uSun: { value: new THREE.Vector3(.5, 1, .3) }, uBases: { value: baseUniform }, uPadCol: { value: padUniform }, uTime: { value: 0 },
   uPadP: { value: PADS.map(p => new THREE.Vector4(p.x, p.z, p.isl.cave ? 1 : 0, 0)) }, uHM: { value: hmTex }, uDecor: { value: decorTex }, ...fog.uniforms,
+  uSurf: { value: surfTex }, uFine: { value: new THREE.Vector3(0, 0, 0) },   // TERRAIN: surface weights; the fine grid's square (x, z, half size)
+  uSandC: { value: GEO_IDX.map(g => new THREE.Color(...GEOLOGY[g].sand)) }, uRockC: { value: GEO_IDX.map(g => new THREE.Color(...GEOLOGY[g].rock)) },
   uHMN: { value: HW[0].tex }, uHMF: { value: HW[1].tex }, uHMNo: { value: new THREE.Vector3(-1e6, -1e6, 4) }, uHMFo: { value: new THREE.Vector3(-1e6, -1e6, 16) },
   uFogN: { value: DRAW * 0.5 }, uFogF: { value: DRAW * 0.97 }, uNear: { value: new THREE.Vector3(0, 0, 0) },
   ...createSeaUniforms(),   // SEAWORLD: the live sea's waves, whitecaps, ships for the hull foam
@@ -424,9 +441,18 @@ const terrainVS = `
       if(g.x>1.&&g.y>1.&&g.x<${(HW_N - 2).toFixed(1)}&&g.y<${(HW_N - 2).toFixed(1)}) return bil(uHMN,g);
       return bil(uHMF,(p-uHMFo.xy)/uHMFo.z);
     }
+    float hAt(vec2 p){ return max(abs(p.x),abs(p.y))<${BOUND.toFixed(1)} ? texture2D(uHM,((p+${BOUND.toFixed(1)})/${HMC.toFixed(2)}+.5)/${HM_N.toFixed(1)}).r : hOut(p); }
     void main(){
       vec4 w=modelMatrix*vec4(position,1.);
-      float h=max(abs(w.x),abs(w.z))<${BOUND.toFixed(1)} ? texture2D(uHM,((w.xz+${BOUND.toFixed(1)})/${TG.toFixed(1)}+.5)/${HM_N.toFixed(1)}).r : hOut(w.xz);
+      float h=hAt(w.xz);
+      #ifdef FINE
+      {   // TERRAIN: the fine grid's edge vertices between two coarse ones take the coarse edge's height (no cracks)
+        vec2 lp=position.xz; const float HF=${FINE_H.toFixed(1)};
+        bool ex=abs(lp.x)>HF-.01, ez=abs(lp.y)>HF-.01;
+        if(ex||ez){ vec2 dir=ex?vec2(0.,1.):vec2(1.,0.); float q=floor((dot(lp,dir)+HF)/${HMC.toFixed(2)}+.5);
+          if(mod(q,2.)>.5) h=.5*(hAt(w.xz+dir*${HMC.toFixed(2)})+hAt(w.xz-dir*${HMC.toFixed(2)})); }
+      }
+      #endif
       vRaw=h; w.y=max(h,0.);
       ${SEA_VS}
       vW=w.xyz;
@@ -435,25 +461,43 @@ const terrainVS = `
 const terrainFS = `
     varying vec3 vW; varying float vRaw; uniform vec3 uFog; uniform vec3 uSun; uniform vec4 uBases[${BASES.length}]; uniform vec3 uPadCol[${PADS.length}]; uniform vec4 uPadP[${PADS.length}];
     uniform float uTime; uniform sampler2D uDecor, uFogT; uniform float uFogB, uFogN, uFogF; uniform vec3 uNear;
+    uniform sampler2D uSurf; uniform vec3 uFine; uniform vec3 uSandC[${ISLANDS.length}], uRockC[${ISLANDS.length}];
     ${FOG_GLSL}
     ${SEA_FS_DECL}
     void main(){
       #ifdef FAR
       if(max(abs(vW.x-uNear.x),abs(vW.z-uNear.y))<uNear.z) discard;   // the fine grid covers this
       #endif
-      vec2 dc=texture2D(uDecor,(vW.xz+${BOUND.toFixed(1)})/${(2 * BOUND).toFixed(1)}).rg*255.;
-      int pi=int(dc.r+.5)-1, bi=int(dc.g+.5)-1;
+      vec3 dc=texture2D(uDecor,(vW.xz+${BOUND.toFixed(1)})/${(2 * BOUND).toFixed(1)}).rgb*255.;
+      int pi=int(dc.r+.5)-1, bi=int(dc.g+.5)-1, gi=int(dc.b+.5)-1;
       if(bi>=0 && length(vW.xz-uBases[bi].xy)<${HOLE_R.toFixed(1)}) discard;   // the shaft
       vec3 n=normalize(cross(dFdx(vW),dFdy(vW))); if(n.y<0.) n=-n;
       float l=max(dot(n,normalize(uSun)),0.)*.75+.4;
       vec2 g=floor(vW.xz/6.); float chk=mod(g.x+g.y,2.);
+      float wild=step(${BOUND.toFixed(1)},max(abs(vW.x),abs(vW.z)));
+      vec3 c=vec3(0.);
+      if(vRaw>0.){   // (land colour only where there is land: the sea below paints its own)
+      if(wild<.5){   // TERRAIN: the islands - what the ground is made of (the same table the sims read), in the island's own colours
+        vec4 sw=texture2D(uSurf,((vW.xz+${BOUND.toFixed(1)})/${HMC.toFixed(2)}+.5)/${HM_N.toFixed(1)});
+        float n1=fract(sin(dot(floor(vW.xz/${HMC.toFixed(2)}),vec2(12.9898,78.233)))*43758.5453), n2=sin(vW.x*.071)*sin(vW.z*.063);
+        vec3 sandC=gi>=0?uSandC[gi]:vec3(.86,.79,.6), rockC=gi>=0?uRockC[gi]:vec3(.55,.53,.5);
+        vec3 grass=mix(vec3(.2,.43,.14),vec3(.29,.5,.17),chk*.35+n1*.3+n2*.25);
+        grass=mix(grass,vec3(.44,.5,.24),smoothstep(5.,1.5,vW.y)*.4);                 // salt-burnt turf along the shore
+        grass=mix(grass,vec3(.36,.44,.2),smoothstep(.93,.8,n.y)*.5);                  // thin, dry grass on the slopes
+        vec3 rk2=rockC*(.8+.28*n1)*(.82+.18*smoothstep(.45,.9,n.y));
+        vec3 sd=sandC*(.94+.07*n1); sd=mix(sd*vec3(.7,.7,.74),sd,smoothstep(.12,.75,vRaw));   // wet sand at the waterline
+        vec3 md=vec3(.31,.27,.18)*(.88+.16*n1), dt=vec3(.47,.38,.26)*(.88+.16*n1);
+        float wg=max(0.,1.-sw.r-sw.g-sw.b-sw.a);
+        c=(grass*wg+sd*sw.r+rk2*sw.g+md*sw.b+dt*sw.a)/max(1.,sw.r+sw.g+sw.b+sw.a+wg);
+      } else {
       vec3 land=mix(vec3(.17,.5,.15),vec3(.25,.6,.19),chk);
       vec3 rock=mix(vec3(.45,.37,.27),vec3(.52,.43,.32),chk);
-      float wild=step(${BOUND.toFixed(1)},max(abs(vW.x),abs(vW.z)));
       float rk=mix(smoothstep(24.,38.,vW.y),max(smoothstep(170.,300.,vW.y+18.*sin(vW.x*.013+vW.z*.009)),smoothstep(.8,.62,n.y)),wild);
-      vec3 c=mix(land*mix(1.,.8+.2*sin(vW.x*.0021)*sin(vW.z*.0017),wild),rock,rk);
+      c=mix(land*mix(1.,.8+.2*sin(vW.x*.0021)*sin(vW.z*.0017),wild),rock,rk);
       c=mix(c,vec3(.93,.95,.98),wild*smoothstep(430.,500.,vW.y+30.*sin(vW.x*.011)*cos(vW.z*.009))*smoothstep(.45,.7,n.y));
       c=mix(vec3(.78,.72,.45),c,smoothstep(0.,3.,vW.y));
+      }
+      }
       c*=l;
       if(vRaw<=0.){   // sea: shallows to deep water, the swell (SEAWORLD: the live sea), whitecaps, surf, hull foam
         float d=-vRaw, t=uTime; vec2 p=vW.xz;
@@ -484,6 +528,21 @@ const terrainFS = `
     }`;
 const terrain = new THREE.Mesh(terrainGeo, new THREE.ShaderMaterial({ uniforms: terrainUni, vertexShader: terrainVS, fragmentShader: terrainFS }));
 terrain.frustumCulled = false; zScene.add(terrain);
+// TERRAIN: the main grid has a hole where the fine grid lies (the same snapped centre, so the hole is fixed in the
+// grid's own frame): those cells are a separate mesh drawn only while the fine grid is off. (A discard would still pay
+// for every covered pixel twice in a software rasteriser.)
+const terrainHole = (() => {
+  const idx = terrainGeo.index.array, ring = [], inner = [], half = TG * TN / 2;
+  for (let iy = 0; iy < TN; iy++) for (let ix = 0; ix < TN; ix++) {
+    const cx = -half + (ix + 0.5) * TG, cz = -half + (iy + 0.5) * TG, k = (iy * TN + ix) * 6;
+    (Math.abs(cx) < FINE_H && Math.abs(cz) < FINE_H ? inner : ring).push(...idx.subarray(k, k + 6));
+  }
+  const g = terrainGeo.clone(); g.setIndex(inner); terrainGeo.setIndex(ring);
+  const m = new THREE.Mesh(g, terrain.material); m.frustumCulled = false; terrain.add(m); return m;
+})();
+// TERRAIN: the fine grid (1.25 m, the heightmap's own texels) round the camera, stitched into the main grid at its edge
+const fineTerrain = new THREE.Mesh(new THREE.PlaneGeometry(2 * FINE_H, 2 * FINE_H, FINE_N, FINE_N).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({ uniforms: terrainUni, vertexShader: terrainVS, fragmentShader: terrainFS, defines: { FINE: 1 } }));
+fineTerrain.frustumCulled = false; zScene.add(fineTerrain);
 const FAR_C = 24, FAR_N = 220;   // far ring: 12 m cells out to ~1.5 km, only drawn while the view reaches past the fine grid
 const farTerrain = new THREE.Mesh(new THREE.PlaneGeometry(FAR_C * FAR_N, FAR_C * FAR_N, FAR_N, FAR_N).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({ uniforms: terrainUni, vertexShader: terrainVS, fragmentShader: terrainFS, defines: { FAR: 1 } }));
 farTerrain.frustumCulled = false; farTerrain.visible = false; zScene.add(farTerrain);
@@ -494,7 +553,9 @@ farTerrain.frustumCulled = false; farTerrain.visible = false; zScene.add(farTerr
 // the black clear colour showed as a dome above the horizon (and the terrain grid ended short of the view).
 sky.frustumCulled = false;
 sky.onBeforeRender = (r, s, cam) => { sky.position.copy(cam.position); sky.updateMatrixWorld(); };
-const _snapTerrain = cam => { const x = Math.round(cam.position.x / TG) * TG, z = Math.round(cam.position.z / TG) * TG; terrainUni.uNear.value.set(x, z, TG * TN / 2 - 3); return [x, z]; };
+const _snapTerrain = cam => { const x = Math.round(cam.position.x / TG) * TG, z = Math.round(cam.position.z / TG) * TG; terrainUni.uNear.value.set(x, z, TG * TN / 2 - 3);
+  const fine = fineTerrain.visible = cam.position.y - Math.max(0, terrainH(cam.position.x, cam.position.z)) < 70;   /* (higher up the 2.5 m grid shows as much) */ terrainUni.uFine.value.set(x, z, fine ? FINE_H : 0); terrainHole.visible = !fine; fineTerrain.position.set(x, 0, z); fineTerrain.updateMatrixWorld(); return [x, z]; };
+fineTerrain.onBeforeRender = (r, s, cam) => _snapTerrain(cam);
 terrain.onBeforeRender = (r, s, cam) => { const [x, z] = _snapTerrain(cam); terrain.position.set(x, 0, z); terrain.updateMatrixWorld(); };
 farTerrain.onBeforeRender = (r, s, cam) => { _snapTerrain(cam); farTerrain.position.set(Math.round(cam.position.x / FAR_C) * FAR_C, 0, Math.round(cam.position.z / FAR_C) * FAR_C); farTerrain.updateMatrixWorld(); };
 const _nrm = new THREE.Vector3();
@@ -510,7 +571,7 @@ const TREES = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(); let n = 0;
   for (let i = 0; i < 60000 && n < 3200; i++) {
     const x = (r() * 2 - 1) * BOUND, z = (r() * 2 - 1) * BOUND, h = terrainH(x, z);
-    if (h < 2.5 || h > 24 || clearedAt(x, z) || onHard(HARDS, x, z, 6) || PADS.some(p => Math.hypot(x - p.x, z - p.z) < (p.isl.cave ? 16 : 34)) || BASES.some(b => Math.hypot(x - b.x, z - b.z) < 30 || stripW(x, z, b) < 1)) continue;   // WORLD: clearedAt keeps trees off the villages and roads
+    if (h < 2.5 || h > 24 || clearedAt(x, z) || !(s => s === 'grass' || s === 'dirt')(zoneSurf(x, z)) || PADS.some(p => Math.hypot(x - p.x, z - p.z) < (p.isl.cave ? 16 : 34)) || BASES.some(b => Math.hypot(x - b.x, z - b.z) < 30 || stripW(x, z, b) < 1)) continue;   // WORLD: clearedAt keeps trees off the villages and roads
     const k = 0.7 + r() * 1.1; sc.set(k, k * (0.8 + r() * 0.6), k);
     m.compose(new THREE.Vector3(x, h, z), q, sc); mesh.setMatrixAt(n++, m); TREES.push({ x, z, y: h, r: 0.9 * k });   // (TREES: colliders for the ground host)
   }
@@ -518,11 +579,6 @@ const TREES = [];
 }
 // forest trees out in the wild lands (scattered by the terrain worker on a fixed jittered grid: the same every time)
 const forest = (() => { const geo = new THREE.ConeGeometry(1.3, 5, 6); geo.translate(0, 2.5, 0); const t = new THREE.InstancedMesh(geo, fogPatch(new THREE.MeshLambertMaterial({ color: 0x1b6a26, flatShading: true }), fog, terrainUni.uTime), 9000); t.count = 0; t.frustumCulled = false; zScene.add(t); return t; })();
-{   // ARMOUR: the landing hards' concrete, kerbs, marker posts and signs (under the fog of war like the rest of the zone)
-  const fp = m => fogPatch(m, fog, terrainUni.uTime);
-  const mats = { concrete: fp(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide })), post: fp(new THREE.MeshLambertMaterial({ color: 0x8c8a84, flatShading: true })), red: fp(new THREE.MeshLambertMaterial({ color: 0xb02a20, flatShading: true })), white: fp(new THREE.MeshLambertMaterial({ color: 0xe8e8e0, flatShading: true })), green: fp(new THREE.MeshLambertMaterial({ color: 0x2f7a3a, flatShading: true })), sign: t => fp(new THREE.MeshLambertMaterial({ map: t, side: THREE.DoubleSide })) };
-  for (const h of HARDS) zScene.add(buildHardMesh(h, mats));
-}
 function fillForest(a) {
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(); let n = 0;
   for (let k = 0; k + 3 < a.length && n < 9000; k += 4) { const s = a[k + 3]; sc.set(s, s * (0.9 + (k % 7) * 0.06), s); m4.compose(p.set(a[k], a[k + 1] - 0.3, a[k + 2]), q, sc); forest.setMatrixAt(n++, m4); }
@@ -647,6 +703,7 @@ const world = createWorldLife({ scene: zScene, fx, sfx, terrainH, isWater, nav, 
 const jetGroundY = (x, z) => Math.max(terrainH(x, z), 0, war.deckY(x, z));   // no shaft holes for a jet: the apron is solid
 const jetPlayCtx = {   // TOMCAT: shared by the HORNET (jetplay.js) and the TOMCAT (units/air/tomcatplay.js)
   scene: zScene, war, fx, sfx, say, feed, CTL, GRAV, CARRIER, BOUND, keyDown: kd, groundY: jetGroundY, waterAt, addScore,
+  surf: (x, z) => GR.surfAt(x, z),   // TERRAIN: tyre grip by surface (the Tomcat's airframe.js; the Hornet's jetfm has its own fixed tyre)
   takeFuel: u => { const t = Math.max(0, Math.min(u, G.res)); G.res -= t; return t; },
   onCarrier: (x, z) => { const u = war.shipAt(x, z); return !!u && u === war.carrier && u.sinking === undefined; },
   selectedIsland: () => selIsl, drawMap: (c, k) => drawJetMap(c, k), catClear: () => { const c = war.carrier; return !!c && laneClear(c, c.yaw) > 320; },
@@ -958,7 +1015,7 @@ function updateHeli(dt, inp, piloted) {
     Object.assign(ctl, SY.controls(dt, H, 0));
   }
   H.extraMass = G.cargo * 3;    // fuel drums from the caves
-  const ev = H.step(dt, ctl, { groundY, fuel: G.fuel, water: waterAt, surfVel: war.surfVel, mods: M });
+  const ev = H.step(dt, ctl, { groundY, fuel: G.fuel, water: waterAt, surfVel: war.surfVel, mods: M, surf: GR.surfAt });   // TERRAIN: skid friction by surface
   SY.update(dt, H, H.landed);
   for (const e of H.events) {
     if (!piloted) continue;
@@ -1147,7 +1204,7 @@ const AW = createArmorWorld({
   terrainH, ships: () => war.units, deckY: (x, z) => war.deckY(x, z), shipAt: (x, z) => war.shipAt(x, z), shipAlive: u => war.units.includes(u) && !(u.sinking > 4),
   roadAt: (x, z) => world.roadAt ? world.roadAt(x, z) : null, pads: PADS.filter(p => !p.isl.cave).map(p => ({ x: p.x, z: p.z, r: 26 })).concat(PADS.filter(p => p.isl.cave).map(p => ({ x: p.x, z: p.z, r: 20 }))),
   holes: BASES.map(b => ({ x: b.x, z: b.z, r: HOLE_R })), trees: TREES, structs: function* () { for (const I of ISLANDS) if (I.structs) yield* I.structs; },
-  items: () => world.zone.flatMap(e => e.items), paved: (x, z) => !!onHard(HARDS, x, z), bounds: skip => crafts.bounds(skip), hitTest: (x, y, z) => war.hitTest(x, y, z, 1, 0.2),
+  items: () => world.zone.flatMap(e => e.items), surface: (x, z) => inGrid(x, z) ? SURFACE[zoneSurf(x, z)].soil : null,   // TERRAIN: the islands' soils bounds: skip => crafts.bounds(skip), hitTest: (x, y, z) => war.hitTest(x, y, z, 1, 0.2),
   onFell: (t, dx, dz, i) => {   // lay a pushed-over tree down along the push
     const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); TREES.mesh.getMatrixAt(i, m4); m4.decompose(p, q, s);
     q.setFromAxisAngle(new THREE.Vector3(dz, 0, -dx).normalize(), 1.35); TREES.mesh.setMatrixAt(i, m4.compose(p, q, s)); TREES.mesh.instanceMatrix.needsUpdate = true;
@@ -1203,7 +1260,7 @@ function stowCrafts() { JP.stow(); jetC.park.on = false; tomcatC.TP.stow(); tomc
 // a new war: the TEST CAR waits at the home island's motor pool (else on the carrier deck)
 function placeVehicles() {
   pool.newGame();   // ngc/wheeledgame: M151s and M35s at every friendly motor pool and on the deck park
-  // ARMOUR: the M60A3 waits at the top of the home island's landing hard, the M113A2 on the ALBATROSS's forward deck park (cold, parked)
+  // ARMOUR: the M60A3 waits at the top of the home island's landing beach (TERRAIN: was the hard), the M113A2 on the ALBATROSS's forward deck park (cold, parked)
   armDelivery.clear();
   const hh = HARDS.find(h => h.I === HOME_B.isl), hp = hh && hh.at(hh.u1 - 5), ts = hp ? { x: hp[0], z: hp[1], yaw: hh.yaw } : GR.motorPool(HOME_B.isl, 4.6); if (ts) m60C.spawnAt(ts); else m60C.stow();   // (on the concrete just below the top, nose inland: past the top it stood on mud and slid)
   const as = GR.deckSpot(2) || GR.motorPool(HOME_B.isl, 3.6); if (as) m113C.spawnAt(as); else m113C.stow();
@@ -1823,8 +1880,10 @@ const landImg = (() => {
     const h = terrainH(-BOUND + (i + 0.5) * 2 * BOUND / N, -BOUND + (j + 0.5) * 2 * BOUND / N), k = (j * N + i) * 4;
     let col;
     if (h <= 0) { const d = clamp(-h / 10, 0, 1); col = [lerp(28, 8, d), lerp(92, 34, d), lerp(118, 78, d)]; }
-    else if (h < 2.5) col = [176, 164, 112];
-    else { const t = clamp((h - 6) / 28, 0, 1); col = [lerp(48, 120, t), lerp(118, 102, t), lerp(50, 80, t)]; }
+    else {   // TERRAIN: sand, rock, grass by what the ground is
+      const sf = zoneSurf(-BOUND + (i + 0.5) * 2 * BOUND / N, -BOUND + (j + 0.5) * 2 * BOUND / N), t = clamp((h - 6) / 28, 0, 1);
+      col = sf === 'sand' || sf === 'wetsand' ? [188, 172, 120] : sf === 'rock' || sf === 'shingle' ? [128, 122, 112] : sf === 'mud' || sf === 'marsh' ? [86, 92, 58] : [lerp(48, 96, t), lerp(118, 112, t), lerp(50, 66, t)];
+    }
     im.data[k] = col[0]; im.data[k + 1] = col[1]; im.data[k + 2] = col[2]; im.data[k + 3] = 255;
   }
   x.putImageData(im, 0, 0); return c;
@@ -2251,4 +2310,4 @@ function frame(now) {
 const PROF = { sim: 0, prep: 0, render: 0 };
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }

@@ -159,6 +159,7 @@ export function createArmorWorld(o) {
         if (o.paved && o.paved(x, z)) return 'paved';   // the landing hards' concrete
         if (o.pads) for (const p of o.pads) if (Math.abs(x - p.x) < p.r && Math.abs(z - p.z) < p.r && Math.hypot(x - p.x, z - p.z) < p.r) return 'paved';
         const r = AW.roadCell(x, z); if (r) return r.surface === 'tarmac' ? 'paved' : 'dirt';
+        if (o.surface) { const sf = o.surface(x, z); if (sf) return sf; }   // TERRAIN (wave 3): the islands' own soils (world/terrain.js)
         if (h < 2.2) return 'sand';                                    // the beaches and the sea bed
         const e = 1, sl = Math.hypot(AW.terrain(x + e, z) - AW.terrain(x - e, z), AW.terrain(x, z + e) - AW.terrain(x, z - e)) / (2 * e);
         if (sl > 0.75 || h > ROCK) return 'rock';                      // steep (> ~37 deg) or the bare tops the shader paints rock

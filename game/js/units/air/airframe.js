@@ -310,14 +310,17 @@ export function createAirframe(P, GRAV = 9.0) {
       const st = i === 0 ? A.steer * 0.6 : 0;
       _d.set(Math.sin(st), 0, -Math.cos(st)).applyQuaternion(A.q); _d.y = 0; _d.normalize();
       _l.set(-_d.z, 0, _d.x);
-      const vlat = _pv.dot(_l), vlong = _pv.dot(_d), mu = 0.85;
+      // TERRAIN (wave 3): env.surf(x, z) -> { mu, crr } (ground.js surfAt): a tyre on grass, sand or mud grips less and
+      // rolls harder; decks and concrete (and the benches, with no env.surf) keep mu 0.85, rolling 0.02
+      const sf = env.surf ? env.surf(_wp.x, _wp.z) : null, hard = !sf || sf.mu >= 0.8;
+      const vlat = _pv.dot(_l), vlong = _pv.dot(_d), mu = hard ? 0.85 : sf.mu, crr = hard ? 0.02 : Math.max(0.02, sf.crr);
       const brk = i === 1 ? ctl.brakeL : i === 2 ? ctl.brakeR : 0;
       // friction is "deadbeat": each tyre pushes just hard enough to stop its slip this substep (its share of the mass
       // is N/g), capped by mu N. That gives real static friction (a braked jet holds still on a rolling deck).
       const mw = N / GRAV / h, flat = clamp(-vlat * mw * 0.5, -mu * N, mu * N);
       const bmax = 0.6 * clamp(brk, 0, 1) * N; A.slip[i] = bmax > 0 ? A.slip[i] + vlong * h : 0;   // braked: anchor the tyre
       const fb = -(vlong + A.slip[i] * 6) * mw * 0.5; if (Math.abs(fb) > bmax) A.slip[i] = 0;
-      const flong = -0.02 * N * Math.tanh(vlong / 0.4) + clamp(fb, -bmax, bmax);
+      const flong = -crr * N * Math.tanh(vlong / 0.4) + clamp(fb, -bmax, bmax);
       _f.set(0, N, 0).addScaledVector(_l, flat).addScaledVector(_d, flong);
       Fw.add(_f); Tw.add(_t.copy(_r).cross(_f));
     }
