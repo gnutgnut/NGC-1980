@@ -88,7 +88,9 @@ export function buildTankInterior() {
   add(rodGeo(new THREE.Vector3(0, 1.44, ZW), new THREE.Vector3(0, 0.62, -3.1), 1.6, 0.04), white);
   add(box(1.6, 0.04, 1.0, 0, RF, (ZW + ZB) / 2), white);                                   // roof
   add(box(1.6, 0.04, 1.6, 0, FL, -2.1), olive);                                             // floor
-  add(box(0.04, RF - FL, 1.8, -XW, (RF + FL) / 2, -2.2), white); add(box(0.04, RF - FL, 1.8, XW, (RF + FL) / 2, -2.2), white);   // walls
+  // walls. QA (ngc/qa-units): ahead of the periscope wall only up to the glacis top (1.44): full-height walls ran on to
+  // z -3.1 and filled the left and right M27 windows with flat white
+  for (const s of [-1, 1]) { add(box(0.04, RF - FL, ZB - ZW, s * XW, (RF + FL) / 2, (ZW + ZB) / 2), white); add(box(0.04, 1.44 - FL, ZW + 3.1, s * XW, (1.44 + FL) / 2, (ZW - 3.1) / 2), white); }
   add(box(1.6, RF - FL, 0.04, 0, (RF + FL) / 2, ZB), grey);                                 // turret basket wall behind
   add(box(1.6, 0.36, 0.04, 0, 1.62, ZW - 0.0), white).visible = false;
   // hatch ring and the hatch underside with its lever

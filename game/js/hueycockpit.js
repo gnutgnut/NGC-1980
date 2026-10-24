@@ -13,6 +13,7 @@
 //   pilot's gloved hands ride the cyclic and the collective, legs go to the pedals.
 import * as THREE from 'three';
 import { CAPTIONS } from './heli.js';
+import { buildSeatedCrewman } from './hueymodel.js';   // QA: the copilot
 import { drawRwr } from './units/defence/cm.js';   // ngc/cmpolish: the radar warning scope   // circular, but only read inside buildHueyCockpit (after both modules ran)
 
 export const HUEY_EYE = new THREE.Vector3(0.55, 0.16, -1.95), HUEY_EYE_PITCH = -0.16;
@@ -367,8 +368,10 @@ export function buildHueyCockpit() {
     for (const sx of [-0.2, 0.2]) box(0.04, 0.4, 0.04, metal, sx, -0.85, -1.85, seat);   // seat legs
     box(0.06, 0.04, 0.5, black, s * 0.29, -0.02, -1.85, seat);                  // armour panel handle rail
   }
-  // empty copilot seat: belts lying on it
-  for (const sx of [-0.12, 0.12]) box(0.05, 0.005, 0.4, M(0x6a6a50), -0.55 + sx, -0.565, -1.85);
+  // QA (ngc/qa-units): the copilot in the left seat, as the exterior model shows him (was: an empty seat with the belts
+  // lying on it). Hands on his thighs; 1.1 m left of the pilot's eye, so he never blocks the view ahead.
+  { const cp = buildSeatedCrewman({ suit: M(0x5a6247), vest: M(0x3a3f2e), helmet: M(0x4a5532), skin: M(0xc19a77), visor: M(0x151515) });
+    cp.position.set(-0.55, -0.57, -1.81); g.add(cp); }
 
   // ---------------------------------------------------------------- flight controls (both seats, linked)
   const cyclics = [], collectives = [], pedalSets = [];

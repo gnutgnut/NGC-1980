@@ -170,6 +170,19 @@ function crewman(put, mats, arms = true) {
   }
 }
 
+// QA (ngc/qa-units): the same crewman for the cockpit's copilot (the exterior shows two pilots, the cockpit had an empty
+// seat). A Group, origin on the seat cushion, facing -z; hands resting on the thighs (he is not flying).
+export function buildSeatedCrewman(mats, name = 'copilot') {
+  const g = new THREE.Group(); g.name = name;
+  crewman((geo, m) => { const o = new THREE.Mesh(geo, m); o.name = name; g.add(o); }, mats, false);
+  for (const s of [-1, 1]) {
+    const a = new THREE.Mesh(rodG([s * 0.22, 0.55, 0.0], [s * 0.21, 0.3, -0.06], 0.1), mats.suit); a.name = name; g.add(a);       // upper arm
+    const f = new THREE.Mesh(rodG([s * 0.21, 0.3, -0.06], [s * 0.15, 0.2, -0.32], 0.085), mats.suit); f.name = name; g.add(f);   // forearm on the thigh
+    const h = new THREE.Mesh(boxG(0.08, 0.05, 0.1, s * 0.14, 0.19, -0.36), mats.visor); h.name = name; g.add(h);                  // glove
+  }
+  return g;
+}
+
 // ------------------------------------------------------------------------------------------- the model
 export function buildHueyMesh() {
   const g = new THREE.Group(); g.name = 'huey';
