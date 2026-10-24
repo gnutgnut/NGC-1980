@@ -140,6 +140,7 @@ export function createMarineSim(o = {}) {
     const st = S.stanceT < 1 ? S.stanceTo : S.stance;
     intent.mx = (inp.move || [0, 0])[0]; intent.mz = (inp.move || [0, 0])[1]; intent.stance = st; intent.jump = jumped; intent.yaw = S.yaw;
     intent.vel.x = S.vel.x; intent.vel.z = S.vel.z;
+    intent.dive = !!inp.dive;   // ngc/waterfish: hold C in the water to dive
     // ngc/infdepth: a casualty in his hands (marinecare.js sets MS.burden = { v: MEDINV BUDDY drag / carry speed, drain }):
     // no faster than that, and the effort comes out of his anaerobic reserve on top of the walking demand
     if (MS.burden) {

@@ -105,9 +105,10 @@ export function buildLeviathan() {
   for (const [y, z, s] of [[8.4, -4.6, 1.5], [6.6, 1.0, 1.2], [9.6, 2.8, 1.0]]) for (const sd of [-1, 1]) glow.add(new THREE.TorusGeometry(s * 0.95, 0.05, 4, 6), CYAN, T(sd * 1.96, y, z, 0, Math.PI / 2, 0));
   glow.add(new THREE.SphereGeometry(0.25, 6, 4), 0xbff8ff, T(0, 14.6, -3.2));
   glow.pop(); kit.pop();
-  // the port-side sensor fin and mast (the asymmetry)
-  kit.add(new THREE.CylinderGeometry(1, 1, 1, 4), CER_D, T(-4.0, DECK + 2.5, -1.5, 0, Math.PI / 4, 0, 2.4, 5, 4.5));
-  kit.rod([-4.0, DECK + 5, -1.5], [-4.3, DECK + 10.5, -0.5], 0.2, COMP_L, 5); kit.add(new THREE.SphereGeometry(0.9, 8, 6), CER, T(-4.3, DECK + 11.2, -0.4)); glow.add(new THREE.TorusGeometry(0.92, 0.05, 4, 14), CYAN, T(-4.3, DECK + 11.2, -0.4, Math.PI / 2));
+  // the port-side sensor fin (the asymmetry): a smaller blade in the same language, leaning aft, a sensor eye on top
+  kit.prism([[-3.4, 0], [3.0, 0], [1.6, 5.2], [-1.2, 5.2]], 1.3, CER_D, T(-4.0 - 0.65, DECK, -1.5, 0, Math.PI / 2, 0));
+  kit.add(new THREE.CylinderGeometry(0.75, 0.75, 0.16, 6), DARKG, T(-4.0 - 0.7, DECK + 3.0, -1.2, 0, 0, Math.PI / 2)); glow.add(new THREE.TorusGeometry(0.72, 0.04, 4, 6), CYAN, T(-4.0 - 0.8, DECK + 3.0, -1.2, 0, Math.PI / 2, 0));
+  kit.add(new THREE.OctahedronGeometry(0.55, 0), DARKG, T(-4.0, DECK + 5.7, -1.4, 0, 0.3, 0, 1, 1.3, 1)); glow.add(new THREE.SphereGeometry(0.16, 6, 4), 0xbff8ff, T(-4.0, DECK + 6.4, -1.4));
   // the power spine aft of the blade: a raised ridge with heat-sink fins and a glowing core line
   kit.box(2.6, 1.6, 16, COMP_L, 1.2, DECK + 0.8, 20); kit.box(2.0, 0.4, 16.4, CER, 1.2, DECK + 1.7, 20);
   for (let z = 13; z <= 27; z += 1.6) for (const sd of [-1, 1]) kit.box(0.08, 1.4, 0.9, COMP, 1.2 + sd * 1.4, DECK + 1.6, z, 0, 0, sd * 0.4);
@@ -135,7 +136,7 @@ export function buildLeviathan() {
   g.add(new THREE.Mesh(glow.geometry(), glowMat()));
   g.add(sheet.mesh({ lambert: false }));
   return {
-    group: g, turrets, guns, mounts, hull: h, localDeck, deckHalf, motion: 'leviathan', dims: LEV, fx: { wake: 0.8, smoke: 0 },
+    group: g, turrets, guns, mounts, hull: h, localDeck, deckHalf, waterHalf: z => z < -50 ? 0 : z < -6 ? 7.2 * Math.pow((z + 50) / 44, 0.65) : 7.2, motion: 'leviathan', dims: LEV, fx: { wake: 0.8, smoke: 0 },
     bow: new THREE.Vector3(0, 0, -47), stern: new THREE.Vector3(0, 0, 46),
     tick(dt) { for (const t of turrets) t.userData.tick(dt); for (const gun of guns) gun.userData.tick?.(dt); },
   };

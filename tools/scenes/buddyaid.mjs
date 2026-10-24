@@ -60,6 +60,12 @@ export default async function (h) {
   await h.eval(`(__G.marine.TV.spoon(), 1)`);
   await phase('cook', 0.3, 'm67-3-cooking-spoon-gone');
   await phase('throw', 0.12, 'm67-4-the-arc');
+  // the same drill seen from outside (carepose.js: rifle slung, the off hand pointing, the throwing arm cocked / over)
+  await h.eval(`(() => { const W = __G.foot.W, S = __G.marine.S, rx = Math.cos(S.yaw), rz = -Math.sin(S.yaw), fx = -Math.sin(S.yaw), fz = -Math.cos(S.yaw); __G.marine.view = 'third';
+    window.__cam = { at: [W.x + rx * 3.2 - fx * 1.2, W.y + 1.7, W.z + rz * 3.2 - fz * 1.2], look: [W.x, W.y + 1.3, W.z] }; return 1; })()`);
+  await phase('cook', 0.6, 'm67-3p-1-cooking-arm-back');
+  await phase('throw', 0.15, 'm67-3p-2-over-the-top');
+  await h.eval(`(window.__cam = null, __G.marine.view = 'first', 1)`);
   await h.expect(`/COOKING/.test(document.getElementById('hint').textContent) || __G.marine.throwState().phase === 'throw'`, 'the HUD counts the cook');
   // let it run: cooked 1.2 s, let go of G -> the throw
   await h.eval(`(() => { const T = __G.marine.throwState(); T.phase = 'cook'; T.t = 0; T.cook = 1.2; __G.marine.freezeThrow = false; __G.marine.input({ throwHeld: false }); window.__b0 = __G.marine.stats.booms || 0; return 1; })()`);

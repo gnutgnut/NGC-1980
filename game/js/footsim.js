@@ -15,11 +15,12 @@
 //   standing jump with load ~0.45 m -> 2.97 m/s take-off                                                INFERRED
 //   falls: injury from ~2.5 m (7 m/s at impact), often fatal beyond ~8 m (12.5 m/s)                     INFERRED (CDC/NIOSH fall data)
 //   swimming in uniform ~0.8-1 m/s                                                                      INFERRED
+//   ngc/waterfish: diving (hold C) to ~4.5 m at ~1 m/s; breath held ~45 s (untrained adults 30-90 s)    INFERRED
 export const SOLDIER = {
   R: 0.3, TALL: { stand: 1.8, crouch: 1.2, prone: 0.45 }, EYE: { stand: 1.62, crouch: 1.05, prone: 0.3 },
   SPEED: { walk: 1.52, run: 2.74, sprint: 5.5, crouch: 1.4, prone: 0.5, swim: 0.9, ladder: 1.1 },
   ACCEL: 9, AIR: 1.5, JUMP_V: 2.97, STEP: 0.45, DROP: 0.55, SLOPE_TAN: 0.75, G: 9.81,
-  FALL_HURT: 7.0, FALL_KILL: 12.5, WATER_HURT: 16, SWIM_D: 1.3, STAMINA_S: 14, STAMINA_REST_S: 25,
+  FALL_HURT: 7.0, FALL_KILL: 12.5, WATER_HURT: 16, SWIM_D: 1.3, DIVE_D: 4.5, BREATH_S: 45, STAMINA_S: 14, STAMINA_REST_S: 25,
   STANCE_T: { stand: 0.35, crouch: 0.3, prone: 0.9 },
 };
 
@@ -27,7 +28,7 @@ export function createWalker(P = SOLDIER) {
   const W = {
     x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, pitch: 0, stance: 'stand', eye: P.EYE.stand, tall: P.TALL.stand,
     onGround: true, swim: false, wade: 0, ladder: null, sprinting: false, stamina: 1, winded: false, surface: 'grass',
-    plat: null, loc: null, carried: null, stride: 0, airT: 0, peakVy: 0, events: [], P,
+    plat: null, loc: null, carried: null, stride: 0, airT: 0, peakVy: 0, events: [], P, breath: P.BREATH_S || 45, gasp: false,
   };
   const _s = {}, _o = { x: 0, z: 0, r: P.R, y0: 0, y1: 0, nx: 0, nz: 0 };
   W.place = (x, y, z, yaw = 0) => { Object.assign(W, { x, y, z, yaw, vx: 0, vy: 0, vz: 0, onGround: true, swim: false, ladder: null, plat: null, loc: null, airT: 0 }); };
@@ -146,7 +147,14 @@ export function createWalker(P = SOLDIER) {
     // ---- vertical: swimming, standing (follow the ground down steps / slopes), or falling
     const g = env.floor(W.x, W.z, W.y, P.STEP, W.tall), gnd = g === Infinity ? W.y : g;
     if (W.swim) {
-      const ty = -P.SWIM_D; W.vy += ((ty - W.y) * 6 - W.vy * 3) * h; W.y += W.vy * h; W.onGround = false;
+      // ngc/waterfish: I.dive (hold C) takes him under, to DIVE_D or just over the bottom; he holds his breath down there
+      // (BREATH_S) and comes up when he lets go or runs out (then not again until he has his breath back)
+      const sub = W.y < -P.SWIM_D - 0.5, bs = P.BREATH_S || 45;
+      W.breath = sub ? Math.max(0, W.breath - h) : Math.min(bs, W.breath + h * 3);
+      if (W.breath <= 0 && !W.gasp) { W.gasp = true; ev('breath'); } else if (W.breath > bs * 0.5) W.gasp = false;
+      const dive = !!I.dive && !W.gasp, ty = dive ? Math.min(-P.SWIM_D, Math.max(-(P.DIVE_D || 4.5), gnd + 0.6)) : -P.SWIM_D;
+      if (dive || sub) { W.vy += ((ty - W.y) * 2 - W.vy * 2.5) * h; W.vy = Math.max(-1.1, Math.min(1.4, W.vy)); } else W.vy += ((ty - W.y) * 6 - W.vy * 3) * h;
+      W.y += W.vy * h; W.onGround = false;
       if (gnd > ty - 0.05 && W.y <= gnd + 0.05) { W.y = gnd; W.vy = 0; W.onGround = true; W.swim = false; }   // shallows: feet on the bottom
       else if (W.y < gnd) W.y = gnd;
       return;

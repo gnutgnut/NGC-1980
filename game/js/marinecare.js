@@ -82,7 +82,7 @@ export function createMarineCare(Mr, ctx) {
     const fx = -Math.sin(S.yaw), fz = -Math.cos(S.yaw);
     if (h.mode === 'drag') {   // in front of you, head toward you: you back up with him
       u.viewAt = null;
-      GS().place(u, W.x + fx * 0.9, W.z + fz * 0.9, Math.atan2(-fx, -fz));
+      GS().place(u, W.x + fx * 0.75, W.z + fz * 0.75, Math.atan2(-fx, -fz));
     } else {   // across the shoulders, face down, his middle on your right shoulder
       GS().place(u, W.x, W.z, S.yaw);
       _q.setFromEuler(_e.set(0, S.yaw + Math.PI / 2, 0, 'YXZ')); _q2.setFromEuler(_e.set(0, 0, Math.PI, 'XYZ')); _q.multiply(_q2);

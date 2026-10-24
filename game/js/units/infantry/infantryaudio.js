@@ -67,7 +67,8 @@ export class InfantryAudio {
     const w = o.weapon || 'M16A1', dist = o.dist || 0, now = this.t, at = now + dist / this.c, own = dist < 2;
     const out = own ? this.master : this._dist(dist, o.pan || 0);
     const P = { M16A1: { blast: 1, f: 2600, body: 0.5, thump: 95, dur: 0.12 }, M60: { blast: 1.25, f: 1800, body: 0.75, thump: 75, dur: 0.18 }, M1911A1: { blast: 0.85, f: 1400, body: 0.7, thump: 110, dur: 0.11 },
-      M203: { blast: 0.45, f: 500, body: 0.6, thump: 140, dur: 0.15 }, M72A2: { blast: 1.6, f: 900, body: 1, thump: 55, dur: 0.5 } }[w] || {};
+      M203: { blast: 0.45, f: 500, body: 0.6, thump: 140, dur: 0.15 }, M72A2: { blast: 1.6, f: 900, body: 1, thump: 55, dur: 0.5 },
+      M2: { blast: 1.55, f: 1100, body: 1.0, thump: 52, dur: 0.24 } }[w] || {};   // M2: ngc/wheeledgame (the M35's ring mount)
     const v = own ? 0.9 : 1.6;
     // the blast: a broadband crack with a fast decay, plus the low body
     this._noise(at, P.dur, { type: 'bandpass', f0: P.f * 1.6, f1: P.f * 0.5, q: 0.5, vol: P.blast * 0.9 * v, out });

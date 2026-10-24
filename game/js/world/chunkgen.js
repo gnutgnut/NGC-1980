@@ -8,6 +8,7 @@ import * as MD from './models.js';
 import { netState, BKT, settlementOf, cellReady, CELL, FARM_CELL, farmOf, roadById, ROAD } from './net.js';
 import { townItems, farmItems, polesOf, mastOf } from './layout.js';
 import { rng } from './rng.js';
+import { isDrivableCar } from './parked.js';   // ngc/wheeledgame: some garden cars are real, drivable ones
 import { rawH } from '../world.js';
 
 export const CHUNK = 400;
@@ -150,7 +151,7 @@ function itemGeo(G, it, hf, vh, dyn) {
     case 'shed': P(gN, g => MD.shed(g, r, it)); break;
     case 'woodpile': P(gN, g => MD.woodpile(g, r)); break;
     case 'garage': P(gN, g => MD.garageBox(g, r, it)); break;
-    case 'car': P(gN, g => MD.car(g, r, it.paint)); break;
+    case 'car': if (!isDrivableCar(it)) P(gN, g => MD.car(g, r, it.paint)); break;   // ngc/wheeledgame: the drivable ones are crafts
     case 'tree': tree(gN, it.x, it.y, it.z, it.s || 1, r); gF.push(it.x, it.y, it.z).blob(0, 4.2 * (it.s || 1), 0, 2.4 * (it.s || 1), 2.3 * (it.s || 1), 2.4 * (it.s || 1), LEAF[0]).pop(); break;
     case 'field': field(G, it, hf, vh, dyn); break;
   }

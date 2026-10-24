@@ -10,7 +10,7 @@
 // |z - 22| < 9, 13 m above the deck. dims = { L: 120, W: 28, DECK: 8, TOWER_X: 10.5, TOWER_Z: 22, TOWER_H: 13 }.
 import * as THREE from 'three';
 import { Kit, T, DEG, rng, hullMat, glowMat, canvasTex, DecalSheet, drawStreak, drawText, drawGlyphs } from './navkit.js';
-import { buildHull, deckHalf as albDeckHalf } from './albatross.js';
+import { buildHull, deckHalf as albDeckHalf, waterHalf, STERN_LADDER, buildLadderGeo } from './albatross.js';
 import { buildRAM, buildLaser } from './mounts.js';
 
 export const KRK = { L: 120, W: 28, DECK: 8, TOWER_X: 10.5, TOWER_Z: 22, TOWER_H: 13 };
@@ -19,11 +19,14 @@ const GREY = 0x6d757b, GREY_D = 0x5b6268, GREY_L = 0x828a90, DARK = 0x26292c, CE
 
 // flight deck outline (x starboard, z aft): the straight deck plus the angled-deck sponson to port, starboard
 // elevator bulges; one polygon, counter-clockwise seen from above with z down
+// Ford-class plan: a broad, blunt bow (the flight deck stays wide nearly to the stem), two starboard deck-edge
+// elevators FORWARD of the island and one to port aft, the angled-deck sponson to port, the island far aft
 export const DECK_POLY = [
-  [13.2, 60], [14.0, 40], [16.6, 36], [16.6, 22], [14.0, 18], [14.0, -6], [16.6, -10], [16.6, -24], [14.0, -28], [13.6, -40],
-  [10.5, -54], [5.5, -63], [0, -66], [-5.5, -63], [-10.5, -54], [-13.6, -40], [-14.2, -26], [-20.5, -14], [-22.5, 6],
+  [13.2, 60], [14.0, 40], [14.0, 10], [16.6, 8], [16.6, -6], [14.4, -8], [14.4, -10], [16.6, -12], [16.6, -26], [14.0, -28], [13.6, -40],
+  [12.8, -52], [10.2, -61], [6.0, -65.2], [0, -66], [-6.0, -65.2], [-10.2, -61], [-12.8, -52], [-13.6, -40], [-14.2, -26], [-20.5, -14], [-22.5, 6],
   [-21.5, 30], [-18.5, 52], [-15.5, 60],
 ];
+export const ELEVS = [[10, -26, 16.6, -12], [10, -6, 16.6, 8], [-20.5, 34, -15, 48]];
 function inPoly(x, z, P) {
   let c = false;
   for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, zi] = P[i], [xj, zj] = P[j]; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; }
@@ -59,7 +62,7 @@ function deckTexture() {
     for (let xx = -15; xx < 13; xx += 2) { x.fillStyle = (Math.round(xx) % 4 === 0) ? '#d8d8d0' : '#b02a20'; x.fillRect(px(xx), pz(58.6), 2 * DT_W / (X1 - X0), pz(60) - pz(58.6)); }
     for (const [xa, za, xb, zb] of [[-3, -8, -3, -56], [5, -10, 5, -54], [-13.5, -6, -15.5, -40], [-8.5, 0, -11.5, -36]]) { line(xa, za, xb, zb, '#141516', 4); line(xa - 0.35, za, xb - 0.35, zb, '#6c6e70', 1.5); line(xa + 0.35, za, xb + 0.35, zb, '#6c6e70', 1.5); line(xa, za + 2, xa, za + 5, '#d8b21e', 3, [8, 6]); }
     // elevator outlines (starboard bulges and port aft), taxi lines
-    for (const [x0, z0, x1, z1] of [[10, -24, 16.6, -10], [10, 22, 16.6, 36], [-20.5, 34, -15, 48]]) { x.lineWidth = 6; x.setLineDash([14, 14]); x.strokeStyle = '#d8b21e'; x.strokeRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); x.lineDashOffset = 14; x.strokeStyle = '#151515'; x.strokeRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); x.setLineDash([]); x.lineDashOffset = 0; }
+    for (const [x0, z0, x1, z1] of ELEVS) { x.lineWidth = 6; x.setLineDash([14, 14]); x.strokeStyle = '#d8b21e'; x.strokeRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); x.lineDashOffset = 14; x.strokeStyle = '#151515'; x.strokeRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); x.setLineDash([]); x.lineDashOffset = 0; }
     line(8, -50, 8, 10, '#c9a51c', 3); line(8, 10, 6.5, 40, '#c9a51c', 3);
     // the old hull number on the bow, crudely painted out and overpainted with machine glyphs
     x.save(); x.fillStyle = 'rgba(224,224,216,0.55)'; x.font = 'bold 200px Liberation Sans, Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.translate(px(0), pz(-56)); x.scale(1, 1.25); x.fillText('82', 0, 0); x.restore();
@@ -87,22 +90,21 @@ let _drone = null;
 export function rwDroneGeos() {
   if (_drone) return _drone;
   const b = new Kit({ wear: 0.02 }), gl = new Kit({ wear: 0 });
-  // chevron wing: a thin prism outline (x span, z chord), swept 35 deg
-  for (const sd of [-1, 1]) {   // swept wing panels (35 deg), ceramic over a dark composite underside
-    b.box(5.2, 0.28, 1.9, CERAMIC, sd * 2.1, 1.7, 0.6, 0, -sd * 0.61, 0); b.box(5.1, 0.08, 1.8, COMPOSITE, sd * 2.1, 1.53, 0.6, 0, -sd * 0.61, 0);
-  }
-  b.box(2.2, 0.3, 3.4, CERAMIC, 0, 1.68, -0.4);
-  b.add(new THREE.SphereGeometry(0.75, 8, 5), CERAMIC, T(0, 1.5, -0.6, 0, 0, 0, 1.0, 0.55, 2.4));   // centre body
-  b.add(new THREE.OctahedronGeometry(0.42, 0), 0x1d2024, T(0, 1.42, -2.45, 0, 0, 0, 1, 0.8, 1));      // the sensor cluster
+  // a tailless flying wing (X-47 / B-2 family planform): sawtooth trailing edge, 9.2 m span
+  const half = [[0, -2.8], [1.0, -1.7], [4.6, 0.9], [4.6, 1.6], [3.0, 1.15], [2.0, 2.1], [0.9, 1.2], [0, 1.9]];
+  const plan = [...half, ...half.slice(1, -1).reverse().map(([x, z]) => [-x, z])];
+  b.slab(plan, 1.48, 1.78, CERAMIC, COMPOSITE);
+  b.add(new THREE.SphereGeometry(0.75, 8, 5), CERAMIC, T(0, 1.72, -0.5, 0, 0, 0, 0.95, 0.42, 2.2));      // the dorsal hump
+  b.add(new THREE.OctahedronGeometry(0.38, 0), 0x1d2024, T(0, 1.62, -2.5, 0, 0, 0, 1, 0.7, 1));       // the sensor cluster for a nose
   for (const sd of [-1, 1]) {
-    b.add(new THREE.TorusGeometry(0.85, 0.16, 6, 14), COMPOSITE, T(sd * 1.9, 1.62, 0.5, Math.PI / 2));
-    b.cyl(0.78, 0.78, 0.06, 0x15171a, sd * 1.9, 1.58, 0.5, 0, 0, 0, 14);
-    b.box(0.12, 0.7, 0.12, COMPOSITE, sd * 1.1, 0.85, -0.9); b.box(0.12, 0.7, 0.12, COMPOSITE, sd * 1.1, 0.85, 1.0);   // skids
-    b.box(0.14, 0.1, 2.6, COMPOSITE, sd * 1.1, 0.5, 0.05);
-    b.box(0.08, 0.7, 0.9, CERAMIC, sd * 4.5, 1.95, 1.1, 0, 0, sd * -0.35);   // winglets
-    gl.box(0.05, 0.05, 2.6, CYAN, sd * 2.9, 1.92, -0.15, 0, sd * -0.95, 0); gl.add(new THREE.TorusGeometry(0.9, 0.04, 4, 16), CYAN, T(sd * 1.9, 1.75, 0.5, Math.PI / 2));
+    b.add(new THREE.TorusGeometry(0.62, 0.12, 6, 14), COMPOSITE, T(sd * 1.75, 1.8, 0.2, Math.PI / 2));   // lift-fan ducts in the wing roots
+    b.cyl(0.56, 0.56, 0.05, 0x15171a, sd * 1.75, 1.8, 0.2, 0, 0, 0, 14);
+    b.box(0.12, 0.8, 0.12, COMPOSITE, sd * 1.0, 0.95, -1.0); b.box(0.12, 0.8, 0.12, COMPOSITE, sd * 1.0, 0.95, 0.9);   // skids
+    b.box(0.14, 0.1, 2.6, COMPOSITE, sd * 1.0, 0.55, -0.05);
+    gl.rod([sd * 1.05, 1.8, -1.68], [sd * 4.5, 1.8, 0.88], 0.035, CYAN, 4);                                   // leading-edge seam
+    gl.add(new THREE.TorusGeometry(0.66, 0.035, 4, 16), CYAN, T(sd * 1.75, 1.84, 0.2, Math.PI / 2));
   }
-  gl.add(new THREE.TorusGeometry(0.3, 0.05, 4, 10), CYAN, T(0, 1.45, -2.66));
+  gl.add(new THREE.TorusGeometry(0.28, 0.045, 4, 10), CYAN, T(0, 1.62, -2.82));
   _drone = { body: b.geometry(), glow: gl.geometry() };
   return _drone;
 }
@@ -128,11 +130,15 @@ export function buildKraken(opts = {}) {
   buildHull(kit, hullHalf, { hull: GREY, dark: GREY_D });
   // the overhangs: angled-deck sponson to port, elevator bulges to starboard, with their undersides and supports
   const slab = (pts, y0, col) => { kit.floor(pts, y0, col, true); };
-  const portSp = [[-13.6, -26], [-14.2, -26], [-20.5, -14], [-22.5, 6], [-21.5, 30], [-18.5, 52], [-15.5, 60], [-13.6, 60]];
-  kit.floor(portSp.map(([x, z]) => [x, z]), DECK - 0.9, GREY_D, true);
-  for (let i = 0; i < portSp.length - 1; i++) { const [a, b] = [portSp[i], portSp[i + 1]]; if (Math.abs(a[0]) < 14 && Math.abs(b[0]) < 14) continue; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); kit.box(0.3, 0.9, L, GREY, (a[0] + b[0]) / 2, DECK - 0.45, (a[1] + b[1]) / 2, 0, Math.atan2(b[0] - a[0], b[1] - a[1]), 0); }
+  // the flight deck's underside wherever it overhangs the hull, and its edge fascia (0.9 m deep)
+  kit.floor(DECK_POLY.map(([x, z]) => [x, z]), DECK - 0.9, GREY_D, true);
+  for (let i = 0; i < DECK_POLY.length; i++) {
+    const a = DECK_POLY[i], b = DECK_POLY[(i + 1) % DECK_POLY.length], mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2, L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L < 0.2 || (Math.abs(mx) < hullHalf(mz) + 0.15 && mz > -40) || mz > 59.5) continue;
+    const yaw = Math.atan2(b[0] - a[0], b[1] - a[1]); kit.box(0.25, 0.9, L + 0.1, GREY, mx, DECK - 0.45, mz, 0, yaw, 0);
+  }
   for (let z = -14; z <= 56; z += 10) { const xo = z < -8 ? -18 : z < 40 ? -21 : -18; kit.rod([-11.8, 3.5, z], [xo, DECK - 1, z], 0.3, GREY_D, 5); }
-  for (const [z0, z1] of [[-24, -10], [22, 36]]) { kit.box(3, 0.9, z1 - z0 + 4, GREY, 15.1, DECK - 0.45, (z0 + z1) / 2); kit.box(0.12, 2.8, z1 - z0, 0x15171a, 12.25, 5.3, (z0 + z1) / 2); }
+  for (const [z0, z1] of [[-26, -12], [-6, 8]]) { kit.box(0.12, 2.8, z1 - z0, 0x1d2023, 12.25, 5.3, (z0 + z1) / 2); kit.box(0.16, 1.0, z1 - z0, 0x5a6167, 12.28, 6.2, (z0 + z1) / 2); }   // hangar door, part up
   kit.box(5.5, 0.9, 14, GREY, -17.8, DECK - 1.0, 41);   // port aft elevator
   // island: small, far aft and outboard; flat-faced radar arrays on three faces; a short stealthy mast
   kit.push(T(KRK.TOWER_X, DECK, KRK.TOWER_Z)); glow.push(T(KRK.TOWER_X, DECK, KRK.TOWER_Z));
@@ -189,6 +195,7 @@ export function buildKraken(opts = {}) {
   const MOUNTS = [{ kind: 'ram', x: 15.6, z: -38, y: DECK - 1.2, out: [1, 0, -0.5] }, { kind: 'ram', x: -15.4, z: -32, y: DECK - 1.2, out: [-1, 0, -0.5] },
     { kind: 'laser', x: -19.4, z: 56, y: DECK - 1.0, out: [-1, 0, 0.6] }, { kind: 'laser', x: 15.4, z: 54, y: DECK - 1.0, out: [1, 0, 0.6] }];
   for (const M of MOUNTS) { const sd = Math.sign(M.x); kit.box(4.2, 0.35, 4.6, GREY, M.x - sd * 0.6, M.y - 0.18, M.z); kit.add(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -3, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, -3, 0], 3)), GREY_D, T(sd * 12, M.y - 0.3, M.z, 0, 0, 0, sd * (Math.abs(M.x) - 12.5), 1, 1)); }
+  buildLadderGeo(kit, STERN_LADDER);
   const hull = kit.mesh(); hull.name = 'kraken-hull'; g.add(hull);
   g.add(buildDeck());
   const dec = sheet.mesh(); g.add(dec);
@@ -216,7 +223,7 @@ export function buildKraken(opts = {}) {
   }
   return {
     group: g, guns, dish, lamp, lights: [], teamM: team, tower: tw, band, mounts, hull, deck: g.getObjectByName('flightdeck'),
-    bow: new THREE.Vector3(0, 1, -60), stern: new THREE.Vector3(0, 0, 57), localDeck, motion: 'kraken', dims: KRK, fx: { wake: 1.05, smoke: 0 },
+    bow: new THREE.Vector3(0, 1, -60), stern: new THREE.Vector3(0, 0, 57), localDeck, waterHalf, ladders: [STERN_LADDER], motion: 'kraken', dims: KRK, fx: { wake: 1.05, smoke: 0 },
     tick(dt, t) { for (const gun of guns) gun.userData.tick?.(dt); lamp.visible = (t % 1.1) < 0.5; },
   };
 }

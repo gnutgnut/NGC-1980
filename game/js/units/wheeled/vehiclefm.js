@@ -233,7 +233,7 @@ export function createVehicleSim(spec, opts = {}) {
     // outputs
     speed: 0, kmh: 0, slipMax: 0, yawRate: 0, latG: 0, lonG: 0, up: v3(0, 1, 0), fwdv: v3(0, 0, -1), roll: 0, pitch: 0, heading: 0,
     inWater: 0, depth: 0, hullContact: 0, odometer: 0, tripFuel: 0, onGround: false, upsideDown: false, contactForce: 0,
-    events: [], dmg: null, mods: { power: 1, seized: false, flat: null, brake: 1 }, _acc: v3(), _t: 0, _evCool: {},
+    events: [], _between: [], _inStep: false, dmg: null, mods: { power: 1, seized: false, flat: null, brake: 1 }, _acc: v3(), _t: 0, _evCool: {},
     kit: false, horn: false, lights: false, lastCtl: null,
     // reset the vehicle: model origin at pos, heading yaw (rad, 0 = nose along -z, + = turn LEFT as three's y rotation),
     // o: { running (engine on), gear, fuel (litres) }
@@ -242,7 +242,7 @@ export function createVehicleSim(spec, opts = {}) {
       S.pos[0] = pos[0]; S.pos[1] = pos[1]; S.pos[2] = pos[2];
       qToR(S.q, R); bw(R, S.cgb, _a);
       S.cgw[0] = pos[0] + _a[0]; S.cgw[1] = pos[1] + _a[1]; S.cgw[2] = pos[2] + _a[2];
-      S.vel.fill(0); S.w.fill(0); S.L.fill(0); solver.w.fill(0); S.events.length = 0;
+      S.vel.fill(0); S.w.fill(0); S.L.fill(0); solver.w.fill(0); S.events.length = 0; S._between.length = 0;
       for (const W of wheels) { const k = P.wk[W.i]; W.s = k.s0; W.sv = 0; W.penPrev = k.pen0; W.ts = tyreState(); W.contact = W.wasContact = false; W.Fbx = 0; W.omega = 0; }
       const run = o.running !== false;
       Object.assign(S.eng, { rpm: run ? E.idle : 0, running: run, thr: 0, temp: o.temp ?? (run ? 82 : 20), boost: 0, crank: 0, misfire: 0, wet: 0, seized: false, hydrolock: false, smoke: 0 });
@@ -301,14 +301,44 @@ export function createVehicleSim(spec, opts = {}) {
       _a[0] = at[0] - S.cgw[0]; _a[1] = at[1] - S.cgw[1]; _a[2] = at[2] - S.cgw[2]; crossTo(_a, J, _b);
       S.L[0] += _b[0]; S.L[1] += _b[1]; S.L[2] += _b[2]; qToR(S.q, R); wFromL(R);
     },
+    // ngc/wheeledgame: kinematic transport by a moving deck (platform.js carry): move the whole vehicle by (dx, dy, dz)
+    // and turn it about the vertical through its model origin by dyaw (THREE convention, + = left), velocities and
+    // angular momentum turned with it, so motion relative to the deck is kept exactly
+    transport(dx, dy, dz, dyaw = 0) {
+      if (dyaw) {
+        const c = Math.cos(dyaw), s = Math.sin(dyaw), ox = S.pos[0], oz = S.pos[2];
+        const rot = v => { const x = v[0], z = v[2]; v[0] = x * c + z * s; v[2] = -x * s + z * c; };
+        const rx = S.cgw[0] - ox, rz = S.cgw[2] - oz; S.cgw[0] = ox + rx * c + rz * s; S.cgw[2] = oz - rx * s + rz * c;
+        rot(S.vel); rot(S.w); rot(S.L);
+        const h = dyaw / 2, qy = [0, Math.sin(h), 0, Math.cos(h)], q = S.q;   // q = qy * q
+        const x = qy[3] * q[0] + qy[1] * q[2], y = qy[3] * q[1] + qy[1] * q[3], z = qy[3] * q[2] - qy[1] * q[0], w = qy[3] * q[3] - qy[1] * q[1];
+        q[0] = x; q[1] = y; q[2] = z; q[3] = w;
+      }
+      S.cgw[0] += dx; S.cgw[1] += dy; S.cgw[2] += dz;
+      updatePose();
+    },
+    // ngc/wheeledgame: start already rolling at v m/s (WORLD traffic handed over to the sim): body, wheels, shafts and
+    // the engine set consistent with the drivetrain constraints in `gear` (0 = neutral, the engine idling)
+    launch(v, gear = 0) {
+      const f = S.fwdv; S.vel[0] = f[0] * v; S.vel[1] = f[1] * v; S.vel[2] = f[2] * v;
+      let wr = 0, wf = 0;
+      for (const W of wheels) { const om = v / W.r; W.omega = om; solver.w[4 + W.i] = om; }
+      for (const a of spec.axles) if (a.driven === 'R') wr = a.final * v / wheels[a.wheels[0]].r; else if (a.driven === 'F') wf = a.final * v / wheels[a.wheels[0]].r;
+      solver.w[2] = wr; solver.w[3] = wf; solver.w[1] = (TC.high || 1) * wr;
+      S.gear = gear | 0;
+      solver.w[0] = gear > 0 ? GB.ratios[gear - 1] * solver.w[1] : Math.max(solver.w[0], E.idle / RPM);
+      S.eng.rpm = solver.w[0] * RPM; S.eng.running = true;
+      updatePose();
+    },
     step(dt, ctl, env) {
-      S.events.length = 0; S.lastCtl = ctl;
+      // events raised between steps (a round through the vehicle: dmg.hit / blast from the host) are reported with this one
+      S.events.length = 0; for (const e of S._between) S.events.push(e); S._between.length = 0; S._inStep = true; S.lastCtl = ctl;
       dt = Math.min(dt, 0.1);
       const n = Math.max(1, Math.ceil(dt / SUB - 1e-6)), h = dt / n;
       frameControls(dt, ctl, env);
       for (let i = 0; i < n; i++) sub(h, ctl, env);
       systems(dt, ctl, env);
-      updatePose();
+      updatePose(); S._inStep = false;
       return S.events;
     },
     // level of detail: 'near' (9 tyre probes, 600 Hz: the player / the camera's neighbours), 'mid' (5, 480 Hz), 'far'
@@ -317,7 +347,7 @@ export function createVehicleSim(spec, opts = {}) {
     get rpm() { return S.eng.rpm; },
     get mass() { return S.massNow; },
   };
-  const ev = (e, x, cool = 0) => { if (cool) { const t = S._evCool[e] || 0; if (S._t < t) return; S._evCool[e] = S._t + cool; } S.events.push(x ? { e, ...x } : { e }); if (S.dmg) S.dmg.onEvent?.(S, e, x); };
+  const ev = (e, x, cool = 0) => { if (cool) { const t = S._evCool[e] || 0; if (S._t < t) return; S._evCool[e] = S._t + cool; } (S._inStep ? S.events : S._between).push(x ? { e, ...x } : { e }); if (S._between.length > 64) S._between.shift(); if (S.dmg) S.dmg.onEvent?.(S, e, x); };
   S.ev = ev;
 
   function updatePose() {

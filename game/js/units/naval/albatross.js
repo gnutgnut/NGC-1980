@@ -28,6 +28,43 @@ export function deckHalf(lz) {
   if (lz >= -40) return W / 2;
   return 4 + 10 * Math.sqrt(Math.max(0, (lz + 66) / 26));
 }
+// The island as solid boxes and walkable roofs for people on foot (ground.js): tower frame [x0, x1, z0, z1, y0, y1],
+// y above the flight deck, matching buildIsland's geometry.
+export const ISLAND_BOXES = [
+  [-2.3, 2.6, -8.5, 8.8, 0, 3.2],          // O-3 / O-4
+  [-2.2, 2.5, -8.0, 8.5, 3.2, 6.4],        // O-5 / O-6
+  [-2.4, 2.5, -7.2, 6.0, 6.4, 9.0],        // O-7 flag bridge
+  [-2.65, 2.65, -6.15, 4.15, 9.0, 13.05],  // navigation bridge (helm.js inside) and its roof lip
+  [-3.4, 1.0, 0.3, 4.9, 13.15, 15.8],      // pri-fly, overhanging to port
+  [-2.0, 2.2, 4.1, 8.7, 6.4, 17.8],        // funnel
+  [-0.2, 0.4, -1.3, -0.7, 13.3, 28],       // mast
+  [-0.5, 0.5, -4.1, -3.1, 13.3, 15.2],     // SPS-48 pedestal
+  [-2.5, 2.6, -6.25, -6.05, 13.3, 14.3],   // top-deck rails: forward, starboard, port (gap at the ladder head)
+  [2.45, 2.65, -6.1, 0.4, 13.3, 14.3],
+  [-2.6, -2.4, -4.95, 0.4, 13.3, 14.3],
+  [-3.68, -3.5, -6.9, 5.2, 6.4, 7.4],      // catwalk rails: outboard, aft end, the stub at the forward end
+  [-3.6, -2.2, 5.08, 5.22, 6.4, 7.4],
+  [-3.65, -3.25, -7.22, -7.08, 6.4, 7.4],
+  [-3.9, -2.5, -4.4, -2.0, 9.0, 9.2],      // port bridge wing (a ledge)
+];
+// height above the flight deck of what you stand on at tower-frame (tx, tz), or null off the island
+export function islandFloor(tx, tz) {
+  if (tx < -3.7 || tx > 2.9 || tz < -9 || tz > 9.2) return null;
+  let h = null;
+  if (tx >= -3.62 && tx < -2.3 && tz >= -7.2 && tz <= 5.2) h = 6.4;                       // the catwalk
+  if (tx >= -2.3 && tx <= 2.6 && tz >= -8.5 && tz <= 8.8) h = 9.0;                         // lower levels' roofs
+  if (tx >= -2.0 && tx <= 2.2 && tz >= 4.1 && tz <= 8.7) h = 17.8;                          // funnel
+  if (tx >= -2.65 && tx <= 2.65 && tz >= -6.15 && tz <= 4.15) h = 13.3;                     // bridge roof
+  if (tx >= -2.5 && tx <= 2.65 && tz >= -6.15 && tz <= 0.5) h = 13.33;                      // the top deck
+  if (tx >= -3.4 && tx <= 1.0 && tz >= 0.3 && tz <= 4.9) h = 15.8;                          // pri-fly roof
+  return h;
+}
+// half-beam of the hull at the waterline (the bow wave hugs it)
+export function waterHalf(z) {
+  if (z < -60 || z > 57) return 0;
+  if (z < -18) { const t = Math.min(1, (-18 - z) / 42); return 10.6 * Math.sqrt(Math.max(0, 1 - t * t)) * (1 - 0.15 * t); }
+  return z > 30 ? 10.6 - (z - 30) / 27 * 2.6 : 10.6;
+}
 // height (above the waterline, ship frame) of what you stand on at (lx, lz), or -1e9 off the ship
 export function localDeck(lx, lz) {
   let h = -1e9;
@@ -91,9 +128,13 @@ function buildIsland(kit, glow, sheet) {
   // flag bridge windows (all round) and pri-fly: a glassed box overhanging aft and to port, looking down the deck
   kit.box(4.95, 0.75, 13.25, GLASS, 0.05, 7.95, -0.6);
   kit.box(4.4, 2.5, 4.6, H, -1.2, 14.4, 2.6); kit.box(4.5, 1.0, 4.7, GLASS, -1.2, 14.6, 2.6); kit.box(4.6, 0.2, 4.8, HD, -1.2, 15.7, 2.6);
-  // bridge wings and the vulture's row balcony
-  for (const sd of [-1, 1]) { kit.box(1.4, 0.15, 2.4, HD, sd * 3.2, 9.05, -4.6); kit.rail([[sd * 2.5, 9.1, -5.8], [sd * 3.9, 9.1, -5.8], [sd * 3.9, 9.1, -3.4]], 1.0, HD, 0.8, 0.03); }
-  kit.box(1.1, 0.15, 8, HD, -3.0, 6.4, 1); kit.rail([[-3.55, 6.45, -3], [-3.55, 6.45, 5]], 1.0, HD, 1, 0.03);
+  // bridge wings (the port one aft of the island ladder) and the port catwalk at the O-7 level ("vulture's row"),
+  // which the two flights of the island ladder join: deck -> catwalk -> island top deck (ISLAND_LADDERS below)
+  for (const sd of [-1, 1]) { const z = sd < 0 ? -3.2 : -4.6; kit.box(1.4, 0.15, 2.4, HD, sd * 3.2, 9.05, z); kit.rail([[sd * 2.5, 9.1, z - 1.2], [sd * 3.9, 9.1, z - 1.2], [sd * 3.9, 9.1, z + 1.2]], 1.0, HD, 0.8, 0.03); }
+  kit.box(1.25, 0.15, 12.4, HD, -3.0, 6.325, -1.0);
+  for (let z = -6.6; z <= 4.8; z += 2.85) kit.add(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -1.1, 0, -1.2, 0, 0, 0, 0, 0, -1.2, 0, 0, 0, -1.1, 0], 3)), HD, T(-2.38, 6.25, z));   // brackets
+  kit.rail([[-3.58, 6.4, -6.9], [-3.58, 6.4, 5.15], [-2.25, 6.4, 5.15]], 1.0, HD, 1.0, 0.03);
+  kit.rail([[-3.58, 6.4, -7.15], [-3.3, 6.4, -7.15]], 1.0, HD, 1.0, 0.03);   // the forward end, open where the lower flight comes up
   // funnel: aft, raked, with the black-topped uptakes
   kit.push(T(0.1, 0, 6.4, -6 * DEG));
   kit.box(4.2, 8.2, 4.6, H, 0, 13.2, 0); kit.box(4.3, 0.55, 4.7, BLACK, 0, 17.55, 0.05);
@@ -103,6 +144,7 @@ function buildIsland(kit, glow, sheet) {
   // island top deck and the mast: a tripod with yardarms, TACAN at the top
   kit.box(5, 0.25, 6.6, HD, 0, 13.2, -2.8);
   kit.rail([[-2.5, 13.3, -6.1], [2.5, 13.3, -6.1], [2.5, 13.3, 0.4]], 0.9, HD, 0.9, 0.03);
+  kit.rail([[-2.5, 13.3, -4.95], [-2.5, 13.3, 0.4]], 0.9, HD, 0.9, 0.03);   // port rail, a gap at the ladder head (z -6.1 .. -4.95)
   const mast = [0.1, 13.3, -1.0], top = [0.1, 28.6, -1.0];
   kit.rod(mast, top, 0.2, HD, 6); kit.rod([-1.8, 13.3, 0.2], [0.1, 22.5, -0.9], 0.11, HD, 5); kit.rod([1.9, 13.3, 0.2], [0.1, 22.5, -0.9], 0.11, HD, 5); kit.rod([0.1, 13.3, 1.6], [0.1, 22.5, -0.9], 0.11, HD, 5);
   kit.box(2.8, 0.18, 2.4, HD, 0.1, 21.4, -1.0);                      // SPS-49 platform
@@ -130,6 +172,37 @@ function buildIsland(kit, glow, sheet) {
   // red obstruction lights on the mast, the masthead light
   for (const [x, y, z] of [[0.1, 30.9, -1.0], [-3.2, 25.3, -1.0], [3.4, 25.3, -1.0]]) glow.box(0.18, 0.18, 0.18, 0xff2a1a, x, y, z);
   kit.pop(); glow.pop();
+}
+
+// ------------------------------------------------------------------------------------------------- ladders
+// Vertical steel ladders as on a 1980 carrier island: two flights up the island's port face (flight deck -> the O-7
+// catwalk -> the island top deck), the upper flight caged; and a Jacob's ladder hanging off the fantail (both carriers).
+// Ship frame: { name, lx, lz, yaw (the climber faces (-sin yaw, -cos yaw), into the rungs), y0, y1 (above the
+// waterline), w (rung width), top: [dx, dz] where the climber steps off, from (lx, lz) }. footsim puts the climber
+// 0.42 m in front of (lx, lz); the rungs are drawn 0.06 m behind it (the same plane foot.js used).
+const IL = (tx, tz, y0, y1, top, name, cage) => ({ ship: 'carrier', side: 1, name, lx: ALB.TOWER_X + tx, lz: ALB.TOWER_Z + tz, yaw: -Math.PI / 2, y0: DECK + y0, y1: DECK + y1, w: 0.6, top, cage, drawn: true });
+export const ISLAND_LADDERS = [
+  IL(-2.42, -7.65, 0, 6.4, [-0.6, 0.95], 'ISLAND LADDER', false),            // up the O-3 / O-6 face, forward of the catwalk
+  IL(-2.76, -5.45, 6.4, 13.33, [0.9, 0], 'ISLAND LADDER (UPPER)', true),     // catwalk -> top deck, past the bridge front corner
+];
+export const STERN_LADDER = { ship: 'carrier', name: "STERN LADDER (JACOB'S)", lx: -7, lz: 60.25, yaw: 0, y0: -1.6, y1: DECK, w: 0.6, top: [0, -1.25], rope: true, drawn: true };
+// rails, rungs, the grab handles over the top and (cage) hoops, into kit
+export function buildLadderGeo(kit, L) {
+  const fx = -Math.sin(L.yaw), fz = -Math.cos(L.yaw), rx = -fz, rz = fx, h = L.y1 - L.y0;   // r: across the ladder
+  const ox = L.lx + fx * 0.06, oz = L.lz + fz * 0.06, P = (a, y, b = 0) => [ox + rx * a - fx * b, L.y0 + y, oz + rz * a - fz * b];
+  const rail = L.rope ? 0x8a7a5a : 0x4a5056, rung = L.rope ? 0x6a4e30 : 0x50565c, top = L.rope ? 0 : 0.9;
+  for (const sd of [-1, 1]) {
+    kit.rod(P(sd * L.w / 2, 0), P(sd * L.w / 2, h + top), L.rope ? 0.02 : 0.03, rail, 5);
+    if (!L.rope && L.top[0] * fx + L.top[1] * fz > 0) kit.rod(P(sd * L.w / 2, h + top), P(sd * L.w / 2, h + top, -0.35), 0.03, rail, 5);   // handles reach over onto the deck
+    if (!L.rope) for (let y = 1.2; y < h - 0.2; y += 2.4) kit.rod(P(sd * L.w / 2, y), P(sd * L.w / 2, y, -0.14), 0.025, rail, 4);   // stand-off brackets to the wall
+  }
+  for (let y = 0.15; y < h; y += 0.3) kit.rod(P(-L.w / 2, y), P(L.w / 2, y), L.rope ? 0.03 : 0.018, rung, 4);
+  if (L.cage) {   // safety cage: hoops from 2.3 m up, and five vertical straps round the climber
+    const hoop = y => { const pts = []; for (let i = 0; i <= 10; i++) { const a = Math.PI * i / 10; pts.push(P(Math.cos(a) * (L.w / 2 + 0.12), y, Math.sin(a) * 0.82)); } return pts; };   // out round the climber (0.48 m from the rungs)
+    const ys = []; for (let y = 2.3; y < h + 0.9; y += 0.9) ys.push(y);
+    for (const y of ys) { const p = hoop(y); for (let i = 0; i < p.length - 1; i++) kit.rod(p[i], p[i + 1], 0.016, rail, 3); }
+    for (const i of [1, 3, 5, 7, 9]) { const a = hoop(ys[0])[i], b = hoop(ys[ys.length - 1])[i]; kit.rod(a, b, 0.014, rail, 3); }
+  }
 }
 
 // ------------------------------------------------------------------------------------------------- deck texture
@@ -240,6 +313,19 @@ function buildDeckGear(kit, glow) {
   // folding whip antennas on the deck edge (lowered for flight ops), and the bow anchors' hawse pipes
   for (const [x, z] of [[14.3, 50], [14.3, 12], [-14.3, 20], [-14.3, -10]]) kit.rod([x, DECK - 0.3, z], [x + Math.sign(x) * 4.5, DECK - 0.1, z + 0.7], 0.04, 0x8d9294, 4);
   for (const sd of [-1, 1]) { kit.cyl(0.55, 0.55, 0.6, BLACK, sd * 6.3, 4.6, -56.5, 0, 0, Math.PI / 2 - sd * 0.3, 10); kit.box(0.4, 1.6, 1.1, 0x1a1a1a, sd * 6.5, 3.4, -56.2, 0, 0, sd * -0.3); }
+  // the bridle arrester "horn" off the bow at the end of cat 1 (it caught the wire bridle a 1970s catapult threw off
+  // the launch; Midway carried them into the 1980s): a tapered boom overhanging the stem, with its brake housing
+  kit.add(new THREE.BoxGeometry(1.2, 0.7, 15).translate(0, 0, -7.5), HAZE, T(-2.5, DECK - 0.15, -52, 0.035));
+  kit.box(1.5, 0.9, 3.2, HAZE_D, -2.5, DECK - 0.55, -53.6); kit.box(0.5, 0.25, 15, 0x55595e, -2.5, DECK + 0.22, -59.2, 0.035);
+  for (const z of [-60, -64]) kit.rod([-2.5, DECK - 0.5, z], [-2.5, 4.2, z + 4.5], 0.12, HAZE_D, 5);
+  // the bullnose fairlead at the stem, the jackstaff
+  kit.cyl(0.55, 0.55, 0.5, HAZE_D, 0, DECK - 0.6, -65.6, Math.PI / 2, 0, 0, 10); kit.rod([0, DECK, -65.2], [0, DECK + 3.2, -65.2], 0.04, 0x2a2a2a, 4);
+  // starboard UNREP (underway replenishment) receiving station: a sponson at hangar-deck level with its highline posts
+  kit.box(2.4, 0.3, 6, HAZE, 13.4, 5.2, -15.5); for (const z of [-17.5, -13.5]) kit.rod([14.2, 5.3, z], [14.4, DECK - 0.6, z], 0.1, HAZE_D, 6);
+  kit.rail([[12.4, 5.35, -18.5], [14.6, 5.35, -18.5], [14.6, 5.35, -12.5], [12.4, 5.35, -12.5]], 0.9, HAZE_D, 1.0, 0.03);
+  // the starboard boat pocket aft: a recess in the hangar side with the captain's gig and a motor whaleboat
+  kit.box(0.14, 2.2, 9, 0x24282c, 12.26, 4.9, 44);
+  for (const [z, c] of [[41.8, 0xd8d8d0], [46.4, 0x8b9095]]) { kit.add(new THREE.SphereGeometry(1, 8, 5, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), c, T(12.2, 5.0, z, 0, 0, 0, 0.9, 0.7, 2.0)); kit.box(1.4, 0.35, 3.4, 0x5a5f63, 12.2, 5.1, z); }
   // hangar-deck openings in the side under the elevators (dark), and the sponsons for the mounts
   for (const E of ELEVATORS) { const sd = Math.sign(E.x0 + E.x1), zc = (E.z0 + E.z1) / 2, len = E.z1 - E.z0 - 1;
     kit.box(0.12, 2.6, len, 0x23272b, sd * 12.25, 5.4, zc);                                                        // the hangar beyond (dim)
@@ -374,13 +460,15 @@ export function buildAlbatross(side = 1, opts = {}) {
   };
   const kit = new Kit({ wear: 0.035, seed: 3, grime }), glow = new Kit({ wear: 0 }), sheet = new DecalSheet(1024, 8, 8);
   buildHull(kit); buildIsland(kit, glow, sheet); buildDeckGear(kit, glow); buildSponsons(kit);
+  for (const L of [...ISLAND_LADDERS, STERN_LADDER]) buildLadderGeo(kit, L);
   // vehicles and deck clutter
-  tractor(kit, 5.6, -1.5, 0.4); tractor(kit, 12.2, 38, Math.PI); tractor(kit, -11.6, -44, -0.3, 0xe8e8e2);
-  tilly(kit, 5.9, 12.5, 0.05); bowser(kit, 10.6, -38.5, 2.6); huffer(kit, 4.6, -16, 1.2); huffer(kit, 4.3, 46, -0.6);
-  for (const [x, z] of [[4.2, -25], [6.4, 24], [12.4, 15.8], [-12.6, 2]]) fireBottle(kit, x, z);
-  for (let i = 0; i < 4; i++) kit.box(0.6, 0.15, 3.2, 0x2a2a2a, -12.6 + i * 0.75, DECK + 0.08, -18 + i * 0.4, 0, 0.1, 0);   // tow bars stacked at the edge
+  // (the port strip from z -6 to -36 is the vehicle park: ground.js DECK_SPOTS put the Marines' jeep and armour there)
+  tractor(kit, 5.6, -1.5, 0.4); tractor(kit, 12.2, 38, Math.PI); tractor(kit, -10.6, -45, -0.25, 0xe8e8e2);
+  tilly(kit, 5.9, 12.5, 0.05); bowser(kit, 11.4, -14.5, Math.PI); huffer(kit, 4.6, -16, 1.2); huffer(kit, 4.3, 46, -0.6);
+  for (const [x, z] of [[4.2, -25], [6.4, 24], [12.4, 15.8], [-12.6, 2], [-12.4, -40]]) fireBottle(kit, x, z);
+  for (let i = 0; i < 4; i++) kit.box(0.6, 0.15, 3.2, 0x2a2a2a, -13.0 + i * 0.7, DECK + 0.08, 6 + i * 0.4, 0, 0.1, 0);   // tow bars stacked at the edge
   // parked aircraft: two Hornets forward of the island (tails over the starboard edge), two Tomcats aft (oversweep)
-  const hornets = [[8.9, -46, 0.62], [9.2, -31, 0.62]], cats = [[9.0, 27, 0.06], [9.3, 46.5, -0.1]];
+  const hornets = [[8.9, -47, 0.62], [9.2, -33.2, 0.62]], cats = [[9.0, 27, 0.06], [9.3, 46.5, -0.1]];
   const hornetMesh = instanced(hornetGeo(), hornets, 2.05); hornetMesh.name = 'parked-hornets'; g.add(hornetMesh);
   if (opts.buildTomcat) { const tm = instanced(tomcatGeo(opts.buildTomcat), cats, 0); tm.name = 'parked-tomcats'; g.add(tm); for (const [x, z, yw] of cats) chocks(kit, x, z, yw, 2.6, 0.9, -6.4); }
   for (const [x, z, yw] of hornets) chocks(kit, x, z, yw, 1.6, 0.6, -4.6);
@@ -451,23 +539,29 @@ export function buildAlbatross(side = 1, opts = {}) {
   let crew = null;
   if (opts.crew !== false) {
     const C = [
-      // around the catapult and the bow: green shirts at the shuttle, a yellow shooter, blue chockers
+      // cat 1 (clear of the lane, x < -8.4 or x > 3.6): the catapult officer ("shooter", yellow) by the JBD, green-shirt
+      // catapult crew at the deck-edge control station and the hold-back bar, a white-shirt safety petty officer
       { x: -9.4, z: -4.2, yaw: 0.8, jersey: 'green', mode: 'kneel' }, { x: 4.0, z: -12, yaw: -0.5, jersey: 'green' }, { x: -9.6, z: -10, yaw: 0.5, jersey: 'yellow', mode: 'signal' },
-      { x: -10.2, z: -26, yaw: 1.4, jersey: 'white', hands: true }, { x: -10.8, z: -42, yaw: 0.4, jersey: 'blue', mode: 'talk' }, { x: -10.2, z: -41, yaw: -2.6, jersey: 'blue' },
-      // the parked Hornets: plane captains, a purple fueller, an ordie, chockers
-      { x: 5.2, z: -44, yaw: -1.9, jersey: 'brown' }, { x: 6.8, z: -40.5, yaw: 2.4, jersey: 'purple', mode: 'kneel' }, { x: 6.0, z: -28.5, yaw: -2.0, jersey: 'red', mode: 'kneel' },
-      { x: 4.6, z: -33, yaw: -1.2, jersey: 'brown', hands: true }, { x: 11.8, z: -36, yaw: 3.0, jersey: 'blue', mode: 'talk' }, { x: 4.8, z: -21, yaw: 0.6, jersey: 'green' },
+      { x: -9.3, z: 1.5, yaw: 0.3, jersey: 'green', mode: 'talk' }, { x: 3.9, z: 1.2, yaw: -0.6, jersey: 'white', hands: true },
+      // the bow: the bow tractor's crew and a blue-shirt pair with chains
+      { x: -9.0, z: -43.6, yaw: 0.4, jersey: 'blue', mode: 'talk' }, { x: -9.4, z: -42.6, yaw: -2.6, jersey: 'blue' }, { x: -9.6, z: -38, yaw: 1.4, jersey: 'white', hands: true },
+      // each parked Hornet: the plane captain (brown) at the nose, a blue chocker at the mains, the fuel crew (purple)
+      // at the single-point refuel on the left side, ordnancemen (red) at the wing stations
+      { x: 5.6, z: -50.6, yaw: 0.6, jersey: 'brown', hands: true }, { x: 8.4, z: -44.0, yaw: 2.4, jersey: 'blue', mode: 'kneel' }, { x: 6.8, z: -40.5, yaw: 2.4, jersey: 'purple', mode: 'kneel' },
+      { x: 5.8, z: -35.6, yaw: 0.6, jersey: 'brown' }, { x: 6.0, z: -28.5, yaw: -2.0, jersey: 'red', mode: 'kneel' }, { x: 4.7, z: -26.4, yaw: -2.3, jersey: 'red', mode: 'talk' },
+      { x: 11.6, z: -18.8, yaw: 3.0, jersey: 'purple', mode: 'talk' }, { x: 4.8, z: -21, yaw: 0.6, jersey: 'green' },
       // the island: flight-deck control, a safety officer, a medic, the tractor driver
       { x: 6.3, z: -3.8, yaw: 2.8, jersey: 'yellow', hands: true }, { x: 7.2, z: 1.2, yaw: -1.6, jersey: 'white' }, { x: 6.6, z: 3, yaw: -1.5, jersey: 'blue', mode: 'talk' },
       { x: 7.1, z: 9, yaw: -2.8, jersey: 'red' },
       // aft: Tomcat crews, the arresting gear (green), the LSO team on the platform
-      { x: 5.0, z: 22, yaw: 1.8, jersey: 'brown' }, { x: 6.2, z: 34, yaw: 2.6, jersey: 'purple' }, { x: 5.1, z: 41.5, yaw: -1.2, jersey: 'blue', mode: 'kneel' }, { x: 12.6, z: 54, yaw: 0.4, jersey: 'red', mode: 'talk' },
+      { x: 5.0, z: 22, yaw: 1.8, jersey: 'brown' }, { x: 6.2, z: 34, yaw: 2.6, jersey: 'purple' }, { x: 6.5, z: 27.6, yaw: -1.4, jersey: 'blue', mode: 'kneel' }, { x: 5.1, z: 41.5, yaw: -1.2, jersey: 'blue', mode: 'kneel' }, { x: 12.6, z: 54, yaw: 0.4, jersey: 'red', mode: 'talk' },
+      { x: 12.2, z: 37.6, yaw: 1.2, jersey: 'purple', mode: 'kneel' }, { x: 4.4, z: 48.8, yaw: -0.4, jersey: 'yellow', mode: 'signal' },
       { x: -12.5, z: 47, yaw: 0.2, jersey: 'green' }, { x: -12.8, z: 36.5, yaw: 1.1, jersey: 'green', hands: true },
       { x: -15.2, z: 42, yaw: Math.PI - 0.15, jersey: 'white', mode: 'lso', y: DECK - 0.22 }, { x: -14.6, z: 44.2, yaw: Math.PI + 0.2, jersey: 'white', y: DECK - 0.22 }, { x: -16.0, z: 44.8, yaw: Math.PI, jersey: 'white', mode: 'talk', y: DECK - 0.22 },
       // people walking the deck: along the street by the island, across the bow, round the fantail
       { mode: 'walk', jersey: 'blue', path: [[4.4, -48], [4.4, -6], [6.6, -4], [6.6, 16], [6.6, -4], [4.4, -6]], speed: 1.3 },
       { mode: 'walk', jersey: 'yellow', path: [[3.8, 18], [3.8, 46], [3.8, 18]], speed: 1.1 },
-      { mode: 'walk', jersey: 'green', path: [[-12, -40], [-12, -6], [-12, -40]], speed: 1.4 },
+      { mode: 'walk', jersey: 'green', path: [[-8.9, -36], [-8.9, -6], [-8.9, -36]], speed: 1.4 },
       { mode: 'walk', jersey: 'purple', path: [[12.8, -34], [12.8, -12], [12.8, -34]], speed: 0.9 },
       { mode: 'walk', jersey: 'brown', path: [[12.6, 18], [12.6, 54], [12.6, 18]], speed: 1.2 },
     ];
@@ -531,7 +625,8 @@ export function buildAlbatross(side = 1, opts = {}) {
   const parts = {
     group: g, guns, dish, lamp, lights: [], teamM: team, tower: tw, band, mounts, crew, sps48, jbd, hull, deck: g.getObjectByName('flightdeck'),
     jbdK: 0, funnel: new THREE.Vector3(ALB.TOWER_X + 0.1, DECK + 19, ALB.TOWER_Z + 6.6), bow: new THREE.Vector3(0, 1, -60), stern: new THREE.Vector3(0, 0, 57),
-    localDeck: deckWith, deckHalf, motion: 'albatross', dims: ALB, fx: { wake: 1, smoke: 1 },
+    ladders: [...ISLAND_LADDERS, STERN_LADDER], islandBoxes: ISLAND_BOXES, islandFloor,
+    localDeck: deckWith, deckHalf, waterHalf, motion: 'albatross', dims: ALB, fx: { wake: 1, smoke: 1 },
     // SEAWORLD: the hull at the waterline (sea.js hull foam), how far out the ship reaches (the lifts: war.js shipAt)
     waterline: { hl: 61, hw: 10.6 }, halfW: 23.2,
     // the lifts: lift(i, 'up' | 'down' | 'toggle'), liftAt(lx, lz) -> the lift there or null, liftY(lx, lz) -> its

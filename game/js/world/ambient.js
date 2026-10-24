@@ -218,7 +218,8 @@ export function createAmbient(ctx) {
     const m = { kind, length: def.length || 4.4, mesh: null, pool: null, n: 0 };
     if (def.object) { m.pool = []; m.object = def.object; }
     else { const g = def.geometry; if (!g.attributes.aPaint) g.setAttribute('aPaint', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1)); m.mesh = new THREE.InstancedMesh(g, carMat, MAXC); m.mesh.count = 0; m.mesh.frustumCulled = false; root.add(m.mesh); }
-    MODELS[kind] = m; return m;
+    MODELS[kind] = m; for (const c of A.cars) if (c.kind === kind) c.m = m;   // ngc/wheeledgame: cars already out switch too
+    return m;
   }
   for (const k of kinds) setModel(k, vehicleGeo(k));
   // road connectivity, built lazily round the camera: endpoints and junctions
@@ -242,7 +243,7 @@ export function createAmbient(ctx) {
     if ((far && d < 280) || d > 1100 || q.bridge) return;
     learn(R);
     const kind = pickKind(R, Math.random()), m = MODELS[kind];
-    A.cars.push({ R, s, dir: Math.random() < 0.5 ? 1 : -1, v: VMAX[R.type] * 0.6, kind, m, col: PAINTS[Math.floor(Math.random() * PAINTS.length)], x: q.x, y: q.y, z: q.z, yaw: 0, pitch: 0, wreck: 0, stopT: 0, flee: 0 });
+    A.cars.push({ R, s, dir: Math.random() < 0.5 ? 1 : -1, v: VMAX[R.type] * 0.6, kind, m, col: A.paints[kind] && A.paints[kind].length ? A.paints[kind][Math.floor(Math.random() * A.paints[kind].length)] : PAINTS[Math.floor(Math.random() * PAINTS.length)], x: q.x, y: q.y, z: q.z, yaw: 0, pitch: 0, wreck: 0, stopT: 0, flee: 0 });
   }
   function hitVehicles(x, y, z, r) {
     for (const c of A.cars) if (!c.wreck && Math.hypot(c.x - x, c.z - z) < r && Math.abs(c.y - y) < r + 2) { c.wreck = 120; c.v = 0; c.col = 0x26221e; fx.burn(c.x, c.y + 0.6, c.z, 40, 0.8); }
@@ -405,6 +406,10 @@ export function createAmbient(ctx) {
   A.dropChunk = c => { dropPeople(c); dropMoorings(c); herds.delete(c); active.delete(c); };
   for (const e of zone) { addMoorings(e); }
   A.setModel = setModel; A.models = MODELS;
+  // ngc/wheeledgame: the vehicle sim takes a car over near the player (units/wheeled/motorpool.js) and hands it back
+  A.paints = {};   // kind -> [hex]: paint that kind from these (the drivable cars' own colours)
+  A.release = c => { const i = A.cars.indexOf(c); if (i >= 0) A.cars.splice(i, 1); };
+  A.adopt = d => { const m = MODELS[d.kind]; if (!m || A.cars.length >= MAXC) return null; learn(d.R); const c = { R: d.R, s: d.s, dir: d.dir, v: d.v, kind: d.kind, m, col: d.col, x: d.x, y: d.y, z: d.z, yaw: 0, pitch: 0, wreck: 0, stopT: 0, flee: 0 }; A.cars.push(c); return c; };
   A.update = (dt, cam, playing) => {
     const t = (A.t = (A.t || 0) + dt);
     for (const d of A.danger) d.t += dt; while (A.danger.length && A.danger[0].t > 60) A.danger.shift();

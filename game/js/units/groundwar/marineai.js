@@ -40,7 +40,9 @@ export const MAR_T = {
   SUPP_DECAY: 0.15, PIN: 0.7, UNPIN: 0.35,
   THREAT: { strider: 2.2, hovertank: 6, mbt: 7, aa: 0.6, inf: 1, air: 1.5 },
   POWER: { sl: 1, tl: 1, ar: 1.4, mg: 1.9, aar: 1, gren: 1.2, doc: 0.6 },   // (doc: the corpsman, ngc/infdepth)
-  RANGE: { rifle: 460, auto: 460, mg: 800, gl: 330, law: 200 },   // m: M16A1 / M60 / M203 / M72 effective-ish (game)
+  RANGE: { rifle: 460, auto: 460, mg: 800, gl: 330, law: 200, frag: 30 },   // m: M16A1 / M60 / M203 / M72 effective-ish, an M67 thrown (game)
+  FRAG: { min: 10, safe: 12, p: 0.3 },   // M67: not closer than 10 m (FM 23-30: 15 m casualty radius, behind cover), none of his own within 12 m of the
+                                          // aim point, a ~0.3 / s chance a man with one decides on it (ngc/infdepth-fix)
   WITHDRAW_RATIO: 0.45, ASSAULT_RATIO: 2.2,
 };
 
@@ -282,8 +284,10 @@ export function createMarineAI(world, opt = {}) {
     // ---- shooting (any state but a rush; pinned men fire seldom and badly)
     // a LAW, once a man has decided on it, stays his job until it is fired (extend, arm, aim: a couple of seconds)
     if (a.law && (AI.time > a.law.until || m.laws <= 0)) a.law = null;
+    if (a.frag && (AI.time > a.frag.until || !(m.frags > 0))) a.frag = null;   // (the same for a hand grenade: the host clears it when it is thrown)
     let tgt = reacting ? null : pickTarget(S, m);
     if (a.law && !reacting) { const k = S.know.get(a.law.id) || a.own.get(a.law.id); if (k && k.conf > 0.2) tgt = k; else a.law = null; }
+    if (a.frag && !reacting) { const k = S.know.get(a.frag.id) || a.own.get(a.frag.id); if (k && k.conf > 0.2) tgt = k; else a.frag = null; }
     if (tgt) {
       const tx = tgt.px ?? tgt.x, tz = tgt.pz ?? tgt.z, ty0 = tgt.y ?? world.height(tx, tz), d = d2(tx, tz, m.x, m.z);
       // where to hold: centre of mass, except on a STRIDER - word gets round fast: the machine gun goes for the legs,
@@ -294,7 +298,12 @@ export function createMarineAI(world, opt = {}) {
       const armour = tgt.kind === 'hovertank' || tgt.kind === 'mbt';
       let wpn = m.role === 'ar' ? 'auto' : m.role === 'mg' ? 'mg' : 'rifle';
       if (!a.law && m.laws > 0 && ((armour && d < MAR_T.RANGE.law) || (tgt.kind === 'strider' && d < 140 && tgt.seen && R() < 0.35 * dt) || (tgt.kind === 'aa' && d < 170))) a.law = { id: tgt.id, until: AI.time + jit(5, 8) };
+      // an M67 over the cover: a man with one, his target in throwing range and behind cover (or a machine close in),
+      // none of his own near where it will land
+      if (!a.law && !a.frag && m.frags > 0 && !armour && d > MAR_T.FRAG.min && d < MAR_T.RANGE.frag && (!clear || tgt.cover > 0.3 || (tgt.kind === 'strider' && d < 20)) && R() < MAR_T.FRAG.p * dt
+        && !S.members.some(o => o !== m && o.alive && d2(o.x, o.z, tx, tz) < MAR_T.FRAG.safe)) a.frag = { id: tgt.id, until: AI.time + 6 };
       if (a.law) wpn = 'law';
+      else if (a.frag) wpn = 'frag';
       else if (m.role === 'gren' && m.gl > 0 && d > 40 && d < MAR_T.RANGE.gl && (!clear || tgt.cover > 0.3 || tgt.kind === 'strider' || R() < 0.3)) wpn = 'gl';
       if (armour && wpn !== 'law') wpn = null;   // no point shooting a tank with a rifle
       let ok = clear && (tgt.seen || AI.time - tgt.t < 2);
@@ -303,6 +312,7 @@ export function createMarineAI(world, opt = {}) {
         ok = !rc || (1 - rc.t) * d < 5;
       }
       if (wpn === 'gl') ok = d > 40;   // lobbed: over the cover
+      if (wpn === 'frag') ok = true;     // thrown over it (he knows where they are)
       if (a.supp > 1.0 && R() < 0.7) ok = false;   // heads down
       if (a.rushT > 0) ok = false;
       if (ok && wpn && d < MAR_T.RANGE[wpn]) { a.fire = wpn; a.note = `${wpn} at ${tgt.kind} ${Math.round(d)} m`; }
@@ -382,7 +392,8 @@ export function createMarineAI(world, opt = {}) {
     // pinned under heavy fire: down now, wherever you are
     if (a.supp > MAR_T.PIN && a.rushT <= 0 && st !== 'withdraw') { stance = 'prone'; if (!dest || d2(dest[0], dest[1], m.x, m.z) > 6) dest = null; pace = 'crawl'; a.state = 'pinned'; }
     // a LAW or a grenade needs a man on one knee at least
-    if (a.fire === 'law' || a.fire === 'gl') { if (stance === 'prone') stance = 'crouch'; }
+    if (a.fire === 'law' || a.fire === 'gl' || a.fire === 'frag') { if (stance === 'prone') stance = 'crouch'; }
+    if (a.fire === 'frag') dest = null;   // (he stops to throw it)
     if (dest && d2(dest[0], dest[1], m.x, m.z) < 1.0) dest = null;
     if (dest && (pace === 'rush' || pace === 'run') && stance !== 'stand' && d2(dest[0], dest[1], m.x, m.z) > 2.5) stance = 'stand';   // you get up to run
     if (dest && pace === 'crawl') stance = 'prone';

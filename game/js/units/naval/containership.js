@@ -110,7 +110,7 @@ export function buildContainerShip() {
   g.add(sheet.mesh());
   return {
     group: g, guns: [gun], mounts: [{ kind: 'laser', pos: gun.position.clone(), dir: new THREE.Vector3(0, 0, -1), node: gun, gun: 0 }],
-    hull: h, localDeck, deckHalf, motion: 'container', dims: BOX, fx: { wake: 0.7, smoke: 0 },
+    hull: h, localDeck, deckHalf, waterHalf: z => z < -26 ? deckHalf(z) * 0.9 : 7.3, motion: 'container', dims: BOX, fx: { wake: 0.7, smoke: 0 },
     bow: new THREE.Vector3(0, 0, -40), stern: new THREE.Vector3(0, 0, 39),
     tick(dt) { gun.userData.tick?.(dt); },
   };

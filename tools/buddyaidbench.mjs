@@ -52,6 +52,19 @@ if (process.argv[2] === 'fight') {
   process.exit(0);
 }
 
+if (process.argv[2] === 'take') {   // Marines attacking an island the machines hold (the groundwar scene's shape)
+  for (const rich of [false, true]) {
+    const F = battle({ seed: +(process.argv[3] || 1), striders: 0, rich, owner: 2, marOrder: { type: 'take', x: 0, z: 30, r: 30 } });
+    for (const m of F.mar) F.GS.place(m, m.x + 60, m.z + 60);
+    const rw = []; for (let k = 0; k < 4; k++) rw.push(F.GS.addStrider(F.B, -6 + k * 4, 26, 0, { weapon: k ? 'xm7' : 'coil' }));
+    F.GS.squadRW(F.B, rw, { type: 'defend', x: 0, z: 30, r: 25 });
+    const cam = { x: 60, y: 30, z: 100 };
+    let s1 = [];
+    run(F, 60, { cam, each: (F, t) => { if (Math.abs(t % 10) < 1 / 60) s1.push(F.GS.stats.shots[1]); } });
+    console.log(rich ? 'RICH ' : 'CHEAP', 'shots', JSON.stringify(F.GS.stats.shots), 'by 10 s', s1.join(','), 'kia', F.GS.stats.kia, 'wia', F.GS.stats.wia, 'richOn', F.mar.filter(m => m.richOn).length, F.mar.filter(m => !m.alive).map(m => m.rich ? m.rich.M.cause : 'cheap:' + m.body.why).join(';'), F.mar.slice(0, 2).map(m => m.ai.state + '/' + m.ai.fire + '/' + (m.rich ? m.rich.stats.shots + ' ' + JSON.stringify(m.rich.stats.wait) : '')).join(' | '));
+  }
+  process.exit(0);
+}
 if (process.argv[2] === 'cmp') {   // the same fights, cheap vs rich near men (balance)
   for (const rich of [false, true]) {
     const tot = { kia: 0, wia: 0, rtd: 0, shots: 0, hits: 0, machines: 0, able: 0, treat: 0 };
@@ -169,8 +182,9 @@ if (process.argv[2] === 'care') {   // the corpsman scenario, verbose
 
 // ------------------------------------------------------------------------------------------------- 5. a fight with rich men and care
 {
-  const F = battle({ seed: 6, striders: 8 }); let maxRich = 0;
-  const r = run(F, 240, { each: F => { maxRich = Math.max(maxRich, F.mar.filter(m => m.richOn).length); } });
+  // (the first of seeds 6.. with a wounded man in it: a fight where everyone hit dies outright tests nothing here)
+  let F, maxRich = 0;
+  for (let seed = 6; seed < 10; seed++) { F = battle({ seed, striders: 8 }); maxRich = 0; run(F, 240, { each: F => { maxRich = Math.max(maxRich, F.mar.filter(m => m.richOn).length); } }); if (F.GS.stats.wia > 0) break; }
   const st = F.GS.stats, cs = F.GS.FC.stats, rc = F.GS.richCost;
   check(maxRich >= 10 && F.mar.some(m => m.rich && m.rich.stats.shots > 0), 'the Marines near the camera fight on the rifleman sim (shots from their real muzzles)', `${maxRich} rich, ${F.mar.reduce((s, m) => s + (m.rich ? m.rich.stats.shots : 0), 0)} rifleman shots`);
   const self = F.mar.reduce((s, m) => s + (m.rich?.stats.selfAid || 0), 0);
@@ -179,6 +193,18 @@ if (process.argv[2] === 'care') {   // the corpsman scenario, verbose
   const ccp = F.GS.FC.ccp(F.B), list = F.GS.casualties(ccp.x, ccp.z, 400), n0 = list.length;
   for (const u of list) F.GS.evacuate(u);
   check(F.GS.casualties(ccp.x, ccp.z, 400).length === 0 && F.GS.stats.evac === n0, 'evacuation: the wounded leave the island alive', `${n0} evacuated`);
+}
+
+// ------------------------------------------------------------------------------------------------- 6. attacking: the rich men shoot
+{
+  // (ngc/infdepth-fix: the groundwar scene's shape - Marines going in against machines holding the pad; the rich model
+  // once fired almost nothing here: an aim tolerance of 0.7 deg and no fire on the move)
+  const F = battle({ seed: 2, striders: 0, owner: 2, marOrder: { type: 'take', x: 0, z: 30, r: 30 } });
+  for (const m of F.mar) F.GS.place(m, m.x + 60, m.z + 60);
+  const rw = []; for (let k = 0; k < 4; k++) rw.push(F.GS.addStrider(F.B, -6 + k * 4, 26, 0, { weapon: k ? 'xm7' : 'coil' }));
+  F.GS.squadRW(F.B, rw, { type: 'defend', x: 0, z: 30, r: 25 });
+  let at20 = 0; run(F, 40, { cam: { x: 60, y: 30, z: 100 }, each: (F, t) => { if (t < 20) at20 = F.GS.stats.shots[1]; } });
+  check(at20 > 20 && F.mar.filter(m => m.richOn).length > 0, 'attacking a held pad, the rich Marines fire (> 20 rounds in the first 20 s: the groundwar scene\'s check)', `${at20} by 20 s, ${F.GS.stats.shots[1]} by 40 s (machines ${F.GS.stats.shots[2]})`);
 }
 
 console.log(`\n${pass}/${pass + fail} checks pass`);

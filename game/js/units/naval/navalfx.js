@@ -29,8 +29,8 @@ export function createNavalFx(scene, fx, seaY = null) {
     let T = ships.get(u);
     if (T) return T;
     // 3 strips (centre, port arm, starboard arm) x N points x 2 vertices
-    const nv = 3 * N * 2, pos = new Float32Array(nv * 3), col = new Float32Array(nv * 4), uv = new Float32Array(nv * 2), idx = [];
-    for (let s = 0; s < 3; s++) for (let i = 0; i < N - 1; i++) { const a = (s * N + i) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    const nv = 5 * N * 2, pos = new Float32Array(nv * 3), col = new Float32Array(nv * 4), uv = new Float32Array(nv * 2), idx = [];
+    for (let s = 0; s < 5; s++) for (let i = 0; i < N - 1; i++) { const a = (s * N + i) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('color', new THREE.BufferAttribute(col, 4).setUsage(THREE.DynamicDrawUsage));
@@ -50,7 +50,7 @@ export function createNavalFx(scene, fx, seaY = null) {
       const T = track(u), P = u.parts, D = u.dims, L = D.L, Wd = D.W, k = (P.fx && P.fx.wake) || 1;
       const bow = P.bow || _b.set(0, 0, -L / 2), st = P.stern || _b.set(0, 0, L / 2);
       // record the bow and stern every STEP seconds (and keep the newest point glued to the ship)
-      T.t += dt;
+      T.t += dt; T.clock = (T.clock || 0) + dt;
       const bw = W(u, bow.x, 0, bow.z, new THREE.Vector3()), sw = W(u, st.x, 0, st.z, new THREE.Vector3());
       const head = { bx: bw.x, bz: bw.z, sx: sw.x, sz: sw.z, yaw: u.yaw, v: u.speed, age: 0 };
       if (T.t >= STEP || !T.hist.length) { T.t = 0; T.hist.unshift(head); if (T.hist.length > N) T.hist.pop(); }
@@ -73,6 +73,23 @@ export function createNavalFx(scene, fx, seaY = null) {
         for (const [strip, sd] of [[1, -1], [2, 1]]) {
           const cx = h.bx + px * off * sd, cz = h.bz + pz * off * sd;
           set(strip, 0, cx - px * aw, cz - pz * aw, aa, 0, sB / 14); set(strip, 1, cx + px * aw, cz + pz * aw, aa, 0.5, sB / 14);
+        }
+      }
+      // the bow wave: the crest a hull pushes up along its forward shoulders, attached to the ship (strips 3 and 4):
+      // it hugs the stem, then stands off the side and fades a third of the way aft; stronger with speed, and it
+      // rises and falls with the bow (a plunging bow throws a bigger one)
+      {
+        const c = Math.cos(u.yaw), sn = Math.sin(u.yaw), Lb = L * 0.34, vk = Math.min(1, u.speed / 5), a0 = u.att || {};
+        const plunge = Math.max(0, -((a0.vHeave || 0) - (a0.vPitch || 0) * bow.z)), amp = Math.min(1, vk * 0.75 + plunge * 0.25);
+        const wl = P.waterHalf || (z => Wd * 0.4);
+        for (let i = 0; i < N; i++) {
+          const t = Math.min(1, i / 15), lz = bow.z + t * Lb, half = Math.max(0.2, wl(lz)), off = half + 0.4 + t * (1.2 + vk * 2.2), w = (0.5 + t * 1.3) * k;
+          const a = i < 16 ? amp * Math.sin(Math.min(1, t * 3) * Math.PI / 2) * (1 - t) * 0.85 : 0;
+          for (const [strip, sd] of [[3, -1], [4, 1]]) {
+            const lx0 = sd * (off - w), lx1 = sd * (off + w), o0 = ((strip * N + i) * 2), y = 0.075 + strip * 0.004;
+            const px0 = u.p.x + lx0 * c + lz * sn, pz0 = u.p.z - lx0 * sn + lz * c, px1 = u.p.x + lx1 * c + lz * sn, pz1 = u.p.z - lx1 * sn + lz * c;
+            pos.set([px0, y, pz0, px1, y, pz1], o0 * 3); col.set([1, 1, 1, a, 1, 1, 1, a * 0.6], o0 * 4); uv.set([0, (lz + T.clock * u.speed * 0.6) / 9, 0.6, (lz + T.clock * u.speed * 0.6) / 9], o0 * 2);
+          }
         }
       }
       for (const a of ['position', 'color', 'uv']) T.g.attributes[a].needsUpdate = true;
@@ -102,8 +119,8 @@ export function createNavalFx(scene, fx, seaY = null) {
           T.smokeT = 0.12;
           const f = P.funnel, kk = P.fx.smoke * (0.4 + Math.min(1, u.speed / 6) * 0.8);
           W(u, f.x + rnd(-0.6, 0.6), f.y, f.z + rnd(-0.6, 0.6), _a);
-          const g = rnd(0.48, 0.6);
-          fx.mix.spawn(_a.x, _a.y, _a.z, rnd(-0.3, 0.3) + u.v.x * 0.3, rnd(2.5, 4), rnd(-0.3, 0.3) + u.v.z * 0.3, rnd(7, 12), 1.6, 9 * kk + 3, g, g * 0.97, g * 0.93, 0.22 * kk + 0.08, -0.12, 0.35, 1.4);
+          const g = rnd(0.6, 0.7);   // oil-fired boilers at cruise: a light grey-brown haze, not black smoke
+          fx.mix.spawn(_a.x, _a.y, _a.z, rnd(-0.3, 0.3) + u.v.x * 0.3, rnd(2.5, 4), rnd(-0.3, 0.3) + u.v.z * 0.3, rnd(7, 12), 1.6, 9 * kk + 3, g, g * 0.97, g * 0.93, 0.16 * kk + 0.06, -0.12, 0.35, 1.4);
         }
       }
     },

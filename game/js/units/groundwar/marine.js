@@ -15,7 +15,7 @@ export const MARINE = {
   STANCE_T: { 'stand>crouch': 0.45, 'crouch>stand': 0.5, 'crouch>prone': 0.8, 'prone>crouch': 0.9, 'stand>prone': 1.1, 'prone>stand': 1.3 },
   H: { stand: 1.78, crouch: 1.15, prone: 0.42 },
   R: { stand: 0.27, crouch: 0.32, prone: 0.26 },
-  LOAD: { sl: { mags: 7, laws: 0, gl: 0 }, tl: { mags: 7, laws: 1, gl: 0 }, ar: { mags: 12, laws: 0, gl: 0 }, mg: { mags: 6, laws: 0, gl: 0 }, aar: { mags: 8, laws: 1, gl: 0 }, gren: { mags: 6, laws: 0, gl: 12 }, doc: { mags: 5, laws: 0, gl: 0 } },   // (doc: the Navy corpsman, ngc/infdepth)
+  LOAD: { sl: { mags: 7, laws: 0, gl: 0, frags: 2 }, tl: { mags: 7, laws: 1, gl: 0, frags: 2 }, ar: { mags: 12, laws: 0, gl: 0, frags: 2 }, mg: { mags: 6, laws: 0, gl: 0, frags: 1 }, aar: { mags: 8, laws: 1, gl: 0, frags: 2 }, gren: { mags: 6, laws: 0, gl: 12, frags: 2 }, doc: { mags: 5, laws: 0, gl: 0, frags: 0 } },   // (doc: the Navy corpsman, ngc/infdepth; frags: M67s, ngc/infdepth-fix)
   ROLES: ['sl', 'tl', 'mg', 'aar', 'gren', 'tl', 'ar', 'aar', 'gren', 'tl', 'ar', 'aar', 'gren'],   // a reinforced squad: SL, three fire teams, an attached M60 gunner in the first
 };
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -28,7 +28,7 @@ export function createMarine(o = {}) {
     x: o.x ?? 0, y: 0, z: o.z ?? 0, yaw: o.yaw ?? 0, vx: 0, vz: 0, speed: 0,
     stance: 'stand', stanceFrom: 'stand', stanceTo: 'stand', stanceT: 1, gait: 0,
     hp: { ...MARINE.HP }, alive: true, able: true, wounded: 0, deadT: 0, why: '',
-    mags: L.mags, rounds: 18, laws: L.laws, gl: L.gl, firedT: 99, fireKind: null,
+    mags: L.mags, rounds: 18, laws: L.laws, gl: L.gl, frags: L.frags ?? 0, firedT: 99, fireKind: null,
     events: [],
   };
   if (o.env) M.y = o.env.height(M.x, M.z);

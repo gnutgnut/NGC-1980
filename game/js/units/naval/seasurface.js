@@ -43,6 +43,10 @@ export function createSeaUniforms() {
     uSeaD: { value: new THREE.Vector2(0, -1) },                                    // main direction the waves travel
     uShipP: { value: Array.from({ length: SEA_SHIPS }, () => new THREE.Vector4()) }, // (x, z, cos yaw, sin yaw)
     uShipD: { value: Array.from({ length: SEA_SHIPS }, () => new THREE.Vector4()) }, // (half length, half beam, speed 0..1, on)
+    // SEALIFE (ngc/waterfish, sealife.js keeps these): (camera under water 0/1, its depth m, turbidity 1/m, -) and the
+    // colour of the water round an underwater camera
+    uSeaK: { value: new THREE.Vector4(0, 0, 0.05, 0) },
+    uUWCol: { value: new THREE.Color(0.08, 0.36, 0.44) },
   };
 }
 // once a frame: the sea's components and the ships near the camera
@@ -103,12 +107,39 @@ export const SEA_VS = `
         }
         w.y=e*att; vSea=vec3(e*att,sx*att,sz*att);
       }`;
-export const SEA_FS_DECL = `uniform vec4 uSeaP; uniform vec2 uSeaD; varying vec3 vSea; varying float vHull;
+// SEALIFE: how fast light is lost in the water per metre (red, green, blue): pure-water absorption (Pope & Fry 1997:
+// ~0.35-0.45 red, ~0.06 green, ~0.02 blue /m) plus clear coastal scattering, a little lighter for the game's look
+export const SEA_EXT_GLSL = 'const vec3 SEA_EXT=vec3(.32,.07,.045);';
+// value noise (the sea's foam, glitter, and the sea bed), and the light loss above
+export const SEA_NOISE_GLSL = `
+    ${SEA_EXT_GLSL}
     float sHash(vec2 p){ p=mod(p,289.); return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
     float sNoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f); return mix(mix(sHash(i),sHash(i+vec2(1.,0.)),f.x),mix(sHash(i+vec2(0.,1.)),sHash(i+1.),f.x),f.y); }
-    // the sun glint's sparkle mask (only asked where there is a glint)
-    float glitAt(vec2 p, float t, float sk){ return mix(1.,.3+1.1*smoothstep(.55,.9,sNoise(p*3.1+vec2(t*1.3,-t*.9))),smoothstep(.1,.4,sk)); }   // glitter: fine sparkle, not patches
 `;
+// SEALIFE (ngc/waterfish): the sea bed, one look for both ways of seeing it - through the surface from above (the clarity
+// in SEA_FS_WATER) and the bed mesh round a camera under water (sealife.js). Sand with ripples near the beaches, sea
+// grass meadows from ~2 m down (Posidonia oceanica, the Mediterranean's: dense meadows ~1-35 m, CONFIRMED range), rock
+// where the bed is steep; caustics where the sun comes through a shallow surface. Needs sNoise.
+export const SEABED_GLSL = `
+    vec3 bedColour(vec2 p, float d, float sl){
+      float n1=sNoise(p*.09), n2=sNoise(p*.41+7.3), n3=sNoise(p*1.7-3.1);
+      float rip=.93+.07*sin(dot(p,vec2(1.9,1.1))+n2*5.);                        // sand ripples (wave-built, parallel to the shore-ish)
+      vec3 sand=mix(vec3(.78,.72,.53),vec3(.66,.60,.43),n2)*rip;
+      float grass=smoothstep(.56,.64,n1+.18*n2)*smoothstep(1.6,3.2,d);
+      vec3 c=mix(sand,mix(vec3(.09,.2,.09),vec3(.15,.29,.13),n3),grass);
+      float rock=smoothstep(.32,.62,sl+.3*(n2-.5));
+      return mix(c,mix(vec3(.38,.35,.3),vec3(.23,.22,.2),n3),rock);
+    }
+    // caustics: the bright net the swell's lenses throw on the bed (two drifting noises, bright where they cross)
+    float caustic(vec2 p, float t){
+      float a=sNoise(p*.75+vec2(t*.33,t*.21)), b=sNoise(p*1.02-vec2(t*.24,-t*.29)+3.7);
+      float c=clamp(1.-abs(a-b)*3.2,0.,1.); return c*c*c*c;
+    }
+`;
+export const SEA_FS_DECL = `uniform vec4 uSeaP; uniform vec2 uSeaD; varying vec3 vSea; varying float vHull; uniform vec4 uSeaK; uniform vec3 uUWCol;
+${SEA_NOISE_GLSL}    // the sun glint's sparkle mask (only asked where there is a glint)
+    float glitAt(vec2 p, float t, float sk){ return mix(1.,.3+1.1*smoothstep(.55,.9,sNoise(p*3.1+vec2(t*1.3,-t*.9))),smoothstep(.1,.4,sk)); }   // glitter: fine sparkle, not patches
+${SEABED_GLSL}`;
 // in: vec2 p (world xz), float d (depth), float t (time), vec3 V (to eye), vec3 L (sun), wc (water colour so far).
 // out: vec3 wn (the swell's normal: shading, fresnel), wg (glitter normal: the sun's specular - mostly ripple, so the
 // glint breaks up into sparkle instead of lighting whole wave faces), glit (sparkle mask), float foam (0..1)
@@ -125,3 +156,37 @@ export const SEA_FS_FOAM = `
         if(sk>.7) streak=smoothstep(.7,.88,sNoise(vec2(q.x*.03-t*.25,q.y*.32)))*smoothstep(.7,1.,sk)*.35;
         float surfW=1.4+3.5*sk, surf=(1.-smoothstep(0.,surfW,d))*(.55+.45*sin(d*8./(1.+sk*2.)-t*2.4+sin(a1)+vSea.x*2.));
         float foam=clamp(max(max(surf,cap),max(streak*(1.-smoothstep(150.,600.,length(cameraPosition.xz-p))),(vHull>.01?vHull*(.45+.55*sNoise(p*.6+vec2(t*.4,t*1.2))):0.))),0.,1.);`;
+
+// SEALIFE (ngc/waterfish): the water's clarity, seen from above. Replaces the flat shallows-to-deep ramp: the eye looks
+// down through the surface (refracted, Snell n = 1.333) to the bed (SEABED_GLSL), the light losing red first on the
+// way down and back (pure-water absorption ~0.35-0.45 /m red, ~0.06 green, ~0.02 blue: Pope & Fry 1997, CONFIRMED
+// order; plus a little scattering), and the water's own blue-green fills in with depth. So sand shows in the shallows
+// by the beaches, the sea grass darkens the bays, and deep water keeps the old deep blue.
+// in: d (depth m), p (world xz), t, sk (sea state 0..1), vW, vRaw.  out: vec3 wc
+export const SEA_FS_WATER = `
+        vec3 wc;
+        {
+          vec3 Vw=normalize(cameraPosition-vW); float ca=clamp(Vw.y,.04,1.), st=sqrt(1.-ca*ca)/1.333, ct=sqrt(1.-st*st);
+          vec2 hd=length(Vw.xz)>1e-4?-normalize(Vw.xz):vec2(0.);
+          float dd=max(d,0.);
+          vec2 bp=p+hd*(st/ct)*dd;                                       // where the refracted ray meets the bed
+          float path=(dd/ct+dd)*.85;                                      // sunlight down to the bed, then up to the eye
+          vec3 Tb=exp(-(SEA_EXT+uSeaK.z)*path);
+          vec2 gs=vec2(length(vec2(dFdx(vRaw),dFdy(vRaw))),length(vec2(length(dFdx(vW.xz)),length(dFdy(vW.xz)))));
+          vec3 bed=bedColour(bp,dd,clamp(gs.x/max(gs.y,1e-3),0.,1.));
+          if(dd<8.) bed*=1.+caustic(bp,t)*1.1*(1.-dd/8.)*(1.-.7*sk)*(1.-smoothstep(60.,160.,length(cameraPosition-vW)));
+          vec3 body=mix(vec3(.1,.46,.52),vec3(.02,.13,.36),smoothstep(0.,10.,dd));   // the water's own colour (light it scatters back)
+          wc=bed*Tb+body*(1.-dot(Tb,vec3(.2,.5,.3)));
+        }`;
+// SEALIFE: the surface seen from BELOW (a camera under water; the terrain is drawn double-sided then). Inside Snell's
+// window (48.6 deg round the vertical, asin(1/1.333)) the sky and the sun come through; outside it the surface is a
+// mirror of the water below (total internal reflection). Foam shows as bright patches. in: wn, foam, L, c. out: c
+export const SEA_FS_UNDER = `
+        if(!gl_FrontFacing){
+          vec3 I=normalize(vW-cameraPosition), nw=normalize(vec3(wn.x*.6,1.,wn.z*.6));
+          float cA=dot(I,nw), win=smoothstep(.62,.7,cA);
+          vec3 sky=mix(vec3(.62,.8,.92),vec3(.9,.97,1.),smoothstep(.75,1.,cA))+vec3(1.,.95,.8)*pow(max(dot(I,L),0.),40.)*1.5;
+          vec3 tir=uUWCol*(.7+.25*sNoise(p*.3+t*.2));
+          c=mix(tir,sky,win)+vec3(.6,.8,.85)*smoothstep(.55,.66,cA)*(1.-win)*.6;   // the bright rim of the window
+          c=mix(c,vec3(.75,.85,.88),foam*.55);
+        }`;

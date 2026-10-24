@@ -35,6 +35,8 @@ export const CARE = {
   CCP: 13,                       // m from the pad, on the side away from the enemy
   REACH: 1.3,                    // m: the medic kneels this close (MEDINV BUDDY.treatRangeM 1.5)
   JOBS: 3,                       // medics at work at once in a squad (the corpsman + two buddies; GAME)
+  CARRY_MIN: 12,                 // m: further than this to go and nobody shooting, a drag becomes a fireman's carry (GAME)
+  DRAG_D: 0.85,                  // m from the dragger's feet to the casualty's root (his hands on the drag strap)
 };
 // what a medic reaches for, in order (the first that applies to the worst region wins): MEDINV item ids
 const BLEED_ITEMS = { limb: ['tq_cat', 'tq_strap', 'cravat', 'dressing_battle', 'dressing_field'], trunk: ['quikclot', 'dressing_battle', 'dressing_field', 'chest_seal'] };
@@ -88,6 +90,8 @@ export function createFieldCare(o) {
   const FC = { log: [], stats: { treated: 0, rtd: 0, dow: 0, dragged: 0, callouts: 0, treatments: 0, playerTreated: 0 } };
   const drag0 = BUDDY.dragSpeed({ weaponUse: 'both', speedMul: 1 }, 95, 25);   // a fit Marine dragging a loaded casualty
   FC.dragV = drag0;
+  const carry0 = BUDDY.carrySpeed({ weaponUse: 'both', speedMul: 1, sprint: true }, 95, 25);   // ... and carrying him (fireman's carry)
+  FC.carryV = carry0;
 
   // the casualty collection point of a battle: by the pad, away from where the enemy is (or was)
   function ccp(B, S) {
@@ -268,14 +272,22 @@ export function createFieldCare(o) {
         return end();
       }
     } else if (job.phase === 'drag') {
-      // backwards, the casualty by the vest's drag strap: MEDINV's drag speed for a loaded casualty
+      // backwards, the casualty by the vest's drag strap: MEDINV's drag speed for a loaded casualty. FM 21-11: drag under
+      // fire (low); with nobody shooting and a long way to go, he lifts him into a fireman's carry (faster, upright)
       const P = p.cas && p.cas.toHuey ? { x: p.cas.toHuey[0], z: p.cas.toHuey[1] } : ccp(B, S), dd = d2(m.x, m.z, P.x, P.z);   // (to the CCP, or the helicopter that came for him)
-      a.move = [P.x, P.z]; a.pace = 'walk'; a.paceV = drag0; a.stance = 'stand'; a.face = Math.atan2(-(p.x - m.x), -(p.z - m.z)); a.state = 'dragging a casualty';
-      if (p.cas && p.cas.held === m.id) {
-        const bx = m.x - p.x, bz = m.z - p.z, bl = Math.hypot(bx, bz) || 1;
-        if (bl > 1.0) o.drag(p, m.x - bx / bl * 1.0, m.z - bz / bl * 1.0, Math.atan2(bx, bz));
+      const held = p.cas && p.cas.held === m.id; job.holdT = (job.holdT || 0) + dt;
+      if (held && !job.carry && dd > CARE.CARRY_MIN && !S.threat && m.able && job.holdT > 1.5 && o.carry) { job.carry = true; FC.stats.carried = (FC.stats.carried || 0) + 1; ev('carry', { id: m.id, to: p.id, x: p.x, y: p.y, z: p.z }); }
+      a.move = [P.x, P.z]; a.pace = 'walk'; a.paceV = job.carry ? carry0 : drag0; a.stance = 'stand'; a.state = job.carry ? 'carrying a casualty' : 'dragging a casualty';
+      a.face = job.carry ? undefined : Math.atan2(-(p.x - m.x), -(p.z - m.z));   // (carrying: he walks forward)
+      if (held) {
+        if (job.carry) o.carry(p, m);
+        else { const bx = m.x - p.x, bz = m.z - p.z, bl = Math.hypot(bx, bz) || 1; if (bl > CARE.DRAG_D) o.drag(p, m.x - bx / bl * CARE.DRAG_D, m.z - bz / bl * CARE.DRAG_D, Math.atan2(bx, bz)); }
       }
-      if (dd < 2.5 || (S.threat && !(p.cas && p.cas.toHuey)) || job.t > 240) { if (p.cas) { p.cas.held = null; p.cas.atCCP = dd < 4; } ev('dropped', { id: m.id, to: p.id, atCCP: dd < 4 }); return end(); }
+      if (dd < 2.5 || (S.threat && !(p.cas && p.cas.toHuey)) || job.t > 240 || !m.able) {
+        if (p.cas) { p.cas.held = null; p.cas.atCCP = dd < 4; }
+        if (job.carry) { if (o.carry) o.carry(p, null, m); job.carry = false; }   // (put down beside him)
+        ev('dropped', { id: m.id, to: p.id, atCCP: dd < 4 }); return end();
+      }
     }
   }
   return FC;

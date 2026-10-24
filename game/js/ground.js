@@ -126,8 +126,9 @@ export function createGround(ctx) {
   const isAlb = u => u.type === 'carrier' && u.side === 1;
   // height above the waterline of what you stand on at ship-local (lx, lz) on the ALBATROSS island, or null when
   // (lx, lz) is not over the island
-  function albIsland(D, lx, lz) {
+  function albIsland(D, lx, lz, parts) {
     const tx = lx - D.TOWER_X, tz = lz - D.TOWER_Z;
+    if (parts && parts.islandFloor) { const h = parts.islandFloor(tx, tz); return h === null ? null : D.DECK + h; }   // NAVAL: the model's own island
     if (tx < -3.4 || tx > 2.9 || tz < -9 || tz > 9.2) return null;
     let h = null;
     if (tx >= -2.3 && tx <= 2.6 && tz >= -8.5 && tz <= 8.8) h = 9.0;                       // lower levels' roofs
@@ -141,7 +142,7 @@ export function createGround(ctx) {
   function deckH(x, z) {
     const c = war.carrier;
     if (c && c.dims && c.side === 1 && Math.abs(x - c.p.x) < 70 && Math.abs(z - c.p.z) < 70 && !(c.sinking > 4)) {
-      const [lx, lz] = toLocal(c, x, z), h = albIsland(c.dims, lx, lz);
+      const [lx, lz] = toLocal(c, x, z), h = albIsland(c.dims, lx, lz, c.parts);
       if (h !== null) { const a = c.att; return a ? shipPointY(c.p.y, a.heave, a.pitch, a.roll, lx, h, lz) : c.p.y + h; }
     }
     return war.deckY(x, z);
@@ -164,7 +165,8 @@ export function createGround(ctx) {
     { ship: 'carrier', side: 1, name: 'ISLAND LADDER', lx: CARRIER.TOWER_X - 2.75, lz: CARRIER.TOWER_Z - 6.6, yaw: -Math.PI / 2, y0: CARRIER.DECK, y1: CARRIER.DECK + ALB_TOP, w: 0.9, top: [1.0, 0.9] },
   ];
   GR.LADDERS = LADDERS;
-  GR.laddersOf = u => LADDERS.filter(L => L.ship === u.type && (L.side === undefined || L.side === u.side));
+  // NAVAL: a ship model that exports its ladders (parts.ladders, ship frame, drawn by the model) is the authority
+  GR.laddersOf = u => u.parts && u.parts.ladders ? u.parts.ladders : LADDERS.filter(L => L.ship === u.type && (L.side === undefined || L.side === u.side));
   const _lw = { x: 0, y: 0, z: 0 };
   // the world-space description of a ladder on ship u: base point, facing, top / bottom heights (deck motion included)
   GR.ladderWorld = (L, u, out = {}) => {
@@ -178,8 +180,7 @@ export function createGround(ctx) {
   GR.ladderAt = (x, z, y, r = 0.5) => {
     for (const u of war.units) {
       if (!u.dims || u.sinking !== undefined || Math.abs(x - u.p.x) > 80 || Math.abs(z - u.p.z) > 80) continue;
-      for (const L of LADDERS) {
-        if (L.ship !== u.type || (L.side !== undefined && L.side !== u.side)) continue;
+      for (const L of GR.laddersOf(u)) {
         const w = GR.ladderWorld(L, u, _lad);
         const dx = x - w.x, dz = z - w.z, along = dx * w.fz - dz * w.fx, off = -(dx * w.fx + dz * w.fz);   // off: how far in front of the rungs
         if (Math.abs(along) < w.w / 2 + 0.15 && off > -0.2 && off < r + 0.45 && y > w.y0 - 0.6 && y < w.y1 + 0.2) return w;
@@ -260,7 +261,7 @@ export function createGround(ctx) {
     for (const u of war.units) {
       if (!u.dims || Math.abs(o.x - u.p.x) > 70 || Math.abs(o.z - u.p.z) > 70) continue;
       const D = u.dims;
-      if (u.type === 'carrier') n += shipBoxes(o, u, isAlb(u) ? ALB_BOXES : KRK_BOXES, D.TOWER_X, D.TOWER_Z, D.DECK);
+      if (u.type === 'carrier') n += shipBoxes(o, u, u.parts.islandBoxes || (isAlb(u) ? ALB_BOXES : KRK_BOXES), D.TOWER_X, D.TOWER_Z, D.DECK);
       else if (u.type === 'battleship') n += shipBoxes(o, u, BS_BOXES, 0, 4, D.DECK);
       else if (u.type === 'freighter') n += shipBoxes(o, u, FR_BOXES, 0, D.L / 2 - 6, D.DECK);
       if (u.parts && u.parts.boxes) {   // SEAWORLD: the lift railings (ship-frame boxes that move with each lift)

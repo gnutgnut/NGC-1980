@@ -25,6 +25,7 @@ import { createMedUI, createMedHud, createVisionFX, FEEDTXT } from './units/infa
 import { addSmoke } from './units/defence/cm.js';   // ngc/cmpolish: M18 smoke blocks sight lines and the LANCE beam
 import { createMarineCare } from './marinecare.js';   // ngc/infdepth: buddy aid both ways, drag / carry, the ground war's dead
 import { createThrowVM } from './units/infantry/throwvm.js';   // ngc/infdepth: the grenade drill in the viewmodel
+import { careHands, throwHands } from './units/infantry/carepose.js';   // ngc/infdepth-fix: the same in third person
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const SENS = 0.0022;   // mouse: rad per pixel (as foot.js)
@@ -307,7 +308,7 @@ export function createMarine(ctx) {
     const turn = (kd('ArrowRight') ? 1 : 0) - (kd('ArrowLeft') ? 1 : 0);
     const shift = kd('ShiftLeft', 'ShiftRight');
     const inp = { move: [mx, my], look: [lookX + turn * 2.2 * (input.dt || 0.016), lookY], sprint: shift && S.ads < 0.5, holdBreath: shift && S.ads > 0.5, walk: walkMode,
-      lean: (kd('KeyE') ? 1 : 0) - (kd('KeyQ') ? 1 : 0), ads: held.ads, fire: held.fire, actions: [] };
+      lean: (kd('KeyE') ? 1 : 0) - (kd('KeyQ') ? 1 : 0), ads: held.ads, fire: held.fire, actions: [], dive: kd('KeyC') };   // (ngc/waterfish: C held in the water dives)
     lookX = lookY = 0;
     if (pad) {   // left stick moves, right stick looks, RT fires, LT aims, A jump, B crouch, X reload, Y weapon, L3 sprint
       const ax = i => { const v = pad.axes[i] || 0; return Math.abs(v) < 0.15 ? 0 : v; }, b = i => !!pad.buttons[i]?.pressed;
@@ -315,6 +316,7 @@ export function createMarine(ctx) {
       inp.look[0] += ax(2) * 2.4 * (input.dt || 0.016); inp.look[1] -= ax(3) * 1.6 * (input.dt || 0.016);
       if ((pad.buttons[7]?.value || 0) > 0.4) inp.fire = true; if ((pad.buttons[6]?.value || 0) > 0.4) inp.ads = true;
       if (b(10)) inp.sprint = true;
+      if (b(1)) inp.dive = true;   // ngc/waterfish: B held in the water dives
       const pr = Mr._padPrev ||= {};
       const edge = i => b(i) && !pr[i];
       if (edge(0)) presses.push(S.stance === 'stand' ? 'jump' : 'stance:stand'); if (edge(1)) presses.push('stance:crouch'); if (edge(2)) presses.push('reload'); if (edge(3)) presses.push('slot' + ((R.slot + 1) % R.slots.length + 1));
@@ -543,7 +545,12 @@ export function createMarine(ctx) {
       me.root.position.set(S.pos.x, S.pos.y, S.pos.z); me.root.rotation.y = S.yaw;
       const key = R.carrier ? (R.carrier.key === 'M16A1' && R.carrier.gl ? 'M16A1/M203' : R.carrier.key) : null; if (me.weaponKey !== key) me.setWeapon(key);
       const p = S.pose(); p.cls = R.cls === 'gl' ? 'rifle' : R.cls; p.action = R.cur && R.cur.act ? { name: R.cur.act.name, p: R.cur.act.t / R.cur.act.dur } : null;
-      if (Mr.care.hold) { p.ads = 0; p.lower = 1; if (Mr.care.hold.mode === 'drag') { p.stance = p.stanceFrom = p.stanceTo = 'crouch'; p.stanceT = 1; } }   // ngc/infdepth: bent over a casualty (drag) or under one (carry), rifle slung
+      // ngc/infdepth: hands off the rifle (slung on the back): bent over a casualty on the drag strap, under one in a
+      // fireman's carry, or the grenade drill (carepose.js); the grenade in the right hand until it leaves it
+      p.hands = null; p.sling = 0;
+      if (Mr.care.hold) { p.ads = 0; p.sling = 1; p.hands = careHands(Mr.care.hold.mode, 0, p.gaitPhase || 0); if (Mr.care.hold.mode === 'drag') { p.stance = p.stanceFrom = p.stanceTo = 'crouch'; p.stanceT = 1; } }
+      else if (TH && TH.phase !== 'recover') { p.ads = 0; p.sling = 1; p.hands = throwHands(TH.phase, TH.p, TH.under); }
+      p.grenade = !!TH && TH.phase !== 'recover' && !(TH.phase === 'throw' && TH.gone);   // (in his right hand in third person, through the drill)
       if (W.swim) { p.stance = p.stanceFrom = p.stanceTo = 'prone'; p.stanceT = 1; }
       poseSkeleton(me, p, dt);
     }
@@ -696,7 +703,7 @@ export function createMarine(ctx) {
     else if (lt) hint = `F: SEARCH ${lt.name}`;
     else if (ctx.serviceAt(W.x, W.z) && (I.countRounds(MS.inv, '556') < 200 || !MS.inv.slots.secondary)) hint = 'F: REARM AND RESUPPLY HERE';
     else if (W.ladder) hint = `${W.ladder.name}  -  W / S TO CLIMB, SPACE TO LET GO`;
-    else if (W.swim) hint = 'SWIMMING  -  MAKE FOR A BEACH OR THE ALBATROSS STERN LADDER';
+    else if (W.swim) hint = W.y < -2 ? `UNDER WATER  -  BREATH ${Math.ceil(W.breath)} S  ·  LET GO OF C TO SURFACE` : 'SWIMMING  -  HOLD C TO DIVE  ·  MAKE FOR A BEACH OR THE ALBATROSS STERN LADDER';   // (ngc/waterfish)
     else { tip = true; hint = 'CLICK: LOOK  ·  LMB FIRE  ·  RMB AIM  ·  R RELOAD  ·  TAB GEAR  ·  H HEALTH  ·  F USE  ·  C / Z STANCE  ·  Q / E LEAN'; }
     return { line, hint, tip, weap, fuel: S.staminaFrac * 100, fuelLabel: 'STAMINA' };
   };

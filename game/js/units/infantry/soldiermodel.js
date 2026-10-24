@@ -233,6 +233,8 @@ function stancePose(st, p, out) {
   return out;
 }
 const _poseA = { e: {}, pos: [0, 0, 0] }, _poseB = { e: {}, pos: [0, 0, 0] };
+const HANDS_RATE = 4;   // 1 / s: ~0.25 s to let go of the rifle (or take it up again)
+const GREN_GEO = new THREE.SphereGeometry(0.034, 8, 6).scale(1, 1.2, 1), GREN_MAT = new THREE.MeshLambertMaterial({ color: 0x4d5636 });   // M67, olive drab
 const _hR = new THREE.Vector3(), _hL = new THREE.Vector3(), _pR = new THREE.Vector3(), _pL = new THREE.Vector3(), _mw = new THREE.Vector3(), _pch = new THREE.Vector3();
 // arms: solve shoulder -> elbow -> hand to a target (all in WORLD space), elbow toward `pole`
 function ikArm(sk, side, target, pole) {
@@ -267,6 +269,23 @@ export function poseSkeleton(sk, pose, dt = 0.016) {
   }
   const P = _poseA.pos, Q = _poseB.pos;
   B.pelvis.position.set(P[0] + (Q[0] - P[0]) * k, P[1] + (Q[1] - P[1]) * k, P[2] + (Q[2] - P[2]) * k);
+  // ngc/infdepth: the hands off the rifle (pose.hands: carepose.js - a drag, a fireman's carry, buddy aid, the grenade
+  // drill). Blended in and out over ~0.25 s (the last targets are kept for the way out), with the rifle going onto the
+  // back (pose.sling) and the back bent / turned by the same weight
+  const C = st.care || (st.care = { w: 0, h: null, sl: 0 });
+  if (pose.hands) { C.h = pose.hands; C.sl = pose.sling ?? 1; }
+  C.w = clamp(C.w + clamp((pose.hands ? 1 : 0) - C.w, -dt * HANDS_RATE, dt * HANDS_RATE), 0, 1);
+  if (!pose.hands && C.w <= 0) C.h = null;
+  const hw = C.h ? sstep(C.w) : 0, H = hw > 0 ? C.h : null;
+  if (H) {
+    if (H.spine) { _q.setFromEuler(_e.set(H.spine[0] * hw, H.spine[1] * hw, H.spine[2] * hw, 'YXZ')); B.spine.quaternion.multiply(_q); }
+    if (H.chest) { _q.setFromEuler(_e.set(H.chest[0] * hw, H.chest[1] * hw, H.chest[2] * hw, 'YXZ')); B.chest.quaternion.multiply(_q); }
+    if (H.dy) B.pelvis.position.y += H.dy * hw;
+  }
+  const sling = H ? C.sl * hw : 0;
+  // the grenade in his right hand (pose.grenade: through the drill until it leaves the hand)
+  if (pose.grenade && !sk.gren) { sk.gren = new THREE.Mesh(GREN_GEO, GREN_MAT); sk.gren.position.set(0, -0.08, -0.02); B.handR.add(sk.gren); }
+  if (sk.gren) sk.gren.visible = !!pose.grenade;
   // aim: chest takes part of the pitch and yaw, neck and head the rest (+ free look)
   const prone = (to === 'prone' ? k : 0) + (from === 'prone' ? 1 - k : 0);
   const aimP = clamp(pose.aimPitch || 0, -1.2, 1.2), aimY = clamp(pose.aimYaw || 0, -0.6, 0.6);
@@ -295,6 +314,12 @@ export function poseSkeleton(sk, pose, dt = 0.016) {
     }
     const k2 = ads * ads * (3 - 2 * ads);
     g.position.copy(_b).lerp(_a, k2); g.quaternion.copy(_q2).slerp(_q, k2);
+    // ngc/infdepth: slung across the back, muzzle up over the left shoulder (both hands busy: a casualty, a grenade)
+    if (sling > 0) {
+      _b.set(0.02, 0.02, 0.2); B.chest.localToWorld(_b); sk.root.worldToLocal(_b);
+      B.chest.getWorldQuaternion(_wq); sk.root.getWorldQuaternion(_pq); _q.copy(_pq.invert().multiply(_wq)).multiply(_q2.setFromEuler(_e.set(1.35, 0, 0.55, 'XYZ')));
+      g.position.lerp(_b, sling); g.quaternion.slerp(_q, sling);
+    }
     if (pose.weaponState) W.setState(pose.weaponState);
     g.updateMatrixWorld(true);
     // hands to the anchors (reload: the left hand goes to the magazine / pouch)
@@ -318,6 +343,22 @@ export function poseSkeleton(sk, pose, dt = 0.016) {
     const s = Math.sin(pose.gaitPhase || 0) * clamp((pose.speed || 0) / 2, 0, 1);
     B.upperArmL.quaternion.setFromEuler(_e.set(-s * 0.5, 0, -0.08)); B.upperArmR.quaternion.setFromEuler(_e.set(s * 0.5, 0, 0.08));
     B.forearmL.quaternion.setFromEuler(_e.set(0.3, 0, 0)); B.forearmR.quaternion.setFromEuler(_e.set(0.3, 0, 0));
+  }
+  // ngc/infdepth: the hands somewhere else (drag strap, a casualty on the shoulders, a grenade drill, a wound being
+  // dressed): pose.hands = { L?: [x, y, z], R?: [x, y, z] } in the figure's own frame (feet origin, facing -z)
+  // (blended from where the hands are now - on the rifle, or hanging - to the targets)
+  if (H) {
+    sk.root.updateMatrixWorld(true);
+    const lift = H.stand ? B.pelvis.position.y - 0.98 : 0;   // (targets for a standing man follow him down onto a knee)
+    const poleR = _pR.set(0.6, -1, 0.3).applyQuaternion(sk.root.getWorldQuaternion(_wq)), poleL = _pL.set(-0.6, -1, 0.3).applyQuaternion(_wq);
+    for (const sd of ['L', 'R']) {
+      const t = H[sd]; if (!t) continue;
+      const hnd = B['hand' + sd], T = sd === 'L' ? _hL : _hR;
+      hnd.getWorldPosition(T); sk.root.localToWorld(_mw.set(t[0], t[1] + lift, t[2])); T.lerp(_mw, hw);
+      _q2.copy(hnd.quaternion);
+      ikArm(sk, sd, T, sd === 'L' ? poleL : poleR);
+      hnd.quaternion.copy(_q2).slerp(_q.setFromEuler(_e.set(-0.3, 0, 0)), hw);
+    }
   }
   sk.root.updateMatrixWorld(true);
 }

@@ -23,9 +23,9 @@ import { createVehicleCraft } from './vehicle.js';
 import { createJetCraft } from './craftjet.js';
 import { createTomcatCraft } from './crafttomcat.js';   // TOMCAT: the flyable F-14A (crafttomcat.js, units/air/tomcatplay.js)
 const isJet = () => G.craft === 'jet' || G.craft === 'tomcat';   // TOMCAT: the fixed-wing crafts share the HORNET's hooks below
-import { createBoxCar } from './units/placeholder/boxcar.js';
-import { buildBoxCarMesh } from './units/placeholder/boxcarmodel.js';
-import { createSeaUniforms, updateSeaUniforms, SEA_VS_DECL, SEA_VS, SEA_FS_DECL, SEA_FS_NORMAL, SEA_FS_FOAM } from './units/naval/seasurface.js';   // SEAWORLD: the sea surface
+import { createMotorPool } from './units/wheeled/motorpool.js';   // ngc/wheeledgame: the M151A2, M35A2 and 1980 civilian cars (replace the TEST CAR)
+import { createSeaUniforms, updateSeaUniforms, SEA_VS_DECL, SEA_VS, SEA_FS_DECL, SEA_FS_NORMAL, SEA_FS_FOAM, SEA_FS_WATER, SEA_FS_UNDER } from './units/naval/seasurface.js';   // SEAWORLD: the sea surface
+import { createSeaLife } from './units/naval/sealife.js';   // SEALIFE (ngc/waterfish): fish, the sea bed, the view under water
 import { createWorldSolid } from './world/solid.js';   // SEAWORLD: buildings as colliders, piers and bridges as floors
 import { createWorldLife } from './world/life.js'; import { clearedAt, roadBed } from './world/net.js';   // WORLD: the lived-in world (towns, roads, traffic, people, faction structures)
 // ARMOUR (wave 2): the M60A3 TTS and M113A2 as crafts on the island world, their sights, the LCM-8 delivery
@@ -64,6 +64,7 @@ addEventListener('keydown', e => {
   // FOUNDATION key routing: Y gets in / out, [ ] change seat, then the craft you are in has first pick of every key
   // (jetplay.js, foot.js, vehicle.js ...); what it leaves falls through to the helicopter and the global keys below.
   if (G.state === 'play' && G.mode === 'zarch') {
+    if (motorKey(e.code)) return;   // ngc/wheeledgame: 7 then 1 / 2 picks the motor pool's delivery
     if (e.code === 'KeyY') { getInOut(); return; }
     if (e.code === 'BracketLeft' || e.code === 'BracketRight') { crafts.cycleSeat(e.code === 'BracketRight' ? 1 : -1); return; }
     if (e.code === 'KeyU' && G.craft !== 'heli' && G.craft !== 'jet' && liftConsole()) return;   // SEAWORLD: run a deck-edge lift (before the craft: foot / vehicles swallow U)
@@ -155,7 +156,7 @@ let switchHover = null;
 let mouseAimT = -1e9;
 addEventListener('mousemove', e => { mouseNdc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); mouseAimT = performance.now(); });
 function pickSwitch() {
-  const ck = G.craft === 'jet' ? JP.cockpit : G.craft === 'tomcat' ? tomcatC.cockpitObj() : G.craft === 'heli' ? cockpit : null;
+  const ck = G.craft === 'jet' ? JP.cockpit : G.craft === 'tomcat' ? tomcatC.cockpitObj() : G.craft === 'heli' ? cockpit : crafts.active && crafts.active.switches ? crafts.active.switches() : null;   // ngc/wheeledgame: a craft's own switches
   if (!ck || !ck.group.visible) return null;
   switchRay.setFromCamera(document.pointerLockElement === canvas ? _ndc0 : mouseNdc, zCam);
   const hit = switchRay.intersectObjects(ck.hitBoxes, false)[0];
@@ -165,7 +166,7 @@ const _ndc0 = new THREE.Vector2(0, 0);
 addEventListener('mousedown', e => {
   if (e.button !== 0 || G.state !== 'play') return;
   const id = pickSwitch(); if (!id) return;
-  e.stopImmediatePropagation(); e.preventDefault(); if (G.craft === 'jet') JP.click(id); else if (G.craft === 'tomcat') tomcatC.click(id); else doSwitch(id);
+  e.stopImmediatePropagation(); e.preventDefault(); if (G.craft === 'jet') JP.click(id); else if (G.craft === 'tomcat') tomcatC.click(id); else if (G.craft !== 'heli' && crafts.active && crafts.active.click) crafts.active.click(id); else doSwitch(id);
 }, { capture: true });
 // cockpit free look: click the view to capture the mouse (Esc releases it and the head re-centres; middle click centres)
 const head = { yaw: 0, pitch: 0 };
@@ -485,7 +486,7 @@ const terrainFS = `
         float d=-vRaw, t=uTime; vec2 p=vW.xz;
         float a1=p.x*.19+t*1.3+sin(p.y*.05), a2=p.y*.23-t*1.1+sin(p.x*.07), a3=(p.x+p.y)*.11+t*.7;
         ${SEA_FS_NORMAL}
-        vec3 wc=mix(vec3(.09,.45,.55),vec3(.02,.13,.36),smoothstep(0.,9.,d));
+        ${SEA_FS_WATER}   // SEALIFE: clarity - the bed through the water (was a flat shallows-to-deep ramp)
         wc=mix(wc,vec3(.1,.2,.27),sk*.4);   // a rough sea is darker and greyer
         vec3 V=normalize(cameraPosition-vW), L=normalize(uSun);
         float fr=1.-max(dot(V,wn),0.); fr*=fr; fr*=fr;
@@ -495,6 +496,7 @@ const terrainFS = `
         wc+=vec3(1.,.95,.8)*sp*1.3*(sp>.002?glitAt(p,t,sk):1.);
         ${SEA_FS_FOAM}
         c=mix(wc*(.92+.05*(sin(a1)+sin(a2))),vec3(.88,.94,1.),foam*.8);
+        ${SEA_FS_UNDER}   // SEALIFE: the surface from below
       }
       if(bi>=0){ vec4 b=uBases[bi]; float d=length(vW.xz-b.xy);
         if(d<${BASE_R.toFixed(1)}){ vec3 pc=mix(vec3(.5,.52,.58),vec3(.36,.3,.3),b.w)*l;
@@ -750,7 +752,7 @@ function command(n) {
   if (G.state !== 'play') return;
   if (n === 5) { launchJet(); return; }
   if (n === 8) { tomcatC.launch(); return; }   // TOMCAT: an F-14A to cat 1 (crafttomcat.js)
-  if (n === 7) { deliverVehicle(); return; }
+  if (n === 7) { motorChoice(); return; }   // ngc/wheeledgame: the motor pool (then 1 M151A2 / 2 M35A2)
   if (n === 9 || n === 0) { deliverArmour(n === 9 ? 'm60' : 'm113'); return; }   // ARMOUR: by LCM-8 to a friendly beach (9 M60A3, 0 M113A2; 8 is the TOMCAT)
   if (n === 4) { say(war.sendEscort(selIsl), 2); return; }   // AIR: CAP over the selected island, else over the ALBATROSS
   if (n === 6) { say(war.upgradeCarrier(), 2.5); return; }
@@ -1133,20 +1135,27 @@ const marine = foot.setMarine(createMarine({
   scene: zScene, GR, war, fx, sfx, say, feed, keyDown: kd, crafts, canvas, hudEl: $('hud'), terrainH, ISLANDS,
   serviceAt: (x, z) => serviceAt(x, z), active: () => G.craft === 'foot' && G.state === 'play' && G.mode === 'zarch',
 }));
-// --- ground vehicles: the placeholder TEST CAR (the WHEELED agent's M151A2 takes its place)
+// SEALIFE (ngc/waterfish, units/naval/sealife.js): fish round the camera that flee ships, wash, swimmers and blasts; the
+// sea bed and the view from under the surface. The player's own disturbances come from here (the AI's from war.units).
+const _slF = {};
+const sealife = createSeaLife({
+  scene: zScene, uniforms: terrainUni, terrain, sky, fx, war, depthAt: terrainH, isWater, cell: TG, canvas,
+  active: () => G.mode === 'zarch' && camB < 0.01,
+  heightPx: () => renderer.domElement.height,
+  extra: S => {
+    if (G.craft === 'heli' && Z.alive && !G.heliStowed && H.agl < 25 && waterAt(H.pos.x, H.pos.z)) S.point(H.pos.x, 0, H.pos.z, 8 + 14 * (1 - H.agl / 25), Math.min(1, H.thrust / 40000) * (1.1 - H.agl / 25), 0, 0, 2 + 3 * (1 - H.agl / 25));   // the Huey's downwash
+    if (G.craft === 'foot' && foot.exists) { const f = foot.frame(_slF); if (f.y < 0.3 && isWater(f.x, f.z)) S.point(f.x, f.y + 0.6, f.z, 4.5, 0.65, 0, 0, 2.5); }   // a man in the water
+  },
+});
+// --- ground vehicles (ngc/wheeledgame): the WHEELED M151A2s, M35A2s and civilian cars, through units/wheeled/motorpool.js
 const vehCtx = {
   scene: zScene, GR, crafts, war, fx, sfx, say, feed, keyDown: kd, CTL, hwOn: () => !keyboardOnly, camZ: () => zCam,
   crewHit: (a, why, at) => foot.hurt(a, why, null),
   crewKilled: why => { say(`${why}  -  CREW KILLED`, 2.5); G.lives--; G.crewDownT = 3.5; feed(`CREW LOST  -  ${why}`, 'bad'); if (G.lives < 0) gameOver(); },
 };
-const carC = crafts.register(createVehicleCraft(vehCtx, {
-  id: 'boxcar', label: 'TEST CAR', sim: createBoxCar(), model: buildBoxCarMesh(), hitR: 2, exposed: 0.35, cyl: 4,
-  seats: [
-    { id: 'driver', label: 'DRIVER', role: 'driver', eye: [-0.38, 1.5, 0.12], door: [-1.15, 0.9, -0.1], exit: [-1.6, 0, -0.1] },
-    { id: 'pass', label: 'PASSENGER', role: 'passenger', eye: [0.38, 1.5, 0.12], door: [1.15, 0.9, -0.1], exit: [1.6, 0, -0.1] },
-    { id: 'rear', label: 'REAR SEAT', role: 'passenger', eye: [0, 1.52, 1.0], door: [0, 0.9, 2.0], exit: [0, 0, 2.5] },
-  ],
-}));
+const pool = createMotorPool({ ...vehCtx, foot, marine, world, ISLANDS, G, Z, terrainH, hover: () => switchHover, getInOut: () => getInOut(), serviceAt: (x, z) => serviceAt(x, z), selIsl: () => selIsl,
+  holes: BASES.map(b => ({ x: b.x, z: b.z, r: HOLE_R + 0.6 })) });
+void createVehicleCraft;   // (vehicle.js stays the host for tracked units)
 // --- ARMOUR (wave 2, units/armor/): the M60A3 TTS and the M113A2 on their tracked-vehicle sim. armorworld.js is their
 // ground (the terrain, roads and bridges, ship decks and the LCM-8, the sea, trees / houses / AA sites / crafts to push
 // against), armorcraft.js the craft (seats at the hatches, interiors, sights, gunnery through war.js, damage, sound).
@@ -1203,7 +1212,7 @@ function toHeli(msg) {
 function stowCrafts() { JP.stow(); jetC.park.on = false; tomcatC.TP.stow(); tomcatC.park.on = false; if (foot.exists) foot.exit(); G.heliStowed = false; G.crewDownT = 0; crafts.setActive('heli'); crafts.silence(); }
 // a new war: the TEST CAR waits at the home island's motor pool (else on the carrier deck)
 function placeVehicles() {
-  const sp = GR.motorPool(HOME_B.isl) || GR.deckSpot(0); if (sp) carC.spawnAt(sp); else carC.stow();
+  pool.newGame();   // ngc/wheeledgame: M151s and M35s at every friendly motor pool and on the deck park
   // ARMOUR: the M60A3 waits at the top of the home island's landing beach (TERRAIN: was the hard), the M113A2 on the ALBATROSS's forward deck park (cold, parked)
   armDelivery.clear();
   const hh = HARDS.find(h => h.I === HOME_B.isl), hp = hh && hh.at(hh.u1 + 6), ts = hp ? { x: hp[0], z: hp[1], yaw: hh.yaw + Math.PI } : GR.motorPool(HOME_B.isl, 4.6); if (ts) m60C.spawnAt(ts); else m60C.stow();   // (nose to the sea, ready to go down)
@@ -1226,17 +1235,12 @@ function deliverArmour(kind) {
   if (!r.ok) { say(r.why, 2); return; }
   G.mat -= cost; say(`LCM-8 WITH AN ${def.label} INBOUND TO ${r.run.pl.beach.name}`, 2.5); sfx.dock();
 }
-// 7: the motor pool lands a vehicle at the selected friendly island (else the nearest one to you, else the carrier deck)
-const COST_VEH = 15;
-function deliverVehicle() {
-  if (crafts.active === carC) { say(`YOU ARE IN THE ${carC.label}`, 1.2); return; }
-  if (G.mat < COST_VEH) { say(`A VEHICLE NEEDS ${COST_VEH} MATERIEL`, 1.6); return; }
-  let I = selIsl && selIsl.owner === 1 ? selIsl : null;
-  if (!I) { let bd = 1e9; for (const J of ISLANDS) if (J.owner === 1) { const d = Math.hypot(J.pad.x - Z.pos.x, J.pad.z - Z.pos.z); if (d < bd) { bd = d; I = J; } } }
-  const sp = (I && GR.motorPool(I)) || GR.deckSpot(0);
-  if (!sp) { say('NOWHERE TO LAND A VEHICLE', 1.6); return; }
-  G.mat -= COST_VEH; carC.spawnAt(sp); feed(`MOTOR POOL: ${carC.label} LANDED AT ${sp.name}`, 'good'); say(`${carC.label} WAITING AT ${sp.name}`, 2.2); sfx.dock();
-}
+// 7 (ngc/wheeledgame): the motor pool - then 1 = an M151A2 slung in by a CH-46 (10 materiel), 2 = an M35A2 run in by an
+// LCM-8 (20), to the selected friendly island (else the nearest friendly island, else the carrier deck)
+function deliverVehicle(type = 'm151') { return pool.deliver(type); }
+let motorPick = 0;
+function motorChoice() { motorPick = 3; say('MOTOR POOL  -  1: M151A2 BY CH-46 (10 MATERIEL)  ·  2: M35A2 BY LCM-8 (20)', 3); }
+function motorKey(code) { if (motorPick <= 0 || (code !== 'Digit1' && code !== 'Digit2')) return false; motorPick = 0; deliverVehicle(code === 'Digit2' ? 'm35' : 'm151'); return true; }
 // the per-frame entry for the surface: the active craft flies / drives / walks, the parked ones idle (craft.js)
 function updateZarch(dt, inp) {
   inp.pad = G.craft === 'heli' || isJet() ? null : G.craft === 'foot' ? readGamepad() : readPad(); inp.keyboardOnly = keyboardOnly;   // on foot: a game controller only, never the HOTAS
@@ -1787,7 +1791,7 @@ function updateHud() {
     for (const id of ['tl', 'hint', 'feed', 'war']) setStyle(id, 'display', bigMap ? 'none' : 'block');   // the command map has its own read-outs
     setStyle('radar', 'bottom', ck && !bigMap ? 'auto' : ''); setStyle('radar', 'top', ck && !bigMap ? '64px' : ''); setStyle('feed', 'top', ck ? '236px' : '');
   }
-  crossEl.style.display = document.pointerLockElement === canvas && (cockpit.group.visible || JP.cockpit.group.visible || tomcatC.TP.cockpit.group.visible) || (G.craft === 'foot' && !foot.marine && foot.alive && foot.firstPerson() && G.state === 'play') ? 'block' : 'none';
+  crossEl.style.display = document.pointerLockElement === canvas && (cockpit.group.visible || JP.cockpit.group.visible || tomcatC.TP.cockpit.group.visible) || (G.craft === 'foot' && !foot.marine && foot.alive && foot.firstPerson() && G.state === 'play') || (G.state === 'play' && crafts.active && crafts.active.switches && crafts.active.firstPerson()) ? 'block' : 'none';   // ngc/wheeledgame: a dot to work the cab's switches / lay the gun
   const ch = G.craft !== 'heli' && crafts.active ? crafts.active.hud() : null;   // FOUNDATION: any other craft's read-outs
   {   // g effects in the jet cockpit: grey tunnel closing in, black at G-LOC, red-out under negative g
     const gf = JP.cockpit.group.visible || (G.craft === 'jet' && JP.gloc > 0) ? JP.gfx() : tomcatC.TP.cockpit.group.visible || (G.craft === 'tomcat' && tomcatC.glocNow()) ? tomcatC.gfx() : { grey: 0, red: 0 };
@@ -1976,7 +1980,7 @@ function updateCamsAndMeshes(dt, time) {
   cockpit.group.visible = inCockpit; for (const o of heliShell) o.visible = !inCockpit;   // seen from inside, the outer shell only gets in the way
   const near = inCockpit || otherFP || drop.cockpitView || helm.bridgeView ? 0.05 : 0.5; if (zCam.near !== near) { zCam.near = near; zCam.updateProjectionMatrix(); }
   updateLandingLight(inCave || G.craft !== 'heli'); updateBombSight(inCave || e > 0.05 || G.craft !== 'heli' || drop.camActive || helm.active);
-  switchHover = inCockpit || jetCk ? pickSwitch() : null;
+  switchHover = inCockpit || jetCk || (crafts.active && crafts.active.switches && G.craft !== 'heli') ? pickSwitch() : null;   // ngc/wheeledgame: vehicle cabs too
   crafts.render(dt, time); if (G.state !== 'play') crafts.silence();   // every craft's model (the HORNET's cockpit, the soldier's arms...)
   if (inCockpit) cockpit.update(H, dt, heliPanel(switchHover));
   const caveAimOn = inCave && T.alive && T.aimX !== undefined && e > 0.9 && G.state === 'play';
@@ -2032,9 +2036,11 @@ function frame(now) {
     else { $('fade').style.opacity = Math.max(0, 1 - tr.t / D); if (tr.t >= D) { G.state = 'play'; $('fade').style.opacity = 0; $('fadeText').textContent = ''; } }
   }
   fx.update(dt);
+  sealife.update(G.state === 'paused' ? 0 : dt);   // SEALIFE
   const t1 = performance.now();
   updateCamsAndMeshes(dt, now / 1000);
   world.update(dt, zCam, G.state === 'play');   // WORLD: stream the lived-in world round the camera, ambient life
+  pool.update(dt, G.state === 'play' && G.mode === 'zarch'); if (motorPick > 0) motorPick -= dt;   // ngc/wheeledgame: parked / town / traffic vehicles, MG rounds, engine sound
   updateHud();
   { const hide = drop.flying || helm.active ? 'none' : ''; setStyle('bot', 'display', hide); setStyle('caution', 'display', hide); }
   const t2 = performance.now();
@@ -2047,4 +2053,4 @@ function frame(now) {
 const PROF = { sim: 0, prep: 0, render: 0 };
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, carC, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }

@@ -33,7 +33,7 @@ const angN = a => ((a % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
 // squad role -> MEDINV loadout (inventory.js): the automatic rifleman carries the rifleman's kit with more magazines
 export const ROLE_KIT = { sl: 'rifleman', tl: 'rifleman', ar: 'rifleman', aar: 'rifleman', gren: 'grenadier', mg: 'mg', doc: 'corpsman' };
 // GAME: how fast a man turns his head and rifle onto a new bearing (rad / s), and how close is "on target" (rad)
-const TURN = 3.2, ON_TGT = 0.012;
+const TURN = 4.5, ON_TGT = 0.03;   // (~260 deg/s: a trained target transition, 90 deg in ~0.35 s; ~1.7 deg: a combat shot, not a range shot; ngc/infdepth-fix: 0.012 starved the fire, 3.2 rad/s left the near men firing half the cheap model's rounds)
 export const RICH_STEP = 1 / 30;   // rifleman sub-step for AI men (the player runs 1/120 s; AI aim needs less)
 
 export function createRichMarine(u, o = {}) {
@@ -68,14 +68,14 @@ export function createRichMarine(u, o = {}) {
   };
   // GAME RULE on top of MEDINV (what takes a man out of the fight): dead; unconscious; both arms out; shock class III+
   // (he can't fight on); both legs out (crawl only). A man treated back below that gets up again.
-  // + a bleed he can't ignore (> 120 ml/min: an artery or a big vein) or a blacked-out chest / belly: he is a casualty
+  // + a bleed he can't ignore (> 250 ml/min: an artery) or a blacked-out chest / belly: he is a casualty
   // until it is under control
   // Once down, he only goes back into the fight with no tourniquet on, no broken bone and no more than class I blood
   // loss (GAME; a man with a tourniquet is a casualty to evacuate, walking or not)
   RM.state = () => {
     if (M.dead) return 'dead';
     const md = RM.mods.med || M.mods();
-    if (M.unconscious || md.weaponUse === 'none' || md.cls >= 3 || md.crawlOnly || md.bleeding > 120 || M.regions.thorax.hp <= 0 || M.regions.stomach.hp <= 0) { RM.wasDown = true; return 'down'; }
+    if (M.unconscious || md.weaponUse === 'none' || md.cls >= 3 || md.crawlOnly || md.bleeding > 250 || M.regions.thorax.hp <= 0 || M.regions.stomach.hp <= 0) { RM.wasDown = true; return 'down'; }
     if (RM.wasDown && (md.cls >= 2 || ['armL', 'armR', 'legL', 'legR'].some(r => M.regions[r].tq.length || (M.regions[r].fracture && !M.regions[r].splint)))) return 'down';
     RM.wasDown = false;
     return 'ok';
@@ -129,14 +129,20 @@ export function createRichMarine(u, o = {}) {
     const w = R.cur, acts = inp.actions; acts.length = 0;
     inp.ads = !!aim && !down && sp < 1.6;
     inp.fire = false;
-    if (w && !down && !w.act && !R.swap) {
+    const selfAid = !!(M.action && M.action.by && M.action.by.self);   // (his hands are on his own wound)
+    if (w && !down && !selfAid && !w.act && !R.swap) {
       const mag = w.mag ? w.mag.rounds : 0;
       if (w.malf) { acts.push(w.malf === 'extract' || w.malf === 'double' ? 'remedial' : 'ia'); RM.stats.ia++; }
       else if (w.def.feed !== 'none' && w.def.feed !== 'single' && mag <= 0 && !w.chamber) { acts.push('reload'); RM.stats.reloads++; }
       else if (fire && aim) {
         const off = Math.abs(angN(yawT - S.aimYaw)) + Math.abs(pT - S.aimPitch);
         RM.trigT -= dt;
-        if (off < ON_TGT * (1 + 2 * (want.supp || 0)) && S.ads > 0.7) {
+        // on the sights: within ON_TGT; off them (moving, or running to cover) he fires from the shoulder unsighted, twice
+        // as loose (the cheap model fires on the move and on the way to cover too; ngc/infdepth-fix: holding fire on every
+        // rush to cover cost the near men a third of their rounds)
+        const tol = ON_TGT * (1 + 2 * (want.supp || 0)), aimedOk = S.ads > 0.5 ? off < tol : off < tol * 2;
+        const W8 = RM.stats.wait || (RM.stats.wait = { off: 0, ads: 0, ok: 0 }); if (aimedOk) W8.ok++; else if (off >= tol) W8.off++; else W8.ads++;
+        if (aimedOk) {
           if (fire === 'auto' || fire === 'mg') { if (RM.burst <= 0 && RM.trigT <= 0) { RM.burst = want.burstS || 0.35; RM.trigT = want.pause || 1.2; } }
           else if (RM.trigT <= 0) { inp.fire = true; RM.trigT = want.gap || 1.1; }
         }

@@ -49,7 +49,7 @@ export default async function (h) {
   // ---- 2. the Huey's door gun and rockets thin them out first (a scripted gunner: the war's own rounds, aimed at a STRIDER)
   await h.eval(`(() => { const W = __G.war, GS = W.ground.sim, T = __G.THREE; let shots = 0;
     const k0 = GS.stats.kills[1];
-    for (let n = 0; n < 1800 && GS.units.filter(u => u.kind === 'strider' && u.alive).length > 3; n++) {
+    for (let n = 0; n < 1800 && GS.units.filter(u => u.kind === 'strider' && u.alive).length > 2; n++) {   // (down to two: SANDBAR is 60 m across, the Sea Knight's LZ can't be far from them)
       const s = GS.units.filter(u => u.kind === 'strider' && u.alive).sort((a, b) => Math.hypot(a.x - __I.pad.x, a.z - __I.pad.z) - Math.hypot(b.x - __I.pad.x, b.z - __I.pad.z))[0]; if (!s) break;
       const gx = s.x + 40, gy = s.y + 35, gz = s.z + 25, d = Math.hypot(s.x - gx, s.y + 1.3 - gy, s.z - gz);
       if (n % 3 === 0) { const v = new T.Vector3(s.x - gx, s.y + 1.3 - gy + 2.2 * (d / 75) * (d / 75) / 2, s.z - gz).normalize().multiplyScalar(75); v.x += (Math.random() - 0.5) * 2; v.y += (Math.random() - 0.5) * 2; v.z += (Math.random() - 0.5) * 2; W.fireBullet(new T.Vector3(gx, gy, gz), v); shots++; }
@@ -62,19 +62,23 @@ export default async function (h) {
   await h.eval(`(() => { const s = __G.war.ground.sim.units.find(u => u.kind === 'strider' && !u.alive) || __G.war.ground.sim.units.find(u => u.kind === 'strider'); window.__cam = { follow: s, yaw: 2.0, d: 8, h: 3 }; return true; })()`);
   await h.shot('strider-down');
   // ---- 3. a CH-46 with Marines to take it back from the survivors
-  await h.eval(`(() => { __G.G.mat = 200; __G.war.P.mat = 200; const r = __G.war.sendDrone(__I); const c = __G.war.units.find(u => u.kind === 'ch46'); window.__c = c; window.__cam = { follow: c, yaw: 2.4, d: 40, h: 10 }; return r; })()`);
+  await h.eval(`(() => { __G.G.mat = 200; __G.war.P.mat = 200; const r = __G.war.sendDrone(__I); const c = __G.war.units.find(u => u.kind === 'ch46'); window.__c = c; if (c) { c.hp = c.hpMax = 400; }   /* (the scene is about the fight on the ground: coilgun hits on the Sea Knight on its way in - below half its hp it loses an engine and turns for home - must not end it; ngc/infdepth-fix) */ window.__cam = { follow: c, yaw: 2.4, d: 40, h: 10 }; return r; })()`);
   await h.expect(`!!window.__c`, 'a Sea Knight launched with Marines for SANDBAR');
   await h.eval(`__ff(260, 1 / 30, () => __c.rot.AI.phase === 'ground' || __c.dead)`);
+  // the rounds so far (the STRIDERs' at the island's empty pad, none of the Marines'): 'both sides fire' counts from here
+  await h.eval(`(() => { const st = __G.war.ground.sim.stats; window.__s0 = { 1: st.shots[1], 2: st.shots[2], rich: st.richShots }; window.__richMax = 0; return window.__s0; })()`);
   await h.eval(`(window.__cam = { follow: __c, yaw: 1.8, d: 26, h: 6 }, __ff(6), { ...__gw(), heli: __G.Z.alive, death: __G.Z.lastDeath, c: __c.dead || __c.dying, hp: __c.hp, lz: __c.lz })`);
   await h.shot('seaknight-unloading');
   await h.eval(`__ff(20, 1 / 30, () => __G.war.ground.sim.units.filter(u => u.kind === 'marine').length >= 13)`);
-  await h.eval(`(() => { __ff(20); const m = __G.war.ground.sim.units.find(u => u.kind === 'marine' && u.alive); window.__m = m; window.__cam = { follow: m, yaw: 0.8, d: 6, h: 1.6, ty: 0.8 }; return __gw(); })()`);
+  await h.eval(`(() => { __ff(20, 1 / 30, () => { window.__richMax = Math.max(window.__richMax, __G.war.ground.sim.units.filter(u => u.richOn).length); }); const m = __G.war.ground.sim.units.find(u => u.kind === 'marine' && u.alive); window.__m = m; window.__cam = { follow: m, yaw: 0.8, d: 6, h: 1.6, ty: 0.8 }; return __gw(); })()`);
   await h.shot('marines-close');
   await h.expect(`__G.war.ground.sim.units.filter(u => u.kind === 'marine').length + __G.war.ground.sim.stats.evac === 13`, 'thirteen Marines came off the ramp (ngc/infdepth: counting the wounded the Sea Knight took back out)');
   await h.eval(`(() => { __ff(30); window.__cam = { at: [__I.pad.x - 60, __I.pad.h + 45, __I.pad.z + 55], look: [__I.pad.x, __I.pad.h + 2, __I.pad.z] }; return __gw(); })()`);
   await h.shot('firefight-air');
-  await h.eval(`(() => { const GS = __G.war.ground.sim; return { shots: GS.stats.shots, hits: GS.stats.hits, ...__gw() }; })()`);
-  await h.expect(`__G.war.ground.sim.stats.shots[1] > 20 && __G.war.ground.sim.stats.shots[2] > 20`, 'both sides fire');
+  await h.eval(`(() => { const st = __G.war.ground.sim.stats; return { since: { 1: st.shots[1] - __s0[1], 2: st.shots[2] - __s0[2], rich: st.richShots - __s0.rich }, richMax: __richMax, shots: st.shots, hits: st.hits, warHits: st.warHits, ...__gw() }; })()`);
+  // every ground-war round of side 1 since the landing (the cheap model's and the rich Marines' from their real muzzles,
+  // M203 and LAW: groundsim's shoot()); the rich men near the camera fire their share (richShots, a subset)
+  await h.expect(`(() => { const st = __G.war.ground.sim.stats; return st.shots[1] - __s0[1] > 20 && st.shots[2] - __s0[2] > 20 && (__richMax === 0 || st.richShots - __s0.rich > 0); })()`, 'both sides fire (since the landing; the rich Marines\' rounds counted)');
   // ---- 4. armour: an RW-7 over the sea, an LCAC with a seized M1A2
   await h.eval(`(() => { const GW = __G.war.ground; window.__hv = GW.launchHover(__I); window.__lc = GW.launchMBT(__I, 'm1a2'); return { hover: !!__hv, lcac: !!__lc }; })()`);
   await h.expect(`!!window.__hv && !!window.__lc`, 'an RW-7 and an LCAC launched');

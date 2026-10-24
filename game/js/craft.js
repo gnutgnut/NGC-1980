@@ -58,6 +58,8 @@ export function createCraftHost({ G, Z, say = NOOP }) {
     if (typeof def.hud !== 'function') def.hud = () => ({ line: '', hint: '', weap: '', fuel: null });
     defs.push(def); byId.set(def.id, def); return def;
   };
+  // ngc/wheeledgame: crafts that come and go (parked town cars, WORLD traffic taken over by the vehicle sim, deliveries)
+  host.unregister = def => { if (!def || host.active === def) return false; const i = defs.indexOf(def); if (i >= 0) defs.splice(i, 1); byId.delete(def.id); return true; };
   host.get = id => byId.get(id) || null;
   Object.defineProperty(host, 'cur', { get: () => host.active });
 

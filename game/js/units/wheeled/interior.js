@@ -222,7 +222,7 @@ export function buildInterior(spec, model) {
   for (let k = 0; k < W0.spokes; k++) { const a = (W0.spokes === 2 ? [0.28, Math.PI - 0.28][k] : [Math.PI / 2, Math.PI - 0.15, 0.15][k]); wheelG.add(new THREE.Mesh(rod([0, -0.01, 0], [Math.cos(a) * W0.r, 0, Math.sin(a) * W0.r], 0.016), blk)); }
   const hornBtn = new THREE.Mesh(cylY(0.03, 0.02, 0, 0.02, 0, 10), mat(isCiv ? 0x8a2a1a : 0x2a2a28, { vc: false })); wheelG.add(hornBtn);
   // gloved hands at ten to two, riding the rim
-  const glove = mat(isCiv ? 0x7a5a40 : 0x3a3626, { vc: false }), sleeve = mat(isCiv ? 0x3a4a6a : 0x4a5232, { vc: false });
+  const glove = mat(isCiv ? 0x7a5a40 : 0x3a3626, { vc: false }).clone(), sleeve = mat(isCiv ? 0x3a4a6a : 0x4a5232, { vc: false }).clone();   // (own copies: setDriver recolours them)
   const hands = [-1, 1].map(s => { const h = new THREE.Group(); const a = -Math.PI / 2 + s * 1.05;   /* local -z = the top of the rim (ten to two) */ h.position.set(Math.cos(a) * W0.r, 0.01, Math.sin(a) * W0.r); h.add(new THREE.Mesh(sphere(0.045, 0, 0, 0, 8, 6).scale(1, 0.75, 1.3), glove)); wheelG.add(h); return h; });
   // arms: upper arm + forearm with an elbow that drops down and out (two tapered segments per side)
   const seg = (r0, r1) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, 1, 7).rotateX(Math.PI / 2), sleeve); g.add(m); return m; };
@@ -257,7 +257,9 @@ export function buildInterior(spec, model) {
   const _a = V(), _b = V();
   const gateOf = (gate, k) => gate[k] ?? gate[0];
   const api = {
-    group: g, controls: { wheelG, pedals, shifter, levers, parkG, panel }, canvases: () => [cv],
+    group: g, controls: { wheelG, pedals, shifter, levers, parkG, panel, hands, arms, hornBtn }, canvases: () => [cv], layout: L0, panelDef: PD,
+    // ngc/wheeledgame: the hands and arms on the wheel only when somebody is driving (not on a parked, empty vehicle)
+    setDriver(on, colours) { for (const h of hands) h.visible = on; for (const a of arms) { a.up.visible = a.fore.visible = on; } if (colours) { glove.color.setHex(colours.glove); sleeve.color.setHex(colours.sleeve); } },
     update(look, dt, inside) {
       if (!look) return;
       // steering wheel: steer -1..1 = half the lock-to-lock turns either way

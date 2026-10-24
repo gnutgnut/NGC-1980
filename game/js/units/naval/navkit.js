@@ -84,6 +84,17 @@ export class Kit {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     return this.add(g, c);
   }
+  // a flat plate from a plan outline (x, z), between heights y0 and y1: top, bottom and edges (wings, hulls in plan)
+  slab(pts, y0, y1, c, cBottom = c) {
+    this.floor(pts, y1, c); this.floor(pts, y0, cBottom, true);
+    const area = pts.reduce((s, p, i) => { const q = pts[(i + 1) % pts.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0), pos = [];
+    for (let i = 0; i < pts.length; i++) {
+      let a = pts[i], b = pts[(i + 1) % pts.length]; if (area > 0) [a, b] = [b, a];
+      pos.push(a[0], y0, a[1], a[0], y1, a[1], b[0], y1, b[1], a[0], y0, a[1], b[0], y1, b[1], b[0], y0, b[1]);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    return this.add(g, c);
+  }
   geometry() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
