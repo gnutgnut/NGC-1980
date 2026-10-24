@@ -1204,7 +1204,7 @@ function stowCrafts() { JP.stow(); jetC.park.on = false; tomcatC.TP.stow(); tomc
 // a new war: the TEST CAR waits at the home island's motor pool (else on the carrier deck)
 function placeVehicles() {
   const sp = GR.motorPool(HOME_B.isl) || GR.deckSpot(0); if (sp) carC.spawnAt(sp); else carC.stow();
-  // ARMOUR: the M60A3 waits at the top of the home island's landing hard, the M113A2 on the ALBATROSS's forward deck park (cold, parked)
+  // ARMOUR: the M60A3 waits at the top of the home island's landing beach (TERRAIN: was the hard), the M113A2 on the ALBATROSS's forward deck park (cold, parked)
   armDelivery.clear();
   const hh = HARDS.find(h => h.I === HOME_B.isl), hp = hh && hh.at(hh.u1 + 6), ts = hp ? { x: hp[0], z: hp[1], yaw: hh.yaw + Math.PI } : GR.motorPool(HOME_B.isl, 4.6); if (ts) m60C.spawnAt(ts); else m60C.stow();   // (nose to the sea, ready to go down)
   const as = GR.deckSpot(2) || GR.motorPool(HOME_B.isl, 3.6); if (as) m113C.spawnAt(as); else m113C.stow();

@@ -254,7 +254,7 @@ function islandHeight(P, x, z, aux) {
       h = Math.max(h, mix(h, top, k));
     }
     if (h < SEA_FLOOR) h = SEA_FLOOR;
-    if (aux) { aux.wb = wb; aux.wc = wc; aux.s = s; aux.dune = 0; aux.vall = 0; aux.tor = 0; aux.peak = 0; aux.P = P; aux.sand = wb > 0.4; }
+    if (aux) { aux.wb = wb; aux.wc = wc; aux.s = s; aux.dune = 0; aux.vall = 0; aux.tor = 0; aux.peak = 0; aux.P = P; aux.sand = wb > 0.4; aux.track = false; aux.main = false; }
     return h;
   }
   // ---- inland ground E: the plateau, falling toward the coast, hills, peaks, valleys
@@ -277,9 +277,10 @@ function islandHeight(P, x, z, aux) {
   E += tor;
   // valleys from the bays: a stream valley up the cove's axis, meandering, floor rising 1 in 18 inland
   let vall = 0;
+  const mean = cove ? cove.a + (cove.valley ? 0.12 * Math.sin(rho * 0.045 + cove.a * 3) : 0) : 0;
+  const latV = cove ? Math.abs(adiff(a, mean)) * rho : 1e9;              // m off the cove's axis / the valley line
   if (cove && cove.valley) {
-    const mean = cove.a + 0.12 * Math.sin(rho * 0.045 + cove.a * 3);
-    const lat = Math.abs(adiff(a, mean)) * rho;                          // m off the valley line
+    const lat = latV;
     const sIn = Rc - rho;
     const wv = mix(34, 18, sm(10, 80, sIn));                             // wide at the mouth, narrowing inland
     const reach = sm(-10, 0, -(rho - 62));                               // ends before the base apron
@@ -298,7 +299,8 @@ function islandHeight(P, x, z, aux) {
       if (ds > 0) {
         const along = a * Rc;
         const blow = 0.55 + 0.45 * noise(along / 26 + 9.1, 3.3);              // blowouts and saddles along the ridge
-        dune = cove.dune * blow * (bump(ds - 6, 7) + 0.6 * bump(ds - 17, 7)) + 0.5 * noise(x / 9.5, z / 9.5) * sm(0, 6, ds) * (1 - sm(26, 34, ds));
+        const gap = sm(6, 20, latV);                                          // the stream (and the beach exit) cut through the dunes
+        dune = cove.dune * blow * gap * (bump(ds - 6, 7) + 0.6 * bump(ds - 17, 7)) + 0.5 * noise(x / 9.5, z / 9.5) * sm(0, 6, ds) * (1 - sm(26, 34, ds));
         hB += Math.max(0, dune);
       }
       const back = berm / g + 30;                                           // behind the dunes the land takes over
@@ -334,6 +336,9 @@ function islandHeight(P, x, z, aux) {
     // the sand: the beach and its dunes, with a ragged edge where the grass takes over
     const sn = noise(x / 11 + 6.6, z / 11 - 3.3);
     aux.sand = !!cove && wb > 0.3 + 0.35 * sn && s < cove.berm / cove.g + 22 + 10 * sn;
+    // the main landing beach's exit: a dirt track from the top of the sand up the valley / to the plateau
+    aux.track = !!cove && cove.main && latV < 3.2 && s > cove.berm / cove.g + 6 && t > 0.3;
+    aux.main = !!cove && cove.main;
   }
   return h;
 }
@@ -358,7 +363,7 @@ function bake() {
         const h = islandHeight(P, x, z, AUX);
         if (h <= H[k]) continue;
         H[k] = h; owner[k] = pi; wbA[k] = AUX.wb * 255;
-        info[k] = (AUX.dune > 0.6 ? 1 : 0) | (AUX.vall > 0.5 ? 2 : 0) | (AUX.tor > 0.5 ? 4 : 0) | (AUX.wc > 0.5 && AUX.s < 25 ? 8 : 0) | (AUX.s < 45 && AUX.s > -60 ? 16 : 0) | (AUX.sand ? 32 : 0);
+        info[k] = (AUX.dune > 0.6 ? 1 : 0) | (AUX.vall > 0.5 ? 2 : 0) | (AUX.tor > 0.5 ? 4 : 0) | (AUX.wc > 0.5 && AUX.s < 25 ? 8 : 0) | (AUX.s < 45 && AUX.s > -60 ? 16 : 0) | (AUX.sand ? 32 : 0) | (AUX.track ? 64 : 0) | (AUX.main ? 128 : 0);
       }
     }
   }
@@ -377,7 +382,8 @@ function bake() {
     else if (f & 32) s = (f & 1) && n1 > 0.4 ? S_GRASS : S_SAND;                                                // beach, dunes (marram tufts)
     else if (wb < 0.35 && h < 1.4 && f & 16) s = sl > 0.5 ? S_ROCK : S_SHINGLE;                                // the strand under a rocky bank
     else if (f & 4 || (sl > 0.6 && n1 > -0.1) || (sl > 0.42 && P.G.rugged >= 1 && n1 > 0.25)) s = S_ROCK;        // tors, scree, outcrops
-    else if (f & 2 && h < 4.2 && sl < 0.12) s = P.low ? S_MARSH : S_MUD;                                         // the stream mouth
+    else if (f & 64 && sl < 0.35) s = S_DIRT;                                                                   // the beach exit track
+    else if (f & 2 && !(f & 128) && h < 4.2 && sl < 0.12) s = P.low ? S_MARSH : S_MUD;                          // the stream mouth (not behind the landing beach)                                         // the stream mouth
     else if (P.low && h < 3.2 && sl < 0.08 && n2 > 0.22) s = S_MARSH;                                           // salt marsh on the low islands
     else if (n2 < -0.46 && sl < 0.3 || (sl > 0.4 && n1 < -0.35)) s = S_DIRT;                                   // bare earth, sheep scrapes
     else s = S_GRASS;

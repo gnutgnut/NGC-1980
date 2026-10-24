@@ -406,10 +406,20 @@ export function zoneNet() {
       if (I.cave) { const k = sm(0, 14, Math.hypot(Math.max(Math.abs(x - I.x) - 76, 0), Math.max(Math.abs(z - I.z) - 9, 0))); h = Math.max(h, padY) + (h - Math.max(h, padY)) * k; }
       return h;
     };
-    const routeH = (x, z) => I.cave && Math.hypot(x - I.x, z - I.z) < 28 ? -5 : finalH(x, z);
+    // the war's sites round the pad (war.js aaSlots: the AA guns on the diagonals; the HQ / production slots) are kept
+    // clear: the lane leaves the apron between them and is routed round them
+    const sites = [0, 1, 2, 3].map(k => { const aa = k * Math.PI / 2 + Math.PI / 4, r = I.cave ? 15 : 22; return [p.x + Math.cos(aa) * r, p.z + Math.sin(aa) * r]; });
+    { const a0 = structAngle(I); if (I.cave) sites.push([p.x - 17, p.z + 9], [p.x + 19, p.z + 6]); else sites.push([p.x + Math.cos(a0) * 17, p.z + Math.sin(a0) * 17], [p.x - Math.cos(a0) * 18, p.z - Math.sin(a0) * 18]); }
+    const routeH = (x, z) => (I.cave && Math.hypot(x - I.x, z - I.z) < 28) || sites.some(([qx, qz]) => Math.hypot(x - qx, z - qz) < 8) ? -5 : finalH(x, z);
     const V = site.village = { id: `z${I.id}`, x: best.x, z: best.z, y: best.y, size: 'village', R: 55, zone: true, I, seed: I.id * 131 + 7 };
     // road from the pad apron to the village
-    const a = Math.atan2(V.z - p.z, V.x - p.x), sx = p.x + Math.cos(a) * (p.r0 - 2), sz = p.z + Math.sin(a) * (p.r0 - 2);
+    const aV = Math.atan2(V.z - p.z, V.x - p.x); let a = aV, bestD = 1e9;
+    for (let k = 0; k < 48; k++) {   // the start on the apron's edge nearest the village's direction that is clear of the sites (and not over the shaft)
+      const c = k / 48 * Math.PI * 2, x = p.x + Math.cos(c) * (p.r0 - 2), z = p.z + Math.sin(c) * (p.r0 - 2);
+      if (sites.some(([qx, qz]) => Math.hypot(x - qx, z - qz) < 11) || (I.cave && Math.hypot(x - I.x, z - I.z) < 30)) continue;
+      const d = Math.abs(Math.atan2(Math.sin(c - aV), Math.cos(c - aV))); if (d < bestD) { bestD = d; a = c; }
+    }
+    const sx = p.x + Math.cos(a) * (p.r0 - 2), sz = p.z + Math.sin(a) * (p.r0 - 2);
     const pts = route(sx, sz, V.x, V.z, { ds: 12, step: 6, wmax: 40, g: ROAD.lane.g, water: 80, res: 5, smooth: 2, h: routeH });
     // TERRAIN (wave 3): the lane leaves the pad apron at the pad's own height (main.js PADS / BASES: the island centre's
     // ground, rounded and clamped), so its first metres lie on the concrete instead of floating over it
