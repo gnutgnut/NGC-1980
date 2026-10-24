@@ -335,15 +335,18 @@ export function createWheeledCraft(ctx, type, o = {}) {
       case 'outOfFuel': if (me) say('OUT OF FUEL', 2); break;
       case 'seized': if (me) say('ENGINE SEIZED', 2); break;
       case 'rollover': if (me) say('ROLLED OVER', 2); ctx.sfx.thump?.(1); break;
-      case 'impact': if (me) V.shake = Math.min(2, (V.shake || 0) + e.speed / 8); if (e.speed > 3) ctx.sfx.thump?.(Math.min(1, e.speed / 12)); if (e.id && e.id.sim && e.id !== V) bump(e); break;
+      case 'impact': if (me) V.shake = Math.min(2, (V.shake || 0) + e.speed / 8); if (e.speed > 3) ctx.sfx.thump?.(Math.min(1, e.speed / 12)); if (e.id && typeof e.id === 'object' && (e.id.sim || e.id.parts) && e.id !== V) bump(e); break;
       case 'overheat': if (me) say('OVERHEATING  -  WATER TEMPERATURE HIGH', 1.8); break;
       case 'lowAir': if (me) say('LOW AIR  -  BRAKES', 1.2); break;
       default: break;
     }
   }
-  function bump(e) {   // we ran into another wheeled vehicle: push it (half our momentum along the contact normal)
-    const O = e.id, m = Math.min(S.massNow, O.sim.massNow), J = m * e.speed * 0.5;
-    O.wake(); O.sim.impulse(e.at, [-e.n[0] * J, -e.n[1] * J * 0, -e.n[2] * J]);
+  function bump(e) {   // we ran into another vehicle: push it (half our momentum along the contact normal)
+    const O = e.id;
+    if (O.sim && O.sim.impulse && O.wake) { const m = Math.min(S.massNow, O.sim.massNow), J = m * e.speed * 0.5; O.wake(); O.sim.impulse(e.at, [-e.n[0] * J, -e.n[1] * J * 0, -e.n[2] * J]); return; }
+    const B = O._cwb || (O.parts ? O : null); if (!B || !B.push) return;   // COLLISION: a tank, a machine - through its body in the collision world
+    const om = B.mass === Infinity ? 1e9 : B.mass, J = Math.min(S.massNow, om) * e.speed * 0.5;
+    B.push(-e.n[0] * J, -e.n[2] * J, e.at[0], e.at[2]);
   }
   function wreck(cause) {
     if (V.wrecked) return; V.wrecked = true;
@@ -417,6 +420,10 @@ export function createWheeledCraft(ctx, type, o = {}) {
     Z.facing.set(S.fwdv[0], S.fwdv[2]); if (Z.facing.lengthSq() < 1e-6) Z.facing.set(0, -1); else Z.facing.normalize();
   };
   const _b = { def: V };
+  // COLLISION (wave 3): in the collision world (craft.js syncs bounds()): the mass, and a push from something heavier
+  // (a tank driving into it, the contact response) as an impulse into the sim at the contact point
+  V.cwClass = 'veh'; V.mass = () => S.massNow;
+  V.push = (jx, jz, x, z) => { if (!V.exists || V.slung) return; V.wake(); S.impulse([x, S.pos[1] + HT * 0.35, z], [jx, 0, jz]); };
   V.bounds = () => {
     if (!V.exists || V.slung) return null;
     const c = -S.heading, cx = S.pos[0] + S.fwdv[0] * -zc, cz = S.pos[2] + S.fwdv[2] * -zc;

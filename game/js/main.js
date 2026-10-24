@@ -42,6 +42,9 @@ import { createArmorWorld } from './units/armor/armorworld.js';
 import { createArmorCraft } from './units/armor/armorcraft.js';
 import { createSight } from './units/armor/armorsight.js';
 import { createArmorDelivery } from './units/armor/armordelivery.js';
+import { createCollisionWorld } from './collision.js';   // COLLISION (wave 3)
+import { groundContact, contactDamage } from './aircontact.js';
+import { UH1H } from './hueyfm.js';
 // TERRAIN (wave 3): the islands' real ground - geology, beaches, cliffs, dunes, valleys - and the one surface API every sim reads
 import { zoneSurf, zoneGrid, beaches as terrainBeaches, inGrid, SURFACE, SURF_NAMES, GEOLOGY, geologyOf, ZONE_C, bakeMs as TERRAIN_BAKE_MS } from './world/terrain.js';
 
@@ -573,7 +576,7 @@ const TREES = [];
     const x = (r() * 2 - 1) * BOUND, z = (r() * 2 - 1) * BOUND, h = terrainH(x, z);
     if (h < 2.5 || h > 24 || clearedAt(x, z) || !(s => s === 'grass' || s === 'dirt')(zoneSurf(x, z)) || PADS.some(p => Math.hypot(x - p.x, z - p.z) < (p.isl.cave ? 16 : 34)) || BASES.some(b => Math.hypot(x - b.x, z - b.z) < 30 || stripW(x, z, b) < 1)) continue;   // WORLD: clearedAt keeps trees off the villages and roads
     const k = 0.7 + r() * 1.1; sc.set(k, k * (0.8 + r() * 0.6), k);
-    m.compose(new THREE.Vector3(x, h, z), q, sc); mesh.setMatrixAt(n++, m); TREES.push({ x, z, y: h, r: 0.9 * k });   // (TREES: colliders for the ground host)
+    m.compose(new THREE.Vector3(x, h, z), q, sc); mesh.setMatrixAt(n++, m); TREES.push({ x, z, y: h, r: 0.9 * k, h: 5 * sc.y, cr: 1.3 * k, i: n - 1 });   // (TREES: colliders for the ground host; COLLISION: h / cr the drawn cone, for rotor discs)
   }
   mesh.count = n; zScene.add(mesh); TREES.mesh = mesh;   // ARMOUR: the instances a tank pushes over (felled in place)
 }
@@ -669,7 +672,10 @@ const nav = createNav(terrainH);
 const seaSpot = (x, z) => { const [wx, wz] = nav.nearestWater(x, z); return [wx, wz, Math.atan2(wx, wz)]; };   // facing the map centre
 const PSTORE = { get fuel() { return G.res; }, set fuel(v) { G.res = v; }, get mat() { return G.mat; }, set mat(v) { G.mat = v; }, get fuelMax() { return RES_MAX; } };
 // FOUNDATION: everything the player can control is a craft (craft.js); PL is how war.js sees whichever one you are in
-const crafts = createCraftHost({ G, Z, say: (t, s) => say(t, s) });
+// COLLISION (wave 3, collision.js): one collision world for every unit - the crafts' footprints (craft.js syncs them),
+// the ground war's machines and Marines, the island trees (ground.js); CW.step resolves contacts once a frame
+const CW = createCollisionWorld({ cell: 10 });
+const crafts = createCraftHost({ G, Z, say: (t, s) => say(t, s), cw: CW });
 const PL = crafts.PL;
 const feedItems = [];
 function feed(t, kind = 'info') { feedItems.unshift({ t, kind, at: performance.now() }); feedItems.length = Math.min(feedItems.length, 6); }
@@ -696,6 +702,7 @@ war = createWar({
   scene: zScene, fx, sfx, terrainH, isWater, nav, ISLANDS, BASES, G: PSTORE, feed, addScore, ear: zCam.position,
   carrierStart: seaSpot(-300, 280), enemyStart: seaSpot(300, -280),
   player: () => PL, hurtPlayer: (a, why, at, dir, kind) => hurtPlayer(a, why, at, dir, kind), onOwner: islandOwnerChanged, onEnd: warOver,
+  cw: CW,   // COLLISION: the ground war's units are bodies in the one collision world
 });
 if (params.has('sea')) war.setSeaDrift(params.has('seadrift')); else { war.setSea(SEA_PREF.ss); war.setSeaDrift(SEA_PREF.drift); }   // SEAWORLD
 const world = createWorldLife({ scene: zScene, fx, sfx, terrainH, isWater, nav, war, fog, uTime: terrainUni.uTime, view, ISLANDS, PADS, BASES });   // WORLD (world/life.js)
@@ -981,6 +988,57 @@ const _cmQ = new THREE.Vector3();
 const cmPose = { vel: null, toWorld: (l, o) => { _cmQ.set(l[0], l[1], l[2]).applyQuaternion(H.q).add(H.pos); o.x = _cmQ.x; o.y = _cmQ.y; o.z = _cmQ.z; return o; }, dirWorld: (l, o) => { _cmQ.set(l[0], l[1], l[2]).normalize().applyQuaternion(H.q); o.x = _cmQ.x; o.y = _cmQ.y; o.z = _cmQ.z; return o; } };
 Object.defineProperty(cmPose, 'vel', { get: () => H.vel });
 const _parkCtl = { cx: 0, cy: 0, pedal: 0, coll: 0, sas: false, fire: false, winch: false, rocket: false, bomb: false, hatX: 0, hatY: 0, source: 'PARKED' };
+// COLLISION (wave 3): the Huey against the collision world (collision.js).
+// The ROTOR DISC (48 ft, 7.32 m radius, at the hub) sweeps a horizontal disc: a tree's crown (a cone), a parked craft,
+// a vehicle, a machine taller than the hub's height in reach is a strike. GAME: a tree's outer branches cost the blade
+// tips (damage by how deep the disc cut in), anything solid takes a blade off; the rotor loses rpm; what it hits is
+// damaged (a deep cut fells the tree). The FUSELAGE: hover-taxiing or sliding into something (not landed, low) is
+// pushed out of it with damage by closing speed (aircontact.js bands), a crash past 7 m/s.
+const _hub = new THREE.Vector3(), _dsc = {};
+let rotorHitT = 0, heliBumpT = 0;
+const RSTAT = { strikes: 0, last: null, bumps: 0 };
+function heliContacts(dt, piloted) {
+  rotorHitT -= dt; heliBumpT -= dt;
+  const tell = (t, s) => piloted ? say(t, s) : feed(t, 'bad');
+  if (H.omega > 3 && rotorHitT <= 0) {
+    H.worldPoint(UH1H.HUB, _hub);
+    let r = CW.disc(_hub.x, _hub.y, _hub.z, UH1H.R, heliC, _dsc);
+    if (!r && !H.landed) { const g = GR.discHit(_hub.x, _hub.y, _hub.z, UH1H.R); if (g) r = { body: { cls: 'solid', owner: g.s ? { kind: g.what } : null, what: g.what }, depth: 9, x: g.x, z: g.z }; }   // buildings, walls, masts, island structures (in flight)
+    if (r) {
+      rotorHitT = 0.6; RSTAT.strikes++;
+      const b = r.body, tree = b.cls === 'tree', sev = tree ? Math.min(1, r.depth / 2.5) : 1;
+      D.hit(tree ? 0.12 + 0.55 * sev : 0.85, 'rotor');
+      H.omega *= tree ? 1 - 0.12 * sev : 0.65;
+      sfx.boom(0.35 + 0.4 * sev);
+      const k = Math.max(0.3, sev), dx = r.x - _hub.x, dz = r.z - _hub.z, dl = Math.hypot(dx, dz) || 1;
+      for (let i = 0; i < 14 * k; i++) fx.mix.spawn(r.x, _hub.y, r.z, rnd(-6, 6) + dx / dl * 8, rnd(-1, 4), rnd(-6, 6) + dz / dl * 8, rnd(0.15, 0.4), 0.8, 2, tree ? .25 : .5, tree ? .42 : .5, tree ? .2 : .5, 0.6, 3, 1, 0.3);
+      let what = tree ? 'TREE' : b.what || 'SOMETHING';
+      if (tree) { if (sev > 0.45) { const T = AW.fell('tree' + b.owner.i, dx / dl, dz / dl); if (!T) fellTree(b.owner, dx / dl, dz / dl); } }
+      else if (b.owner && b.cls !== 'solid') {
+        const o = b.owner; what = o.label || (o.kind ? String(o.kind).toUpperCase() : what);
+        if (o.hurt && o !== heliC) o.hurt(0.6, 'ROTOR STRIKE');
+        else if (o.kind && war.ground && war.ground.sim && war.ground.sim.applyHit) war.ground.sim.applyHit(o, { type: 'blast', weapon: 'ROTOR' }, 260);
+      }
+      RSTAT.last = { what, sev: +sev.toFixed(2), rotor: +D.hp.rotor.toFixed(2), t: war.time };
+      tell(D.hp.rotor <= 0.02 ? `ROTOR STRIKE  -  ${what}  -  THE BLADES ARE GONE` : `ROTOR STRIKE  -  ${what}  -  MAIN ROTOR ${Math.round(D.hp.rotor * 100)}%`, 2.4);
+    }
+  }
+  if (!H.landed && H.agl < 6) {   // the fuselage: hover-taxi / slide into something
+    const B = crafts.syncBody(heliC, 0);
+    const r = B && groundContact(CW, B, H.pos, H.vel);
+    if (r) {
+      const dm = contactDamage(r.speed);
+      if (dm.band !== 'nudge' && heliBumpT <= 0) {
+        heliBumpT = 1; RSTAT.bumps++;
+        const o = r.other.owner, who = o && o.label ? o.label : r.other.cls === 'tree' ? 'A TREE' : 'SOMETHING';
+        sfx.boom(Math.min(1, 0.2 + r.speed / 10));
+        if (o && o.hurt && o !== heliC) o.hurt(dm.amount * 0.5, 'HIT BY THE HUEY');
+        if (dm.band === 'crash') { if (piloted) killPlayerZ(`FLEW INTO ${who}`); else { D.hit(1, 'rotor'); D.hit(1, 'xmsn'); } return; }
+        D.hit(dm.amount, dm.band === 'bump' ? 'skids' : undefined); tell(`HIT ${who}  -  ${(r.speed * 1.944).toFixed(0)} KT`, 1.8);
+      }
+    }
+  }
+}
 function updateHeli(dt, inp, piloted) {
   const P = H.pos;
   if (piloted && Z.alive) advise(dt);
@@ -1044,6 +1102,8 @@ function updateHeli(dt, inp, piloted) {
   else if (ev === 'hardland') { D.hit(0.35, 'skids'); D.hit(0.15, 'xmsn'); say('HARD LANDING  -  SKIDS AND GEARBOX DAMAGED', 2); sfx.boom(0.4); }
   else if (ev === 'crash') killPlayerZ('CRASHED');
   if (!Z.alive) return;
+  heliContacts(dt, piloted);   // COLLISION: the rotor disc and the fuselage against the collision world
+  if (!Z.alive) return;
   // rotor downwash: dust (or spray over water) blown out radially under the disc
   if (H.agl < 20 && H.rpm > 0.5 && H.thrust > 8000) {   // the 48 ft disc throws dust (spray) out to a rotor diameter
     const gy = groundY(P.x, P.z), wet = waterAt(P.x, P.z), k = (1 - H.agl / 20) * Math.min(1, H.thrust / 40000);
@@ -1083,7 +1143,7 @@ function updateHeli(dt, inp, piloted) {
 // Everything the player can control registers here (craft.js): the Huey (still special: the cave, the drop, the helm),
 // the HORNET (craftjet.js), the soldier on foot (foot.js) and ground vehicles (vehicle.js on the ground host,
 // ground.js). Wave-2 units register the same way - see docs/ngc1980/FOUNDATION.md.
-const GR = createGround({ war, terrainH, holeOf, PADS, ISLANDS, CARRIER, trees: TREES, crafts, inZone });
+const GR = createGround({ war, terrainH, holeOf, PADS, ISLANDS, CARRIER, trees: TREES, crafts, inZone, cw: CW });
 // SEAWORLD: the lived-in world is solid - buildings, walls, hedges, parapets and poles collide; piers and bridge decks
 // are floors; roads are road / dirt surfaces (world/solid.js, from the same generators the world is drawn from)
 const worldSolid = createWorldSolid({ hf: islandH, zoneHf: terrainH, zone: () => world.zone || [] });
@@ -1125,6 +1185,7 @@ const heliC = crafts.register({
   },
   update: (dt, inp) => updateHeli(dt, inp, true),
   idle: dt => updateHeli(dt, null, false),
+  mass: () => 2360 + G.fuel * 6.3 + G.cargo * 3, cwClass: 'air',   // COLLISION: UH-1H empty 2,360 kg + fuel (the 209 gal tank ~ 630 kg at 100%) + cargo
   bounds: () => {   // cabin and tail boom, for walkers and vehicles bumping into a parked Huey
     if (!Z.alive || G.heliStowed) return null;
     const y = yawOfQ(H.q), c = Math.cos(y), s = Math.sin(y), y0 = H.pos.y + HELI.SKID_Y;
@@ -1204,12 +1265,16 @@ const AW = createArmorWorld({
   terrainH, ships: () => war.units, deckY: (x, z) => war.deckY(x, z), shipAt: (x, z) => war.shipAt(x, z), shipAlive: u => war.units.includes(u) && !(u.sinking > 4),
   roadAt: (x, z) => world.roadAt ? world.roadAt(x, z) : null, pads: PADS.filter(p => !p.isl.cave).map(p => ({ x: p.x, z: p.z, r: 26 })).concat(PADS.filter(p => p.isl.cave).map(p => ({ x: p.x, z: p.z, r: 20 }))),
   holes: BASES.map(b => ({ x: b.x, z: b.z, r: HOLE_R })), trees: TREES, structs: function* () { for (const I of ISLANDS) if (I.structs) yield* I.structs; },
-  items: () => world.zone.flatMap(e => e.items), surface: (x, z) => inGrid(x, z) ? SURFACE[zoneSurf(x, z)].soil : null,   // TERRAIN: the islands' soils bounds: skip => crafts.bounds(skip), hitTest: (x, y, z) => war.hitTest(x, y, z, 1, 0.2),
-  onFell: (t, dx, dz, i) => {   // lay a pushed-over tree down along the push
-    const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); TREES.mesh.getMatrixAt(i, m4); m4.decompose(p, q, s);
-    q.setFromAxisAngle(new THREE.Vector3(dz, 0, -dx).normalize(), 1.35); TREES.mesh.setMatrixAt(i, m4.compose(p, q, s)); TREES.mesh.instanceMatrix.needsUpdate = true;
-  },
+  items: () => world.zone.flatMap(e => e.items), surface: (x, z) => inGrid(x, z) ? SURFACE[zoneSurf(x, z)].soil : null,   // TERRAIN: the islands' soils
+  bounds: skip => crafts.bounds(skip), hitTest: (x, y, z) => war.hitTest(x, y, z, 1, 0.2),   // COLLISION: (these two had been swallowed by the comment above since TERRAIN: tanks drove through parked crafts)
+  cw: CW,   // COLLISION: light crafts are shoved aside, the ground war's machines and men are obstacles / shoved
+  onFell: (t, dx, dz, i) => fellTree(t, dx, dz, i),
 });
+function fellTree(t, dx, dz, i = t.i) {   // lay a pushed-over tree down along the push (COLLISION: and out of the collision world)
+  if (t.down) return; t.down = true; if (t.body) CW.enable(t.body, false);
+  const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); TREES.mesh.getMatrixAt(i, m4); m4.decompose(p, q, s);
+  q.setFromAxisAngle(new THREE.Vector3(dz, 0, -dx).normalize(), 1.35); TREES.mesh.setMatrixAt(i, m4.compose(p, q, s)); TREES.mesh.instanceMatrix.needsUpdate = true;
+}
 const armCtx = { ...vehCtx, hover: () => switchHover, AW, SG: createSight({ canvas }), ground: (x, z) => Math.max(terrainH(x, z), war.deckY(x, z)), isWater, bail: def => { if (crafts.active === def) getInOut(); } };
 const m60C = crafts.register(createArmorCraft(armCtx, 'm60'));
 const m113C = crafts.register(createArmorCraft(armCtx, 'm113'));
@@ -2285,6 +2350,7 @@ function frame(now) {
     if (G.mode === 'zarch') updateZarch(dt, inp); else updateThrust(dt, inp);
     war.update(dt, PL, params.has('peace'));
     if (G.mode === 'zarch') { crafts.afterWar(); seats.afterWar(dt); }   // FOUNDATION: decks moved - the soldier, vehicles, parked jets catch up (ngc/interiors: the troops in their seats)
+    if (G.mode === 'zarch') { const c0 = performance.now(); CW.step(dt); PROF.cw += (performance.now() - c0 + CW.stats.ms - PROF.cw) * 0.05; CW.stats.ms = 0; }   // COLLISION: contacts between moving bodies (pushes, knocks, hits)
     fogT -= dt; if (fogT <= 0) { fogT = 0.25; fog.update(war.visionSources(PL)); war.setVisibility(fog); updateFogImg(); }
   } else if (G.state === 'trans') {
     const tr = G.tr; tr.t += dt; const D = 0.8;
@@ -2308,7 +2374,7 @@ function frame(now) {
   const t3 = performance.now(), pk = 0.05;   // smoothed per-frame CPU cost: sim, scene/HUD prep, render submit
   PROF.sim += ((t1 - now0) - PROF.sim) * pk; PROF.prep += ((t2 - t1) - PROF.prep) * pk; PROF.render += ((t3 - t2) - PROF.render) * pk;
 }
-const PROF = { sim: 0, prep: 0, render: 0 };
+const PROF = { sim: 0, prep: 0, render: 0, cw: 0 };   // (cw: the collision world's step + this frame's circle pushes, ms)
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ, CW, TREES, fellTree, RSTAT }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }

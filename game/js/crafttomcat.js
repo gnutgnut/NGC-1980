@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { TOMCAT, TOMCAT_AF } from './units/air/tomcatfm.js';
 import { createTomcatPlay } from './units/air/tomcatplay.js';
+import { groundContact, contactDamage } from './aircontact.js';   // COLLISION (wave 3): taxiing into things
 import { startSet } from './units/air/tomcatsys.js';   // COMMANDER + TOMCAT cockpit: a jet you switch into is handed over hot
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -31,6 +32,36 @@ export function createTomcatCraft(ctx) {
   D.present = () => TP.active && TP.alive && !TP.ejected;
   D.frame = out => { out.x = A.pos.x; out.y = A.pos.y; out.z = A.pos.z; out.yaw = yawOf(); return out; };
   D.bounds = () => D.present() && A.onGround ? (D._b ||= {}, Object.assign(D._b, (() => { const y = yawOf(), c = Math.cos(y), s = Math.sin(y), ox = 0.8; return { x: A.pos.x + ox * s, z: A.pos.z + ox * c, yaw: y, hl: 9.6, hw: 1.7, y0: A.pos.y - H0, y1: A.pos.y + 2.6, def: D }; })())) : null;
+  // ---------------------------------------------------------------- COLLISION (wave 3): the TOMCAT in the collision world
+  // on the ground: fuselage and nacelles (19.1 m), the wings at their sweep (parked oversweep 10.2 m, 11.65 at 68 deg,
+  // 19.55 spread), the stabilators (9.97 m); ~18.2 t empty plus fuel
+  D.mass = () => 18200 + (A.fuel || 0); D.cwClass = 'air';
+  const CWB = [{}, {}, {}];
+  D.cwBounds = () => {
+    if (!D.present() || !A.onGround) return null;
+    const y = yawOf(), c = Math.cos(y), s = Math.sin(y), p = A.pos, at = (o, hl, hw, y0, y1, B) => Object.assign(B, { x: p.x + o * s, z: p.z + o * c, yaw: y, hl, hw, y0: p.y + y0, y1: p.y + y1 });
+    const sw = A.sweep !== undefined ? Math.min(1, Math.max(0, (A.sweep - 20) / 55)) : 1;   // 0 spread .. 1 swept back
+    at(0.8, 9.6, 1.7, -H0, 2.6, CWB[0]);
+    at(1.0 + sw * 1.2, 2.2 + sw * 0.8, 9.8 - sw * 4.0, -0.6, 0.4, CWB[1]);
+    at(7.4, 1.4, 5.0, -0.2, 0.5, CWB[2]);
+    return CWB;
+  };
+  let bumpT = 0;
+  D.contacts = 0; D.lastContact = null;
+  function taxiContact(dt) {
+    bumpT -= dt;
+    if (!crafts.cw || !A.onGround || !TP.alive || TP.ejected || A.cat || A.wire) return;
+    const B = crafts.syncBody(D, 0); if (!B) return;
+    const r = groundContact(crafts.cw, B, A.pos, A.vel); if (!r) return;
+    D.contacts++;
+    const dm = contactDamage(r.speed); if (dm.band === 'nudge' || bumpT > 0) return; bumpT = 1;
+    const o = r.other.owner, who = o && o.label ? o.label : r.other.cls === 'tree' ? 'A TREE' : r.other.cls === 'trk' || r.other.cls === 'veh' ? 'A VEHICLE' : 'SOMETHING';
+    D.lastContact = { band: dm.band, speed: +r.speed.toFixed(2), who };
+    sfx.boom?.(Math.min(1, 0.15 + r.speed / 10));
+    if (o && o.hurt && o !== D) o.hurt(dm.amount * 0.6, 'HIT BY A TAXIING TOMCAT');
+    if (dm.band === 'crash') { A.dead = 'collision'; return; }
+    TP.hurt(dm.amount, `TAXIED INTO ${who}  -  ${(r.speed * 1.944).toFixed(0)} KT`);
+  }
   // ---------------------------------------------------------------- taking a Tomcat (8 on the ALBATROSS deck, in the helicopter)
   // COMMANDER (o.command): taken out from any unit, as craftjet.js does it for the HORNET
   D.launch = (o = {}) => {
@@ -116,6 +147,7 @@ export function createTomcatCraft(ctx) {
   // ---------------------------------------------------------------- flying
   D.update = (dt, inp) => {
     TP.update(dt, inp);
+    taxiContact(dt);   // COLLISION
     const E = TP.ejectPos();
     Z.pos.copy(E || A.pos); Z.vel.copy(E ? TP.ejected.seats[TP.seat].vel : A.vel); Z.landed = A.onGround;
     A.forward(_f); const fl = Math.hypot(_f.x, _f.z); if (fl > 0.15) Z.facing.set(_f.x / fl, _f.z / fl);

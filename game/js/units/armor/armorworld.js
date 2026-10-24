@@ -15,6 +15,8 @@
 //     structs() -> [island structures]     war.js island structs { kind, x, y, z, r, h, dead } (buildings, AA sites)
 //     items() -> [zone items]              WORLD's village items { t, x, z, yaw, w, d, y?, h? } (houses: boxes)
 //     bounds(skip) -> [craft footprints]   crafts.bounds: other vehicles, the parked Huey / Hornet { x, z, yaw, hl, hw, y0, y1 }
+//     cw                                   COLLISION (wave 3): the game's collision world (collision.js): light pushable
+//                                          crafts are skipped (shoved by its contact response), its other moving bodies added
 //     hitTest(x, y, z) -> truthy           anything solid for the laser (war targets of either side)
 //     onFell(tree, dirX, dirZ)             lay a pushed-over tree down (the host's instanced mesh)
 //     seaLevel: 0, rockAbove: 30
@@ -128,7 +130,7 @@ export function createArmorWorld(o) {
   }
   AW.houses = () => houseGrid();
   const sObs = new Map();   // island structures -> obstacle objects (reused)
-  const bPool = [];         // craft footprints -> obstacle objects (pooled per call)
+  const bPool = [], cwn = [];   // craft footprints -> obstacle objects (pooled per call); COLLISION: the collision world's near list
   const holes = (o.holes || []).map((h, i) => ({ kind: 'cyl', x: h.x, z: h.z, r: h.r + 0.5, top: 1e4, id: 'shaft' + i }));
 
   // ---------------------------------------------------------------- a vehicle's environment
@@ -191,11 +193,24 @@ export function createArmorWorld(o) {
           obs.push(b);
         }
         for (const h of holes) if (Math.abs(h.x - x) < r + h.r && Math.abs(h.z - z) < r + h.r) obs.push(h);
+        // COLLISION (wave 3, o.cw = the game's collision world): a craft lighter than PUSH_RATIO of this hull that can be
+        // pushed is not an obstacle (the contact response shoves it: a tank through a car); the ground war's machines and
+        // men come from the collision world too (the heavy ones, and the wrecks, are obstacles; the light ones are shoved)
+        const cw = o.cw, myM = cw ? (typeof self.mass === 'function' ? self.mass() : self.mass || 1e9) : 0;
         if (o.bounds) for (const B of o.bounds(self)) {
           if (Math.abs(B.x - x) > r + B.hl + B.hw || Math.abs(B.z - z) > r + B.hl + B.hw) continue;
+          if (cw && B.def && B.def._cwb && !cw.hard(myM, B.def._cwb)) continue;
           const b = bPool[nb] ||= { kind: 'box', x: 0, z: 0, hx: 0, hz: 0, yaw: 0, top: 0, id: 'craft' + nb }; nb++;
-          b.x = B.x; b.z = B.z; b.hx = B.hw; b.hz = B.hl; b.yaw = B.yaw; b.top = B.y1; b.id = 'craft:' + (B.def ? B.def.id : nb);
+          b.kind = 'box'; b.x = B.x; b.z = B.z; b.hx = B.hw; b.hz = B.hl; b.yaw = B.yaw; b.top = B.y1; b.id = 'craft:' + (B.def ? B.def.id : nb);
           obs.push(b);
+        }
+        if (cw) for (const q of cw.near(x, z, r + 2, cwn, null, false)) {
+          if ((q.owner && q.owner.seats) || !(q.cls === 'trk' || q.cls === 'walk' || q.cls === 'inf' || q.cls === 'veh') || !cw.hard(myM, q)) continue;   // (crafts: their bounds above)
+          for (const p of q.parts) {
+            const b = bPool[nb] ||= { kind: 'box', x: 0, z: 0, hx: 0, hz: 0, yaw: 0, top: 0, id: 'craft' + nb }; nb++;
+            if (p.k === 'b') { b.kind = 'box'; b.hx = p.hw; b.hz = p.hl; b.yaw = Math.atan2(p.s, p.c); } else { b.kind = 'cyl'; b.r = p.r; }
+            b.x = p.x; b.z = p.z; b.top = p.y1; b.id = 'body:' + q.id; obs.push(b);
+          }
         }
         return obs;
       },

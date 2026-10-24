@@ -138,7 +138,8 @@ export function createGroundSim(o) {
     const u = unit({ side: 1, kind: 'marine', role, body, laws: body.laws, gl: body.gl, frags: body.frags, able: true, h: 1.8, burst: 0, lawT: 0, seed: o.seed ?? GS.nextId, name: o.name });
     sync(u); inBattle(B, u); return u;
   };
-  function sync(u) {
+  function sync(u) { syncCore(u); if (CW) syncBody(u); }   // (COLLISION: and its body)
+  function syncCore(u) {
     const s = u.sim;
     if (u.kind === 'marine') {
       const M = u.body; u.x = M.x; u.y = M.y; u.z = M.z; u.yaw = M.yaw; u.alive = M.alive; u.able = M.able; u.up = M.able; u.vx = M.vx; u.vz = M.vz; u.h = M.height(); u.laws = M.laws; u.gl = M.gl; u.frags = M.frags;
@@ -155,6 +156,71 @@ export function createGroundSim(o) {
     }
   }
   GS.sync = sync;
+
+  // ------------------------------------------------------------------------------------------------- COLLISION (wave 3)
+  // With o.cw (the game's collision world, collision.js) every unit is a body in it: Marines and STRIDERs circles,
+  // RW-7s and MBTs boxes; a burnt-out hull stays as an obstacle, the dead men and machines leave it. The player, his
+  // vehicles and the parked crafts bump into them through the ground host; the contact response shoves the kinematic
+  // ones apart, pushes the machines with their mass, and knocks a Marine down when a vehicle runs into him. The AI's
+  // movement is bent round the other bodies (CW.avoid) before it is stepped. Without o.cw (the balance benches)
+  // nothing here runs and the fights are bit-identical to before.
+  const CW = o.cw || null;
+  GS.cw = CW;
+  const GMASS = { marine: 100, strider: 420, hovertank: 24000, mbt: 60000 };   // kg (game; MBT: M1A2 / T-90M class)
+  function bodyOf(u) {
+    const veh = u.kind === 'hovertank' || u.kind === 'mbt';
+    const P = u.kind === 'mbt' ? u.sim.P : null;
+    const hl = u.kind === 'hovertank' ? RW7.L / 2 : P ? (P.hullL || 7.5) / 2 : 0, hw = u.kind === 'hovertank' ? RW7.W / 2 : P ? (P.W || 3.6) / 2 : 0;
+    const b = CW.add(veh ? { cls: 'trk', shape: 'box', hl, hw, x: u.x, z: u.z, yaw: u.yaw || 0, y0: u.y, y1: u.y + u.h }
+      : { cls: u.kind === 'marine' ? 'inf' : 'walk', shape: 'circle', r: u.kind === 'marine' ? 0.3 : 0.55, x: u.x, z: u.z, y0: u.y, y1: u.y + u.h });
+    b.owner = u; b.side = u.side; b.mass = GMASS[u.kind] || 500;
+    b.shove = (dx, dz) => shoveUnit(u, dx, dz);
+    b.push = u.kind === 'hovertank' || (u.kind === 'strider' && !u.lite) ? (jx, jz) => pushUnit(u, jx, jz) : null;
+    if (b.push) b.shove = null;
+    b.hit = (other, sp, c) => bumped(u, other, sp, c);
+    return b;
+  }
+  function syncBody(u) {
+    if (!CW) return;
+    const b = u.cwb || (u.cwb = bodyOf(u));
+    if (!u.alive) {
+      if (u.vehicle && u.kind !== 'strider') { if (b.mass !== Infinity) { b.mass = Infinity; b.push = b.shove = b.hit = null; } }   // the wreck: a wall
+      else { b.enabled = false; return; }
+    }
+    if (u.kind === 'strider' && u.alive) { b.push = u.lite ? null : b.push || ((jx, jz) => pushUnit(u, jx, jz)); b.shove = u.lite ? (dx, dz) => shoveUnit(u, dx, dz) : null; }
+    b.vx = u.vx || 0; b.vz = u.vz || 0;
+    CW.place(b, u.x, u.z, u.yaw || 0, u.y, u.y + (u.h || 1.8));
+  }
+  function shoveUnit(u, dx, dz) {   // a kinematic body moved aside (capped: a nudge, not a teleport)
+    const l = Math.hypot(dx, dz); if (l > 0.3) { dx *= 0.3 / l; dz *= 0.3 / l; }
+    if (u.kind === 'marine') { const M = u.body; M.x += dx; M.z += dz; if (u.rich && u.rich.S && u.rich.S.pos) { u.rich.S.pos.x += dx; u.rich.S.pos.z += dz; } }
+    else if (u.kind === 'mbt' && u.sim.p) { u.sim.p[0] += dx; u.sim.p[2] += dz; }
+    u.x += dx; u.z += dz;
+  }
+  function pushUnit(u, jx, jz) {   // an impulse into a sim with momentum (a hover tank's hull, a STRIDER's centre of mass)
+    const m = GMASS[u.kind] || 500, s = u.sim;
+    if (s.v) { s.v[0] += jx / m; s.v[2] += jz / m; }
+  }
+  function bumped(u, other, sp, c) {   // something ran into this unit, closing at sp m/s (c.nx / nz: from it to us)
+    if (!u.alive) return;
+    const om = other.mass === Infinity ? 1e6 : other.mass || 0, at = (other.vx || 0) * c.nx + (other.vz || 0) * c.nz;   // (it came at us: not us walking into it)
+    if (u.kind === 'marine' && om > 600 && at > 2.5 && !(GS.time - (u._bumpT ?? -9) < 1)) {
+      u._bumpT = GS.time;   // a vehicle: knocked down and hurt (GAME: blunt trauma by speed)
+      const hp = Math.min(400, (at - 2) * 45);
+      applyHit(u, { type: 'blast', weapon: 'VEHICLE' }, hp);
+      ev('runover', { id: u.id, x: u.x, y: u.y, z: u.z, speed: at });
+    }
+  }
+  // the AI's wanted velocity bent round the other bodies near it (vehicles, walkers, men, parked crafts)
+  const _avo = { x: 0, z: 0, k: 1 }, AVO = { strider: { T: 2.5, margin: 0.4 }, marine: { T: 2, margin: 0.25 }, hovertank: { T: 3, margin: 1.2 }, mbt: { T: 3, margin: 1.2 } };
+  function avoidV(u, v) {
+    if (!CW || !u.cwb || !u.alive) return v;
+    const s = Math.hypot(v[0], v[1]); if (s < 0.2) return v;
+    CW.avoid(u.cwb, v[0], v[1], s, _avo, AVO[u.kind] || AVO.marine);
+    v[0] = _avo.x * s * _avo.k; v[1] = _avo.z * s * _avo.k;
+    return v;
+  }
+  GS.avoidV = avoidV;
 
   // ------------------------------------------------------------------------------------------------- squads
   GS.squadRW = (B, members, order) => { const S = B.rw.addSquad({ id: `R${B.I.id}-${++B.sq}`, side: 2, members, order }); S.B = B; for (const m of members) m.squad = S; return S; };
@@ -207,7 +273,7 @@ export function createGroundSim(o) {
     const a = u.ai, s = u.sim; if (!a) return;
     if (peace) { a.fire = false; }
     if (u.kind === 'strider') {
-      const sp = a.run ? 4.2 : 1.6, [vx, vz] = dry(u, B.rw.steerVel(u, sp), 2.5);
+      const sp = a.run ? 4.2 : 1.6, [vx, vz] = dry(u, avoidV(u, B.rw.steerVel(u, sp)), 2.5);   // (COLLISION: round the others first)
       if (u.lite) {   // far: kinematic, the AI's velocity over the ground (the body sim waits where it is)
         if (s.alive) { const v = Math.hypot(vx, vz), k = Math.min(1, dt * 3); u.vx += (vx - u.vx) * k; u.vz += (vz - u.vz) * k; u.x += u.vx * dt; u.z += u.vz * dt; u.y = hAt(u.x, u.z); if (v > 0.2) u.yaw = Math.atan2(-u.vx, -u.vz); }
       } else {
@@ -242,7 +308,7 @@ export function createGroundSim(o) {
       }
     } else {
       if (a.move && u.kind !== 'hovertank' && hAt(a.move[0], a.move[1]) < 0.6) a.move = landward(B, a.move);   // never a firing position in the sea
-      const vehSp = a.run ? 12 : 7, [vx, vz] = u.kind === 'mbt' ? dry(u, B.rw.steerVel(u, vehSp), 7) : B.rw.steerVel(u, vehSp);
+      const vehSp = a.run ? 12 : 7, [vx, vz] = u.kind === 'mbt' ? dry(u, avoidV(u, B.rw.steerVel(u, vehSp)), 7) : avoidV(u, B.rw.steerVel(u, vehSp));
       const cmd = { vx, vz };
       if (a.face !== undefined && Math.hypot(vx, vz) < 1) cmd.face = a.face;
       if (a.aim) { const mz = s.muzzle(), dx = a.aim[0] - mz[0], dz = a.aim[2] - mz[2]; cmd.turret = Math.atan2(-dx, -dz); cmd.gun = Math.atan2(a.aim[1] - mz[1], Math.hypot(dx, dz)); if (u.kind === 'hovertank') cmd.aimAt = a.aim; }
@@ -294,7 +360,7 @@ export function createGroundSim(o) {
   function driveMarine(B, u, dt, tmap) {
     const a = u.ai, M = u.body; if (!a) return;
     const sp = a.paceV ?? MAR_T.SPEED[a.pace] ?? 1.5;   // (paceV: a casualty drag at MEDINV's drag speed)
-    let [vx, vz] = dry(u, B.mar.steerVel(u, sp), 2);
+    let [vx, vz] = dry(u, avoidV(u, B.mar.steerVel(u, sp)), 2);   // (COLLISION: round the others first)
     if (u.cas && u.cas.held) vx = vz = 0;   // being dragged / carried: moved by whoever has him
     // ngc/infdepth: a man near the camera runs on the real rifleman + medical sims (richmarine.js)
     if (u.richOn) { driveRich(B, u, dt, vx, vz, tmap); if (!M.alive || !M.able || GS.peaceMar) { dropDrill(u); return; } if (a.fire !== 'gl' && a.fire !== 'law' && a.fire !== 'frag' && u.thrT == null) { u.burst = 0; return; } }
@@ -483,7 +549,7 @@ export function createGroundSim(o) {
       u.deadT += dt;
       // (ngc/infdepth: with care on, a Marine's body stays 7 min: lootable)
       // (ngc/rwground-polish: a burnt-out tank stays 10 min, a STRIDER's carcass 4: the island shows what happened on it)
-      if (u.deadT > (u.kind === 'marine' ? (o.care ? 420 : 120) : u.vehicle ? 600 : 240)) { GS.units.splice(i, 1); if (u.B) { const k = u.B.units.indexOf(u); if (k >= 0) u.B.units.splice(k, 1); } ev('remove', { id: u.id, u }); }
+      if (u.deadT > (u.kind === 'marine' ? (o.care ? 420 : 120) : u.vehicle ? 600 : 240)) { GS.units.splice(i, 1); if (u.B) { const k = u.B.units.indexOf(u); if (k >= 0) u.B.units.splice(k, 1); } if (CW && u.cwb) CW.remove(u.cwb); ev('remove', { id: u.id, u }); }
     }
     return GS.events;
   };
@@ -687,11 +753,12 @@ export function createGroundSim(o) {
   GS.evacuate = u => {
     u.evac = true; GS.stats.evac++;
     const k = GS.units.indexOf(u); if (k >= 0) GS.units.splice(k, 1);
+    if (CW && u.cwb) { CW.remove(u.cwb); u.cwb = null; }   // (COLLISION: aboard, out of the world)
     if (u.B) { const j = u.B.units.indexOf(u); if (j >= 0) u.B.units.splice(j, 1); }
     if (u.squad && u.squad.members) { const j = u.squad.members.indexOf(u); if (j >= 0) u.squad.members.splice(j, 1); }
     ev('evac', { id: u.id, x: u.x, y: u.y, z: u.z, u }); ev('remove', { id: u.id, u });
   };
-  GS.reset = () => { GS.battles.length = 0; GS.units.length = 0; GS.proj.length = 0; GS.events.length = 0; GS.time = 0; };
+  GS.reset = () => { if (CW) for (const u of GS.units) if (u.cwb) CW.remove(u.cwb); GS.battles.length = 0; GS.units.length = 0; GS.proj.length = 0; GS.events.length = 0; GS.time = 0; };
   GS.hAt = hAt; GS.envLand = envLand; GS.armorEnv = armorEnv;
   return GS;
 }

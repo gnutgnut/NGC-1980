@@ -95,7 +95,7 @@ export function createGroundWar(ctx) {
   }
   function extBlast(x, y, z, r, power, side) { W.blast(x, y, z, r, 4 * power, side, true); }   // (true: the ground war already did its own)
   // ngc/infdepth: the Marines near the camera on the real rifleman + medical sims (rich), casualty care, casevac
-  const GS = createGroundSim({ terrainH, islands: W.islands, hooks: { targetsFor, extSeg, extBlast, patients: B => CV.patients(B) }, rich: { r: GW_T.RICH_R, max: GW_T.RICH_MAX }, care: true });
+  const GS = createGroundSim({ terrainH, islands: W.islands, hooks: { targetsFor, extSeg, extBlast, patients: B => CV.patients(B) }, rich: { r: GW_T.RICH_R, max: GW_T.RICH_MAX }, care: true, cw: ctx.cw });   // (COLLISION: units are bodies in the game's collision world)
   const CV = createCasevac({ GS, W, PL: () => ctx.player(), feed });
   const LOD = createStriderLOD(root, 160), GFX = createGroundFx({ root, fx, GS, hAt: (x, z) => GS.hAt(x, z) });   // ngc/rwground-polish
   const GW = { LOD, GFX, sim: GS, root, views: new Map(), proxies: [], landings: [], lcacs: [], hoverT: GW_T.HOVER_AT, mbtT: GW_T.MBT_AT, playerFiredT: 99, bank: 0, kills: new Map(), godPlayer: false, T: GW_T, CV };

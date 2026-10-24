@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { createTomcatSim, cadcSweep, STATIONS as TSTATIONS } from './tomcatfm.js';
 import { createShrikeSim, createReaperSim, createShahedSim, shahedGuide, SHRIKE } from './rwfm.js';
 import { createPilot } from './pilot.js';
+import { DECKOPS } from './airframe.js';   // COLLISION: the catapult track and the landing area (deck foul checks)
 import { buildTomcatModel } from './tomcatmodel.js';
 import { buildShrikeModel, buildReaperModel, buildShahedModel } from './rwmodel.js';
 import { createAirSound } from './airsound.js';
@@ -38,7 +39,7 @@ export function createAirWar(W, ctx, H) {
       surfVel: W.surfVel,
       carrier: () => {
         const c = carrierOf(side); if (!c) return null;
-        return { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: CARRIER.DECK + c.p.y, vx: c.v.x, vz: c.v.z, speed: c.speed, w: c.w || 0 };
+        return { x: c.p.x, z: c.p.z, yaw: c.yaw, deck: CARRIER.DECK + c.p.y, vx: c.v.x, vz: c.v.z, speed: c.speed, w: c.w || 0, foul: side === 1 && deckFoul(c, 'land') };   // COLLISION: a fouled landing area waves them off
       },
       foes: function* (s) {
         for (const u of W.units) if (u.side !== s && u.p && !u.dims && !u.dead && !u.dying && !u.gone) yield u;
@@ -107,8 +108,23 @@ export function createAirWar(W, ctx, H) {
       if (laneClear(c, y, 700)) { W.orderCarrier(c.p.x - Math.sin(y) * 500, c.p.z - Math.cos(y) * 500); feed('ALBATROSS: TURNING INTO CLEAR WATER TO LAUNCH THE TOMCATS'); return; }
     }
   }
+  // COLLISION (wave 3): is the catapult track / the landing area clear of crafts, vehicles and men? (the collision world:
+  // a parked Hornet, the Huey, a jeep, a Marine on the deck). Ship frame from DECKOPS: the cat at x -2.5 from z -6 to -50,
+  // the landing area round the wires and the runout (x -2.5 +- 9, z +8 to +50); 1 s cache
+  const _foul = [], foulC = { cat: { t: -9, v: false, who: '' }, land: { t: -9, v: false, who: '' } };
+  function deckFoul(c, what) {
+    const F = foulC[what]; if (!W.cw) return false;
+    if (W.time - F.t < 1 && F.t <= W.time) return F.v; F.t = W.time;
+    const lx = what === 'cat' ? DECKOPS.CAT_X : DECKOPS.LAND_X, lz = what === 'cat' ? (DECKOPS.CAT_Z0 + DECKOPS.CAT_Z1) / 2 : 29, hl = what === 'cat' ? Math.abs(DECKOPS.CAT_Z1 - DECKOPS.CAT_Z0) / 2 + 4 : 21, hw = what === 'cat' ? 3.5 : 9;
+    const co = Math.cos(c.yaw), si = Math.sin(c.yaw), x = c.p.x + lx * co + lz * si, z = c.p.z - lx * si + lz * co, y = CARRIER.DECK + c.p.y;
+    const hits = W.cw.boxQuery(x, z, c.yaw, hl, hw, y - 0.5, y + 6, _foul, b => b.cls === 'air' || b.cls === 'veh' || b.cls === 'trk' || b.cls === 'inf');
+    F.v = hits.length > 0; F.who = F.v ? (hits[0].owner && hits[0].owner.label) || hits[0].cls.toUpperCase() : '';
+    return F.v;
+  }
+  AW.deckFoul = deckFoul; AW.foulC = foulC;
   function launchQueued(u, dt) {
     const c = carrierOf(1); if (!c) { AW.pending.splice(AW.pending.indexOf(u), 1); return; }
+    if (deckFoul(c, 'cat')) { if (!u.foulSaid) { u.foulSaid = true; feed(u.name + ': CAT FOULED  -  ' + foulC.cat.who + ' ON THE TRACK  -  LAUNCH HOLDING', 'info'); } return; }
     const busy = W.units.some(o => o.type === 'escort' && o.ai && o.ai.state === 'cat') || AW.pending.find(o => o.queued) !== u;   // one at a time, in order
     if (busy || W.time - AW.lastCat < AIR.CAT_GAP) return;
     u.waitT = (u.waitT || 0) + dt;

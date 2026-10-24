@@ -28,17 +28,24 @@
 //     avatar(Z)                           // copy pos / vel / facing into the player avatar Z (map, tags, camera)
 //     hurt(amount, why, at, dir)          // enemy fire / blasts (at: world hit point, dir: round's velocity)
 //     bounds(out)          -> { x, z, yaw, hl, hw, y0, y1 } | null   // optional footprint for collisions (when parked)
+//     cwBounds()           -> [boxes / circles] | null   // optional: the collision world's finer shape (else bounds())
 //     menuNote()           -> string      // optional: the pause menu sub-line
+//     -- COLLISION (wave 3, collision.js): with a collision world (createCraftHost({ cw })) every present craft's bounds()
+//        is a body in it, synced each frame; optional:
+//     mass                 -> kg (number or function; default 3000)    cwClass -> 'veh' | 'trk' | 'air' | 'inf'
+//     push(jx, jz, x, z)                   // an impulse (N s, world) at a point: the craft can be shoved by heavier ones
+//     shove(dx, dz)                        // a position correction (kinematic crafts: the soldier)
+//     contact(other, speed, c)             // a collision closing at `speed` m/s (other: the body; other.owner the thing)
 //   }
 //
 // All functions are optional except id, label, kind, present, update, pl. The host fills in safe defaults.
 const NOOP = () => {};
 const DEFAULT_PL = { alive: true, landed: false, inCave: false, hitR: 2.6, sight: 0, sources: null, detect: 1, capTime: 0 };
 
-export function createCraftHost({ G, Z, say = NOOP }) {
+export function createCraftHost({ G, Z, say = NOOP, cw = null }) {
   const defs = [], byId = new Map();
   const host = {
-    defs, active: null, seat: 0,
+    defs, active: null, seat: 0, cw,
     // captured mouse movement since the last frame, consumed by the active craft's look()
     mouse: { dx: 0, dy: 0 },
     onSwitch: NOOP,   // (from, to) -> void : main.js hook (cameras, pointer lock, HUD)
@@ -59,7 +66,7 @@ export function createCraftHost({ G, Z, say = NOOP }) {
     defs.push(def); byId.set(def.id, def); return def;
   };
   // ngc/wheeledgame: crafts that come and go (parked town cars, WORLD traffic taken over by the vehicle sim, deliveries)
-  host.unregister = def => { if (!def || host.active === def) return false; const i = defs.indexOf(def); if (i >= 0) defs.splice(i, 1); byId.delete(def.id); return true; };
+  host.unregister = def => { if (!def || host.active === def) return false; const i = defs.indexOf(def); if (i >= 0) defs.splice(i, 1); byId.delete(def.id); if (def._cwb && cw) { cw.remove(def._cwb); def._cwb = null; } return true; };   // (COLLISION: out of the world too)
   host.get = id => byId.get(id) || null;
   Object.defineProperty(host, 'cur', { get: () => host.active });
 
@@ -114,7 +121,10 @@ export function createCraftHost({ G, Z, say = NOOP }) {
   // ------------------------------------------------------------------ per-frame
   host.update = (dt, input) => {
     const a = host.active;
+    if (cw) host.syncBodies(dt);   // COLLISION: where everything stands before anyone moves
+    if (cw && a && a._cwb) a._cwb.enabled = false;   // (not in its own way while it moves: GR.collide is asked with no skip)
     if (a) a.update(dt, input);
+    if (cw && a) host.syncBody(a, 0);   // (the craft you drive, after it moved: the parked ones collide with where it is now)
     for (const def of defs) if (def !== a && def.present()) def.idle(dt);
     if (a) a.avatar(Z);
     host.mouse.dx = host.mouse.dy = 0;
@@ -134,6 +144,36 @@ export function createCraftHost({ G, Z, say = NOOP }) {
     for (const def of defs) { if (def === skip || !def.bounds || !def.present()) continue; const b = def.bounds(); if (b) { if (Array.isArray(b)) _b.push(...b); else _b.push(b); } }
     return _b;
   };
+
+  // COLLISION (wave 3): every present craft's footprint as a body in the collision world (collision.js), so walkers,
+  // vehicles, the ground war's units and the contact response all see the same thing. Velocity from the motion of the
+  // body between frame syncs (smoothed; dt = 0: position only); mass, push / shove / contact from the def.
+  const _one = [null];
+  host.syncBody = (def, dt) => {
+    if (!def.bounds && !def.cwBounds) return null;
+    const bb = def.present() ? (def.cwBounds ? def.cwBounds() : def.bounds()) : null;   // (cwBounds: a finer compound, or a circle { x, z, r, y0, y1 }, for the collision world only)
+    let B = def._cwb;
+    if (!bb || (Array.isArray(bb) && !bb.length)) { if (B) B.enabled = false; return null; }
+    const arr = Array.isArray(bb) ? bb : (_one[0] = bb, _one);
+    if (!B) {
+      const cls = def.cwClass || (def.kind === 'air' ? 'air' : def.kind === 'foot' ? 'inf' : 'veh');
+      B = def._cwb = cw.add({ cls, shape: 'box', x: arr[0].x, z: arr[0].z, hl: 1, hw: 1, owner: def, side: 1,
+        push: def.push ? (jx, jz, x, z) => def.push(jx, jz, x, z) : null, shove: def.shove ? (dx, dz) => def.shove(dx, dz) : null,
+        hit: def.contact ? (o, sp, c) => def.contact(o, sp, c) : null });
+      B._px = arr[0].x; B._pz = arr[0].z;
+    }
+    const m = typeof def.mass === 'function' ? def.mass() : def.mass; B.mass = m > 0 ? m : 3000;
+    B.enabled = true; cw.setBoxes(B, arr);
+    if (dt > 0) {
+      const vx = (B.x - B._px) / dt, vz = (B.z - B._pz) / dt, k = Math.min(1, dt * 12);
+      if (Math.hypot(vx, vz) < 120) { B.vx += (vx - B.vx) * k; B.vz += (vz - B.vz) * k; }   // (a teleport is not a speed)
+      else { B.vx = B.vz = 0; }
+      B._px = B.x; B._pz = B.z;
+    }
+    return B;
+  };
+  host.syncBodies = dt => { for (const def of defs) if (def.bounds || def.cwBounds || def._cwb) host.syncBody(def, dt); };
+  host.bodyOf = def => def._cwb || null;
 
   // ------------------------------------------------------------------ PL: the player as war.js sees it
   // pos / vel are the avatar Z (always the controlled craft's centre); the rest asks the active craft.

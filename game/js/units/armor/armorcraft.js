@@ -563,6 +563,10 @@ export function createArmorCraft(ctx, type = 'm60', id = type) {
   };
   const B = { x: 0, z: 0, yaw: 0, hl: TY.L / 2, hw: TY.W / 2, y0: 0, y1: 0, def: D };
   D.bounds = () => { if (!D.exists) return null; fm.origin(_o); B.x = _o[0]; B.z = _o[2]; B.yaw = heading(); B.y0 = _o[1]; B.y1 = _o[1] + TY.H; return B; };
+  // COLLISION (wave 3): in the collision world (craft.js syncs bounds()): the combat weight, and a push from something
+  // heavier or a vehicle that rammed it, as an impulse into trackfm at the contact point (a wreck is not moved)
+  D.cwClass = 'trk'; D.mass = () => fm.mass;
+  D.push = (jx, jz, x, z) => { if (!D.exists || D.dead) return; D.wake(); fm.origin(_o); fm.impulse([x, _o[1] + 1, z], [jx, 0, jz]); };
 
   // ---------------------------------------------------------------- keys
   D.key = code => {

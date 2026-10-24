@@ -71,7 +71,7 @@ export function createWorldEnv(o) {
       const S = V.sim, x = S.pos[0], z = S.pos[2], y = S.pos[1], L = S.spec.dims.L;
       // broadphase: anything of the ground host's within reach this frame?
       const reach = L * 0.6 + 2 + Math.hypot(S.vel[0], S.vel[2]) * 0.1;
-      _bp.x = x; _bp.z = z; _bp.r = reach; _bp.y0 = y - 1; _bp.y1 = y + 4;
+      _bp.x = x; _bp.z = z; _bp.r = reach; _bp.y0 = y - 1; _bp.y1 = y + 4; _bp.mass = S.massNow;   // (COLLISION: lighter pushable bodies - a man, a light car under a truck - are shoved, not walls)
       V.near = GR.collide(_bp, V.self) > 0;
       const B = buildingsNear(x, z, reach + 8);
       V.boxes = B.boxes; V.circles = B.circles;
@@ -115,7 +115,7 @@ export function createWorldEnv(o) {
         let best = 0, nx = 0, ny = 0, nz = 0, id = null;
         const take = (d, ax, ay, az, who) => { if (d > best) { best = d; nx = ax; ny = ay; nz = az; id = who; } };
         if (V.near) {   // the ground host: trees, island buildings, ship islands, other crafts' footprints
-          co.x = x; co.z = z; co.r = r; co.y0 = y - r; co.y1 = y + r;
+          co.x = x; co.z = z; co.r = r; co.y0 = y - r; co.y1 = y + r; co.mass = V.sim.massNow;
           if (GR.collide(co, V.self)) { const dx = co.x - x, dz = co.z - z, d = Math.hypot(dx, dz); if (d > 1e-6) take(d, dx / d, 0, dz / d, 'ground'); }
         }
         for (const b of V.boxes || []) {

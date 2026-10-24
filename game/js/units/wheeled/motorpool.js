@@ -37,7 +37,27 @@ export function createMotorPool(o) {
   const spec = t => createWheeledSim(t).spec;
   // ---------------------------------------------------------------- shared pieces
   const WO = createWorldObstacles({ terrainH: o.terrainH, zoneItems: () => (world && world.zone ? world.zone.flatMap(e => e.items || []) : []) });
-  const vehiclesNear = (V, x, z, r) => { const out = V._others || (V._others = []); out.length = 0; for (const U of list) { if (U === V || !U.exists) continue; const s = U.sim; if (Math.abs(s.pos[0] - x) < r + 8 && Math.abs(s.pos[2] - z) < r + 8) { const b = U.bounds(); if (b) out.push(b); } } return out; };
+  // COLLISION (wave 3): the other vehicles from the collision world - our wheeled ones, the tanks, the ground war's
+  // machines - those as heavy as this one or heavier (a lighter one is shoved aside by the contact response instead)
+  const CW = GR.CW, _vn = [], _vb = [];
+  const vehiclesNear = (V, x, z, r) => {
+    const out = V._others || (V._others = []); out.length = 0;
+    if (!CW) return vehiclesNearOld(V, x, z, r, out);
+    let nb = 0;
+    for (const b of CW.near(x, z, r + 8, _vn, null, false)) {
+      if (b.owner === V || !(b.cls === 'veh' || b.cls === 'trk' || b.cls === 'walk') || !CW.hard(V.sim.massNow, b)) continue;
+      const U = b.owner;
+      if (U && U.sim && U.bounds && list.includes(U)) { const bb = U.bounds(); if (bb) out.push(bb); continue; }
+      for (const p of b.parts) {   // a tank, a machine: its parts as boxes, the body as the id (bump() pushes it)
+        const q = _vb[nb++] ||= {}; q.x = p.x; q.z = p.z; q.yaw = Math.atan2(p.s, p.c); q.hl = p.k === 'b' ? p.hl : p.r; q.hw = p.k === 'b' ? p.hw : p.r; q.y0 = p.y0; q.y1 = p.y1; q.def = b; out.push(q);
+      }
+    }
+    return out;
+  };
+  // the AI drivers' avoidance (driver.js follower opts.avoid): the collision world's CW.avoid on this vehicle's body
+  const _avo = { x: 0, z: 0, k: 1 }, AVO = { T: 3, margin: 1.0 };
+  const avoidFor = V => (sim, ux, uz, v) => (CW && V._cwb && V._cwb.enabled ? CW.avoid(V._cwb, ux, uz, v, _avo, AVO) : null);
+  const vehiclesNearOld = (V, x, z, r, out) => { for (const U of list) { if (U === V || !U.exists) continue; const s = U.sim; if (Math.abs(s.pos[0] - x) < r + 8 && Math.abs(s.pos[2] - z) < r + 8) { const b = U.bounds(); if (b) out.push(b); } } return out; };
   const WENV = createWorldEnv({ GR, terrainH: o.terrainH, holes: o.holes || [], world: { roadAt, roadById, roadPoint, buildingsNear: (x, z, r) => WO.near(x, z, r), vehiclesNear,
     shipNear: (x, z, r) => war.units.some(u => u.dims && Math.abs(u.p.x - x) < r && Math.abs(u.p.z - z) < r) } });
   let ia = null;
@@ -249,7 +269,7 @@ export function createMotorPool(o) {
     const V = spawn(type, { x: c.x, y: c.y - (c.R.type === 'dirt' ? 0.1 : 0.14) + 0.05, z: c.z, yaw, plat: null }, { colour, owner: 'traffic', running: true, launch: { v: Math.max(0, c.v), gear } });
     if (!V) return null;
     V.lod = 'far'; V.sim.setLod('far');
-    V.traffic = { R: c.R, dir: c.dir, lat, kind: c.kind, col: c.col, path, F: createFollower(path, { speed: VMAX[c.R.type] || 12, latG: 0.22, gap: () => gapAhead(V), stopDist: 3 }) };
+    V.traffic = { R: c.R, dir: c.dir, lat, kind: c.kind, col: c.col, path, F: createFollower(path, { speed: VMAX[c.R.type] || 12, latG: 0.22, gap: () => gapAhead(V), stopDist: 3, avoid: avoidFor(V) }) };
     amb().release(c);
     return V;
   }
@@ -302,7 +322,7 @@ export function createMotorPool(o) {
     if (more.length < 3) return false;
     t.R = Q; t.dir = dir; t.lat = lat;
     const keep = t.path.slice(Math.max(0, t.F.i));
-    t.path = keep.concat(more); t.F = createFollower(t.path, { speed: VMAX[Q.type] || 12, latG: 0.22, gap: () => gapAhead(V), stopDist: 3 });
+    t.path = keep.concat(more); t.F = createFollower(t.path, { speed: VMAX[Q.type] || 12, latG: 0.22, gap: () => gapAhead(V), stopDist: 3, avoid: avoidFor(V) });
     return true;
   }
   // ---------------------------------------------------------------- blasts (every fx.explode near a vehicle)
@@ -371,7 +391,7 @@ export function createMotorPool(o) {
     spawners, spawnM151: spawners.m151, spawnM35: spawners.m35, spawnLandRover: spawners.landrover, spawnHilux: spawners.hilux, spawnBeetle: spawners.beetle, spawnLada: spawners.lada,
     first: type => list.find(V => V.type === type && V.exists) || null,
     // tests / tools: a driver.js follower at the wheel of V (pts [{x, z, v?}]), and a path along a WORLD road
-    autopilot: (V, pts, speed = 10) => { V.auto = pts ? createFollower(pts, { speed, latG: 0.3, stopDist: 3, unstick: false }) : null; return !!V.auto; },
+    autopilot: (V, pts, speed = 10, o = {}) => { V.auto = pts ? createFollower(pts, { speed, latG: 0.3, stopDist: 3, unstick: false, avoid: o.avoid === false ? null : avoidFor(V) }) : null; return !!V.auto; },
     roadPath: (id, s0, s1, lat = 1.4, step = 6) => { const R = roadById(id), q = {}, out = [], dir = s1 >= s0 ? 1 : -1; for (let s_ = s0; dir * (s1 - s_) >= 0; s_ += dir * step) { roadPoint(R, s_, lat * dir, q); out.push({ x: q.x, z: q.z, y: q.y, bridge: q.bridge }); } return out; },
     update(dt, playing = true) {
       if (!playing) { mute(); delivery?.silence(); return; }   // the pause menu, the title: everything quiet and still

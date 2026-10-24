@@ -34,6 +34,7 @@ const PROD_KIND = { fuel: 'fuel', factory: 'factory', radar: 'radar', fortress: 
 export function createWar(ctx) {
   const { scene, fx, sfx, terrainH, isWater, nav } = ctx;
   const W = {
+    cw: ctx.cw || null,   // COLLISION (wave 3): the game's collision world (the ground war's units, the deck's foul checks)
     islands: ctx.ISLANDS, units: [], proj: [], E: { fuel: 0, mat: 0, bship: 0 }, P: ctx.G, time: 0, over: null,
     carrier: null, enemyCarrier: null, battleship: null, thinkT: 0, raidT: 120, econT: 0, deckCache: null,
   };
@@ -389,7 +390,7 @@ export function createWar(ctx) {
   // NGC-1980 GROUND WAR hook (units/groundwar/): the troops the transports land fight on the islands - STRIDERs off the
   // MV-22s, the CH-46's Marines, RW-7 hover tanks over the sea and seized MBTs by landing craft. Squads stand in W.units
   // as 'squad' proxies (capture, gunship targets, expansion); the war's rounds and blasts reach them through GW below.
-  const GW = createGroundWar({ W, scene, fx, sfx, terrainH, nav, feed, hear, boomAt, ear, addScore: ctx.addScore, player: ctx.player, hurtPlayer: (a, why, at, dir) => ctx.hurtPlayer(a, why, at, dir) });
+  const GW = createGroundWar({ W, scene, fx, sfx, terrainH, nav, feed, hear, boomAt, ear, addScore: ctx.addScore, player: ctx.player, hurtPlayer: (a, why, at, dir) => ctx.hurtPlayer(a, why, at, dir), cw: ctx.cw });   // (COLLISION: the one collision world)
   W.ground = GW; ROT.ground = GW;
   function makeAir(type, side, x, y, z, extra = {}) {
     { const ru = ROT.make(type, side, x, y, z, extra); if (ru) { W.units.push(ru); return ru; } }   // NGC-1980 hook

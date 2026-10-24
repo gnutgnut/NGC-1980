@@ -208,6 +208,9 @@ export function createFollower(path, opts = {}) {
       }
       if (!o.loop) { const end = path[n - 1], de = Math.hypot(end.x - px, end.z - pz); vmax = Math.min(vmax, Math.max(0, (de - o.stopDist) * 0.6)); F.done = de < o.stopDist + 1 && v < 0.5; }
       const gap = o.gap ? o.gap(sim) : Infinity; if (gap < Infinity) vmax = Math.min(vmax, Math.max(0, (gap - 6) * 0.5));
+      // COLLISION (wave 3): opts.avoid(sim, dx, dz, v) -> { x, z (unit), k } bends the aim round other moving bodies
+      // (collision.js CW.avoid: keep right head-on) and slows for what is ahead
+      if (o.avoid && vmax > 0.3) { const dx = tx - px, dz = tz - pz, L = Math.hypot(dx, dz) || 1, a = o.avoid(sim, dx / L, dz / L, Math.max(v, vmax)); if (a) { tx = px + a.x * L; tz = pz + a.z * L; vmax *= a.k; F.avoiding = a.k < 0.99 || a.x * dx / L + a.z * dz / L < 0.995; } }
       aiInput(sim, { x: tx, z: tz }, vmax, F.input);
       if (vmax < 0.3 && v < 1) { F.input.throttle = 0; F.input.brake = 0.4; F.input.handbrake = v < 0.2 ? 1 : 0; }
       else if (F.unstick) F.unstick.update(sim, F.input);   // stuck on something: back off and have another go

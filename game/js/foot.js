@@ -343,6 +343,25 @@ export function createFootCraft(ctx) {
     ctx.onDeath?.(why);
   }
   F.kill = why => die(why);
+  // ---------------------------------------------------------------- COLLISION (wave 3): the soldier in the collision world
+  // a 0.3 m circle (his height by stance; lying: a body length along his facing as a box), 100 kg with kit. Vehicles
+  // heavier than him are walls for him (GR.collide); he is not a wall for them (lighter than PUSH_RATIO): the contact
+  // response shoves him aside, and one that comes at him faster than 3 m/s knocks him down and hurts him (GAME).
+  F.mass = 100; F.cwClass = 'inf';
+  const _cwc = [{ x: 0, z: 0, r: 0.3, y0: 0, y1: 1.8 }], _cwp = [{ x: 0, z: 0, yaw: 0, hl: 0.9, hw: 0.3, y0: 0, y1: 0.45 }];
+  F.cwBounds = () => {
+    if (!F.exists) return null; const W = slots.soldier;
+    if (W.stance === 'prone' || !F.alive) { const p = _cwp[0]; p.x = W.x; p.z = W.z; p.yaw = W.yaw; p.y0 = W.y; p.y1 = W.y + 0.45; return _cwp; }
+    const c = _cwc[0]; c.x = W.x; c.z = W.z; c.y0 = W.y; c.y1 = W.y + (W.tall || 1.8); return _cwc;
+  };
+  F.shove = (dx, dz) => { const W = slots.soldier, l = Math.hypot(dx, dz), k = l > 0.25 ? 0.25 / l : 1; W.x += dx * k; W.z += dz * k; };
+  let bumpT = -9;
+  F.contact = (o, sp, c) => {
+    const at = (o.vx || 0) * c.nx + (o.vz || 0) * c.nz, om = o.mass === Infinity ? 1e6 : o.mass || 0, t = performance.now() / 1000;   // (at: it came at him)
+    if (!F.alive || om < 600 || at < 3 || t - bumpT < 1) return;
+    bumpT = t; const W = slots.soldier; W.vx = (W.vx || 0) + c.nx * at * 0.6; W.vz = (W.vz || 0) + c.nz * at * 0.6;
+    F.hurt(Math.min(1.2, (at - 3) * 0.06 + 0.04), `HIT BY ${o.owner && o.owner.label ? o.owner.label : 'A VEHICLE'}`, null, null, 'blast');
+  };
   // ---------------------------------------------------------------- what war.js sees
   F.pl = {
     alive: () => F.alive && F.exists, inCave: false,

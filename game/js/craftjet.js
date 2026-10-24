@@ -4,6 +4,7 @@
 // losing it, cameras, keys, HUD lines, the pause/silence hook and what war.js sees.
 import * as THREE from 'three';
 import { COST } from './war.js';
+import { groundContact, contactDamage } from './aircontact.js';   // COLLISION (wave 3): taxiing into things
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -22,6 +23,37 @@ export function createJetCraft(ctx) {
   D.present = () => JP.active && JP.alive && !JP.ejected;
   D.frame = out => { out.x = J.pos.x; out.y = J.pos.y; out.z = J.pos.z; out.yaw = yawOf(); return out; };
   D.bounds = () => D.present() && J.onGround ? (D._b ||= {}, Object.assign(D._b, (() => { const y = yawOf(), c = Math.cos(y), s = Math.sin(y), ox = 1.2; return { x: J.pos.x + ox * s, z: J.pos.z + ox * c, yaw: y, hl: 8.2, hw: 1.5, y0: J.pos.y - 1.7, y1: J.pos.y + 3, def: D }; })())) : null;
+  // ---------------------------------------------------------------- COLLISION (wave 3): the HORNET in the collision world
+  // on the ground: fuselage (17.1 m), wings (11.4 m span, the leading edge ~1.6 m over the deck), stabilators (6.6 m)
+  // and the fins as a compound; ~10.5 t empty plus fuel. In the air it is not a body (free flight never sees this).
+  D.mass = () => 10500 + (J.fuel || 0); D.cwClass = 'air';
+  const CWB = [{}, {}, {}, {}];
+  D.cwBounds = () => {
+    if (!D.present() || !J.onGround) return null;
+    const y = yawOf(), c = Math.cos(y), s = Math.sin(y), p = J.pos, at = (o, hl, hw, y0, y1, B) => Object.assign(B, { x: p.x + o * s, z: p.z + o * c, yaw: y, hl, hw, y0: p.y + y0, y1: p.y + y1 });
+    at(1.2, 8.2, 1.5, -1.7, 1.4, CWB[0]);     // fuselage, nose to tailpipes, to the canopy top (~3.1 m over the deck)
+    at(1.6, 2.1, 5.7, -0.35, 0.45, CWB[1]);   // wings
+    at(7.0, 1.2, 3.3, -0.1, 0.6, CWB[2]);     // stabilators
+    at(5.4, 1.9, 1.7, 0.5, 3.0, CWB[3]);      // the twin fins (4.66 m over the deck)
+    return CWB;
+  };
+  let bumpT = 0;
+  D.contacts = 0; D.lastContact = null;
+  // rolling into something: pushed out, the closing speed taken out; damage by speed (aircontact.js bands)
+  function taxiContact(dt) {
+    bumpT -= dt;
+    if (!crafts.cw || !J.onGround || !JP.alive || JP.ejected || J.cat || J.wire) return;   // (on the catapult or the wire the deck gear holds her)
+    const B = crafts.syncBody(D, 0); if (!B) return;
+    const r = groundContact(crafts.cw, B, J.pos, J.vel); if (!r) return;
+    D.contacts++;
+    const dm = contactDamage(r.speed); if (dm.band === 'nudge' || bumpT > 0) return; bumpT = 1;
+    const o = r.other.owner, who = o && o.label ? o.label : r.other.cls === 'tree' ? 'A TREE' : r.other.cls === 'trk' || r.other.cls === 'veh' ? 'A VEHICLE' : 'SOMETHING';
+    D.lastContact = { band: dm.band, speed: +r.speed.toFixed(2), who };
+    sfx.boom?.(Math.min(1, 0.15 + r.speed / 10));
+    if (o && o.hurt && o !== D) o.hurt(dm.amount * 0.6, 'HIT BY A TAXIING HORNET');   // what she hit takes it too
+    if (dm.band === 'crash') { J.dead = 'collision'; return; }
+    JP.hurt(dm.amount, `TAXIED INTO ${who}  -  ${(r.speed * 1.944).toFixed(0)} KT`);
+  }
   // ---------------------------------------------------------------- taking a jet (5 on the ALBATROSS deck, in the helicopter)
   // COMMANDER (o.command): the commander takes a Hornet out from any unit - the reserve was already counted by the
   // caller (units/commander/); the Huey, if it sits on the deck, goes down to the hangar; the unit you leave carries on
@@ -108,6 +140,7 @@ export function createJetCraft(ctx) {
   // ---------------------------------------------------------------- flying
   D.update = (dt, inp) => {
     JP.update(dt, inp);
+    taxiContact(dt);   // COLLISION
     const E = JP.ejected;
     Z.pos.copy(E ? E.pos : J.pos); Z.vel.copy(E ? E.vel : J.vel); Z.landed = J.onGround;
     J.forward(_f); const fl = Math.hypot(_f.x, _f.z); if (fl > 0.15) Z.facing.set(_f.x / fl, _f.z / fl);

@@ -292,6 +292,8 @@ export function createPilot(A, o = {}) {
     const vlat = rvx * co - rvz * si, vlong = rvx * si + rvz * co;   // + starboard, + aft
     const latErr = lx - A.landX, hErr = A.pos.y - yGS;
     PL.lso = { R, latErr, hErr, aoa: A.alpha / D2R, eas: A.eas };
+    // COLLISION (wave 3): the landing area fouled (a craft, a vehicle, men in it: the host's c.foul) - the LSO waves her off
+    if (c.foul && R < 900 && R > 15) { PL.why = 'FOUL DECK'; PL.waveoffs++; set('waveoff', 'FOUL DECK'); return; }
     // wave-off: out of parameters in close, or the deck is swinging
     if (R < 320 && R > 15) {
       const tol = R < 120 ? 1 : 1.6;

@@ -25,6 +25,7 @@
 import { createPlatforms } from './platform.js';
 import { shipPointY } from './units/naval/seamotion.js';
 import { zoneSurf, inGrid, SURFACE, beachesOf } from './world/terrain.js';   // TERRAIN (wave 3): the islands' surface types
+import { createCollisionWorld } from './collision.js';   // COLLISION (wave 3): trees and every moving body in one world
 
 // surface table: tyre / boot friction coefficient mu and rolling-resistance coefficient crr for a pneumatic tyre.
 // INFERRED typical values (Wong, Theory of Ground Vehicles 4th ed. tables 1.2 / 2.1; SAE J2452 ranges):
@@ -52,10 +53,14 @@ export function createGround(ctx) {
   const providers = [], extra = [], floors = [], sources = [];   // SEAWORLD: floors (piers, bridge decks) and collider sources (the world's buildings)
   const GR = { G: GRAV, SURF };
 
-  // ------------------------------------------------------------------ static circles: island trees in a hash grid
-  const CELL = 8, grid = new Map();
-  const key = (i, j) => i * 100003 + j;
-  for (const t of ctx.trees || []) { const k = key(Math.floor(t.x / CELL), Math.floor(t.z / CELL)); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(t); }
+  // ------------------------------------------------------------------ the collision world (collision.js, wave 3)
+  // the island trees are static bodies in it (trunk circle, crown cone for rotor discs: t.h tall, t.cr crown radius);
+  // the crafts (craft.js syncs their bounds()) and the ground war's units are its moving bodies
+  const CW = ctx.cw || createCollisionWorld();
+  GR.CW = CW;
+  for (const t of ctx.trees || []) t.body = CW.addStatic({ cls: 'tree', shape: 'circle', r: t.r, x: t.x, z: t.z, y0: t.y - 0.5, y1: t.y + Math.max(4, t.h || 4), cone: t.cr || 0, owner: t });
+  const isTree = b => b.cls === 'tree';
+  let _hm = 0; const hardF = b => CW.hard(_hm, b);   // o.mass: lighter pushable bodies are shoved (CW.step), not walls
 
   // ------------------------------------------------------------------ surface sampling
   const padAt = (x, z) => { for (const p of PADS) { const d = Math.hypot(x - p.x, z - p.z); if (d < (p.isl.cave ? 20 : 26)) return p; } return null; };
@@ -266,9 +271,9 @@ export function createGround(ctx) {
   }
   GR.collide = (o, skip = null) => {
     let n = 0; o.y0 ??= -1e9; o.y1 ??= 1e9;
-    // trees (trunks)
-    const i0 = Math.floor((o.x - 2) / CELL), i1 = Math.floor((o.x + 2) / CELL), j0 = Math.floor((o.z - 2) / CELL), j1 = Math.floor((o.z + 2) / CELL);
-    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const a = grid.get(key(i, j)); if (a) for (const t of a) if (o.y0 < t.y + 4 && pushCircle(o, t.x, t.z, t.r)) n++; }
+    // COLLISION: the trees (trunks) and every moving body - crafts' footprints, the ground war's machines and Marines
+    // (o.mass: a body lighter than PUSH_RATIO of it that can be pushed is not a wall - the contact response shoves it)
+    if (o.mass) { _hm = o.mass; n += CW.pushCircle(o, skip, hardF); } else n += CW.pushCircle(o, skip);
     // island buildings, AA guns (alive only: rubble is walkable)
     for (const I of ISLANDS) {
       if (!I.structs || Math.abs(o.x - I.x) > (I.r || 60) + 70 || Math.abs(o.z - I.z) > (I.r || 60) + 70) continue;
@@ -293,23 +298,29 @@ export function createGround(ctx) {
     // SEAWORLD: the lived-in world's buildings, walls, hedges, parapets, poles (world/solid.js); o.crush (a tank) goes
     // through the soft ones (field walls, hedges)
     for (const src of sources) for (const c of src(o.x, o.z, o.r + 1)) { if (c.soft && o.crush) continue; if (c.hl !== undefined ? pushBox(o, c) : (o.y1 > c.y0 && o.y0 < c.y1 && pushCircle(o, c.x, c.z, c.r))) n++; }
-    if (ctx.crafts) for (const b of ctx.crafts.bounds(skip)) if (pushBox(o, b)) n++;
+    if (ctx.crafts && !ctx.crafts.cw) for (const b of ctx.crafts.bounds(skip)) if (pushBox(o, b)) n++;   // (no collision world: the footprints directly)
     return n;
   };
   // wave 2 (ngc/foot2): a round's path (x0..x1, short: one sim step) against the tree trunks -> the nearest fraction t
   // along it and the trunk, or null (the Marine's rounds: a trunk is cover)
-  GR.treeHit = (x0, y0, z0, x1, y1, z1) => {
-    const i0 = Math.floor((Math.min(x0, x1) - 1) / CELL), i1 = Math.floor((Math.max(x0, x1) + 1) / CELL), j0 = Math.floor((Math.min(z0, z1) - 1) / CELL), j1 = Math.floor((Math.max(z0, z1) + 1) / CELL);
-    if ((i1 - i0 + 1) * (j1 - j0 + 1) > 64) return null;
-    const dx = x1 - x0, dz = z1 - z0, L2 = dx * dx + dz * dz || 1e-9;
-    let best = null;
-    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const a = grid.get(key(i, j)); if (a) for (const t of a) {
-      const k = Math.max(0, Math.min(1, ((t.x - x0) * dx + (t.z - z0) * dz) / L2)), px = x0 + dx * k - t.x, pz = z0 + dz * k - t.z;
-      if (px * px + pz * pz > t.r * t.r) continue;
-      const y = y0 + (y1 - y0) * k; if (y < t.y - 0.5 || y > t.y + 5) continue;
-      if (!best || k < best.t) best = { t: k, tree: t };
-    } }
-    return best;
+  GR.treeHit = (x0, y0, z0, x1, y1, z1) => {   // COLLISION: the trunks in the collision world
+    const r = CW.segment(x0, y0, z0, x1, y1, z1, isTree);
+    return r ? { t: r.t, tree: r.body.owner } : null;
+  };
+  // COLLISION (wave 3): a rotor disc (radius R, horizontal at height y) against the world's own solids - buildings, walls,
+  // poles, masts (world/solid.js sources), extra colliders, the island structures - the first one it cuts into, or null.
+  // (The trees, crafts and the ground war's units are the collision world's: CW.disc. Ship superstructures: the flight
+  // model's own rotor-strike test against the deck heights.)
+  const _dh = { x: 0, z: 0, r: 0, y0: 0, y1: 0 };
+  GR.discHit = (x, y, z, R) => {
+    const put = () => { _dh.x = x; _dh.z = z; _dh.r = R; _dh.y0 = y - 0.05; _dh.y1 = y + 0.05; };
+    for (const I of ISLANDS) {
+      if (!I.structs || Math.abs(x - I.x) > (I.r || 60) + 70 || Math.abs(z - I.z) > (I.r || 60) + 70) continue;
+      for (const s of I.structs) if (!s.dead && y > s.y - 1 && y < s.y + Math.max(2, s.h * 2) && Math.hypot(x - s.x, z - s.z) < R + (s.kind === 'aa' ? 2.2 : s.r * 0.8)) return { what: String(s.kind || 'BUILDING').toUpperCase(), x: s.x, z: s.z, s };
+    }
+    for (const c of extra) { put(); if (c.hl !== undefined ? pushBox(_dh, c) : (y > (c.y0 ?? -1e9) && y < (c.y1 ?? 1e9) && pushCircle(_dh, c.x, c.z, c.r))) return { what: 'OBSTACLE', x: c.x, z: c.z }; }
+    for (const src of sources) for (const c of src(x, z, R + 1)) { put(); if (c.hl !== undefined ? pushBox(_dh, c) : (y > c.y0 && y < c.y1 && pushCircle(_dh, c.x, c.z, c.r))) return { what: c.soft ? 'A WALL' : 'A BUILDING', x: c.x, z: c.z }; }
+    return null;
   };
   GR.addCollider = c => { extra.push(c); return c; };
   GR.addColliderSource = fn => { sources.push(fn); };   // SEAWORLD: fn(x, z, r) -> boxes / circles near (x, z)
