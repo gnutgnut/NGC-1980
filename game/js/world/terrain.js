@@ -246,7 +246,7 @@ function islandHeight(P, x, z, aux) {
   const t = rho / Rc;                                                    // 0 centre .. 1 coast
   if (s < -1) {   // under the sea: the shore profiles alone (cheap: most of the cells); further out they spread and blend
     const kb = sm(2, 70, -s), wbE = mix(wb, A.wbW, kb), wcE = mix(wc, A.wcW, kb), wrE = 1 - wbE - wcE, g = cove ? cove.g : 0.06;
-    let h = wbE * (-s > 36 ? -g * 36 - 0.12 * (-s - 36) : g * s) + wcE * (-2.6 + 0.45 * s) + wrE * (-0.6 + 0.3 * s);
+    let h = wbE * (-s > 36 ? -g * 36 - 0.2 * (-s - 36) : g * s) + wcE * (-2.6 + 0.45 * s) + wrE * (-0.6 + 0.3 * s);
     h += 1.4 * noise(x / 47 + 2.2, z / 47 - 9.1) * sm(8, 40, -s);            // an uneven bottom
     for (const st of P.stacks) {                                             // sea stacks
       const d = Math.hypot(x - st.x, z - st.z); if (d > st.rad * 1.8) continue;
@@ -292,7 +292,7 @@ function islandHeight(P, x, z, aux) {
   let hB = 0, hC = 0, hR = 0, dune = 0;
   if (wb > 0 && cove) {
     const g = cove.g, berm = cove.berm;
-    if (s < 0) hB = -s > 36 ? -g * 36 - 0.14 * (-s - 36) : g * s;      // shoreface, then the shelf
+    if (s < 0) hB = -s > 36 ? -g * 36 - 0.2 * (-s - 36) : g * s;      // shoreface, then the shelf
     else {
       hB = Math.min(berm, g * s) + 0.15 * sm(berm / g, berm / g + 8, s);     // foreshore to the berm, the backshore
       const ds = s - (berm / g + 10);                                        // dunes start ~10 m behind the berm
