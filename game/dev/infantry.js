@@ -11,6 +11,7 @@ import { createViewmodel } from '../js/units/infantry/viewmodel.js';
 import { InfantryAudio } from '../js/units/infantry/infantryaudio.js';
 import { atmosphere } from '../js/units/infantry/ballistics.js';
 import { buildRange, groundY, surface, waterDepth } from './infantry-range.js';
+import { climbHands, swimHands, selfAidHands } from '../js/units/infantry/carepose.js';   // ngc/marine-polish
 
 const Q = new URLSearchParams(location.search);
 const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, +(Q.get('res') || 1.25))); document.body.prepend(renderer.domElement);
@@ -38,8 +39,13 @@ function modelView() {
     ['stand', makePose({})], ['aim', makePose({ ads: 1 })], ['walk', makePose({ speed: 1.5, gait: 'walk', gaitPhase: 1.2, moveF: 1.5 })], ['sprint', makePose({ speed: 5.6, gait: 'sprint', gaitPhase: 0.6, moveF: 5.6, lower: 1 })],
     ['kneel', makePose({ stance: 'crouch', stanceFrom: 'crouch', stanceTo: 'crouch', ads: 1 })], ['prone', makePose({ stance: 'prone', stanceFrom: 'prone', stanceTo: 'prone', ads: 1, cls: 'mg' })],
     ['lean', makePose({ ads: 1, lean: 1 })], ['down', makePose({ down: true })],
+    // ngc/marine-polish: seated (rifle between the knees), on a ladder, swimming, self aid on a leg wound
+    ['seated', makePose({ seat: true })], ['climb', makePose({ climb: 0.2, hands: climbHands(0.2), sling: 1 })],
+    ['swim', makePose({ swim: { ph: 0.45, speed: 0.8 }, hands: swimHands(0.45, 1), sling: 1 })],
+    ['selfaid', makePose({ stance: 'crouch', stanceFrom: 'crouch', stanceTo: 'crouch', hands: selfAidHands('legL', 0.3), sling: 1 })],
   ];
-  const marines = POSES.map(([n, p], i) => { const m = buildMarine({ seed: i, weapon: n === 'down' ? null : i === 5 ? 'M60' : i === 4 ? 'M16A1/M203' : 'M16A1', pack: i === 2 }); m.root.position.set(i * 2.4, 0, 0); scene.add(m.root); poseSkeleton(m, p, 0); return m; });
+  // (poses with hands off the rifle blend in over ~0.25 s: posed a few times)
+  const marines = POSES.map(([n, p], i) => { const m = buildMarine({ seed: i, weapon: n === 'down' ? null : i === 5 ? 'M60' : i === 4 ? 'M16A1/M203' : 'M16A1', pack: i === 2 || i === 9 || i === 11 }); m.root.position.set(i * 2.4, 0, 0); scene.add(m.root); for (let k = 0; k < (p.hands ? 4 : 1); k++) poseSkeleton(m, p, p.hands ? 0.3 : 0); return m; });
   const hbMat = new THREE.MeshBasicMaterial({ color: 0xff2020, wireframe: true });
   if (Q.has('hitboxes')) for (const m of marines) addHitboxDebug(m, hbMat);
   const cam = { yaw: 0.6, pitch: 0.15, dist: 6, t: new THREE.Vector3(3, 0.9, 0) };

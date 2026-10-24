@@ -60,6 +60,34 @@ function throwPose(phase, p, under) {
     default: return null;
   }
 }
+// ngc/marine-polish: hands for the ladder, the water and self aid (third person; the first-person versions are bodyvm.js)
+//   climbHands(y)        on the rails in front (z -0.3), hand over hand: each hand holds while he climbs past it, then
+//                        reaches up (y: metres climbed; one cycle per 0.6 m), the other half a cycle behind
+//   swimHands(ph, mv)    breaststroke (ph 0..1: glide forward, sweep out, back under the chin) or sculling (mv 0)
+//   selfAidHands(region, t)  both hands on his own wound (one hand on the other arm), working
+const frac = x => x - Math.floor(x);
+export function climbHands(y = 0) {
+  const h = off => { const u = frac(y / 0.6 + off); return u < 0.6 ? 1.72 - u * 0.6 : 1.72 - 0.36 + ss((u - 0.6) / 0.4) * 0.36; };
+  return { L: [-0.2, h(0), -0.32], R: [0.2, h(0.5), -0.32], spine: [-0.04, 0, 0], stand: false };
+}
+export function swimHands(ph = 0, mv = 0) {
+  if (mv < 0.2) { const a = ph * Math.PI * 2 * 1.6; return { L: [-0.32 - 0.06 * Math.cos(a), 1.25, -0.35 + 0.06 * Math.sin(a)], R: [0.32 + 0.06 * Math.cos(a), 1.25, -0.35 - 0.06 * Math.sin(a)] }; }
+  let x, y, z;
+  if (ph < 0.35) { const t = ss(ph / 0.35); x = lerp(0.1, 0.06, t); y = lerp(1.35, 1.4, t); z = lerp(-0.3, -0.75, t); }
+  else if (ph < 0.7) { const t = ss((ph - 0.35) / 0.35); x = lerp(0.06, 0.5, t); y = lerp(1.4, 1.3, t); z = lerp(-0.75, -0.35, t); }
+  else { const t = ss((ph - 0.7) / 0.3); x = lerp(0.5, 0.1, t); y = 1.3 + 0.05 * t; z = lerp(-0.35, -0.3, t); }
+  return { L: [-x, y, z], R: [x, y, z] };
+}
+export function selfAidHands(region = 'legL', t = 0) {
+  const w = Math.sin(t * 5.5) * 0.02;
+  // targets for a man kneeling on one knee (poseSkeleton lowers 'stand' targets with his pelvis: these are already low)
+  const at = region === 'legL' ? [-0.12, 0.42, -0.3] : region === 'legR' ? [0.12, 0.42, -0.3] : region === 'armL' ? [-0.24, 0.85, -0.18] : region === 'armR' ? [0.24, 0.85, -0.18]
+    : region === 'stomach' ? [0, 0.72, -0.2] : region === 'head' ? [0.02, 1.15, -0.15] : [0.03, 0.92, -0.2];
+  const one = region === 'armL' ? 'R' : region === 'armR' ? 'L' : null;
+  const H = { L: [at[0] - (one ? 0 : 0.07) + w, at[1] + w, at[2]], R: [at[0] + (one ? 0 : 0.07) - w, at[1] - w, at[2]], spine: [region.startsWith('leg') ? -0.25 : -0.08, 0, 0], chest: [-0.06, 0, 0] };
+  if (one === 'R') H.L = [-0.3, 0.8, -0.25]; if (one === 'L') H.R = [0.3, 0.8, -0.25];
+  return H;
+}
 // the AI's M67 drill (groundsim.js): seconds per phase (a man who has done it before: clip, pin, a ~1 s cook, throw)
 export const AI_DRILL = [['draw', 0.45], ['pin', 0.55], ['ready', 0.35], ['cook', 1.0], ['throw', 0.5], ['recover', 0.4]];
 export const AI_RELEASE = 0.55;   // fraction of 'throw' at which the grenade leaves the hand

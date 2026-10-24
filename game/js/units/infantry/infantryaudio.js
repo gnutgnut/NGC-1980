@@ -169,6 +169,58 @@ export class InfantryAudio {
     }
     // gear: canteens, magazines in pouches, sling swivels jingle more running and with more on you
     if (gait === 'run' || gait === 'sprint') for (let i = 0; i < 2 + (load > 25 ? 2 : 0); i++) n(0.02 + Math.random() * 0.08, 0.02, { f0: 2500 + Math.random() * 3000, q: 8, vol: 0.03 * k });
+    this.gear(gait, load, stance);   // ngc/marine-polish
+  }
+  // ngc/marine-polish: the rest of the man's kit on each step - the LC-2 belt's metal (keeper clips, the canteen cup in
+  // its cover, the M16's sling swivels) ticks even at a walk; the canteens slosh (a low, wet thump a little after the
+  // footfall); the pack's frame and the e-tool knock on the run; nylon and the flak vest rustle when crouched / crawling
+  gear(gait = 'walk', load = 20, stance = 'stand') {
+    if (!this.ctx || !this.master) return;
+    const t = this.t, n = (dl, d, o) => this._noise(t + dl, d, o), run = gait === 'run' || gait === 'sprint', L = Math.min(1.5, load / 25);
+    if (gait === 'crawl' || stance === 'prone') { n(0, 0.35, { type: 'bandpass', f0: 1400, f1: 900, q: 0.7, vol: 0.05 * L, attack: 0.08, curve: 'lin' }); return; }
+    if (stance === 'crouch') n(0, 0.18, { type: 'bandpass', f0: 1900, q: 0.9, vol: 0.03 * L, attack: 0.03, curve: 'lin' });   // nylon / vest rustle
+    if (Math.random() < (run ? 0.9 : 0.45)) n(0.01 + Math.random() * 0.04, 0.012, { f0: 3800 + Math.random() * 2400, q: 10, vol: (run ? 0.035 : 0.016) * L });   // metal tick
+    if (Math.random() < (run ? 0.7 : 0.3)) { const d = 0.05 + Math.random() * 0.05; this._tone(t + d, 0.09, 140 + Math.random() * 40, 90, (run ? 0.05 : 0.025) * L, 'sine'); n(d, 0.08, { type: 'bandpass', f0: 600, q: 1.5, vol: (run ? 0.03 : 0.015) * L }); }   // canteen slosh
+    if (run && load > 22) n(0.03 + Math.random() * 0.05, 0.03, { type: 'lowpass', f0: 380, vol: 0.06 * L });   // pack / e-tool knock
+  }
+  // ngc/marine-polish: first aid you can hear (FM 21-11 procedures): the field dressing's wrapper torn open and the
+  // tails tied; a tourniquet strap pulled tight and a windlass turned (ratchety clicks of the stick in the cravat); the
+  // morphine syrette's cap off, the seal pierced, the tube squeezed; a wire ladder splint bent and tied; the chest seal's
+  // plastic wrapper; the ammonia ampule crushed
+  aid(kind = 'dress') {
+    if (!this.ctx || !this.master) return;
+    const t = this.t, n = (dl, d, o) => this._noise(t + dl, d, o);
+    switch (kind) {
+      case 'dress': case 'pack':
+        for (let i = 0; i < 6; i++) n(i * 0.035 + Math.random() * 0.02, 0.03, { type: 'highpass', f0: 2600 + Math.random() * 1500, vol: 0.07 });   // wrapper tear
+        n(0.3, 0.6, { type: 'bandpass', f0: 1200, f1: 800, q: 0.6, vol: 0.05, attack: 0.1, curve: 'lin' });                                // cloth, the tails wrapped
+        n(1.0, 0.15, { type: 'bandpass', f0: 1500, q: 1, vol: 0.06 }); break;                                                               // the knot pulled
+      case 'seal': for (let i = 0; i < 8; i++) n(i * 0.04, 0.04, { type: 'highpass', f0: 4000 + Math.random() * 2000, vol: 0.05 }); break;
+      case 'tq': case 'tightenTQ': case 'sling':
+        n(0, 0.35, { type: 'bandpass', f0: 900, f1: 1800, q: 1.2, vol: 0.08, attack: 0.05 });                                             // the strap drawn tight
+        for (let i = 0; i < (kind === 'sling' ? 0 : 5); i++) { n(0.45 + i * 0.16, 0.015, { f0: 2400, q: 6, vol: 0.12 }); this._tone(t + 0.45 + i * 0.16, 0.03, 420, 380, 0.03, 'square'); }   // windlass turns
+        break;
+      case 'opioid':
+        n(0, 0.02, { f0: 3200, q: 5, vol: 0.12 }); n(0.25, 0.015, { f0: 2600, q: 6, vol: 0.15 });                                          // cap off, seal pierced
+        n(0.6, 0.3, { type: 'bandpass', f0: 700, q: 2, vol: 0.05, attack: 0.05, curve: 'lin' }); break;                                     // the tube squeezed
+      case 'splint':
+        for (let i = 0; i < 4; i++) { this._tone(t + i * 0.09, 0.05, 900 + i * 120, 700, 0.025, 'triangle'); n(i * 0.09, 0.05, { f0: 2200, q: 3, vol: 0.05 }); }   // the wire bent
+        n(0.6, 0.5, { type: 'bandpass', f0: 1100, q: 0.7, vol: 0.05, attack: 0.1, curve: 'lin' }); break;
+      case 'smelling': case 'ammonia': n(0, 0.02, { f0: 3500, q: 4, vol: 0.18 }); break;                                                   // the ampule crushed
+      default: n(0, 0.4, { type: 'bandpass', f0: 1300, q: 0.7, vol: 0.05, attack: 0.08, curve: 'lin' });
+    }
+  }
+  // ngc/marine-polish: in the water - a breaststroke's pull (water moved, a little splash as the hands come forward), or
+  // a hand on a ladder rung
+  swim(strong = 1) {
+    if (!this.ctx || !this.master) return;
+    const t = this.t;
+    this._noise(t, 0.45, { type: 'bandpass', f0: 650, f1: 380, q: 0.9, vol: 0.09 * strong, attack: 0.08, curve: 'lin' });
+    this._noise(t + 0.25, 0.2, { type: 'highpass', f0: 2600, vol: 0.04 * strong });
+  }
+  rung() {
+    if (!this.ctx || !this.master) return;
+    const t = this.t; this._noise(t, 0.03, { f0: 1600, q: 3, vol: 0.12 }); this._tone(t, 0.18, 760 + Math.random() * 60, 740, 0.025, 'sine');
   }
   // per frame: the breath (phase, depth 0..1, rate /min, held), heart rate
   body(b) {

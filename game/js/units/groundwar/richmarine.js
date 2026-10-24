@@ -97,6 +97,9 @@ export function createRichMarine(u, o = {}) {
     RM.shots.length = 0; RM.t += dt; env2.groundY = env.height;
     // medical at ~10 Hz
     RM.medAcc += dt; if (RM.medAcc >= 0.1) { RM.medStep(RM.medAcc); RM.medAcc = 0; }
+    // ngc/marine-polish: a man dragging or carrying a casualty goes at MEDINV's BUDDY drag / carry speed (fieldcare.js
+    // a.paceV), not at his rifleman's walk: the soldier sim takes it as a ground-speed cap
+    RM.mods.vCap = a && a.paceV != null ? a.paceV : null;
     const down = RM.state() !== 'ok';
     // ---- what the AI wants
     let vx = 0, vz = 0, face = a && a.face, fire = want && want.fire, aim = want && want.aim;

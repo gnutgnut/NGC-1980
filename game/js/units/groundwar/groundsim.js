@@ -30,7 +30,8 @@ import { rng } from '../runaway/rwworld.js';
 import { zoneSurf, inGrid, SURFACE } from '../../world/terrain.js';   // TERRAIN (wave 3): the one surface table
 // ngc/infdepth: the near Marines on the real rifleman + medical sims, and casualty care (corpsman, buddy aid, CCP)
 import { createRichMarine, ROLE_KIT } from './richmarine.js';
-import { drillAt, AI_RELEASE_T } from '../infantry/carepose.js';   // ngc/infdepth-fix: the M67 drill's timing (the views pose it)
+import { drillAt, AI_RELEASE_T, AI_DRILL } from '../infantry/carepose.js';   // ngc/infdepth-fix: the M67 drill's timing (the views pose it)
+const AI_COOK_S = AI_DRILL.find(d => d[0] === 'cook')[1];   // ngc/marine-polish: s the AI cooks an M67 (a dropped one's fuse)
 import { createFieldCare } from './fieldcare.js';
 import { partAt } from './marine.js';
 import { fragmentHits } from '../infantry/medical.js';
@@ -338,8 +339,7 @@ export function createGroundSim(o) {
 
   // ngc/infdepth-fix: an M67 thrown (game level): the drill takes its time (clip, pin, a ~1 s cook, the throw:
   // carepose.js AI_DRILL; u.thr = { phase, p, gone } for the views), it leaves the hand at AI_RELEASE_T, lands, rolls to a
-  // stop and goes off when the fuse (4.5 s from the spoon) runs out. A man who goes down before he lets go keeps it
-  // (pin back in: a game simplification)
+  // stop and goes off when the fuse (4.5 s from the spoon) runs out. A man who goes down before he lets go: dropDrill
   function throwStep(u, a, M, dt) {
     if (u.thrT == null) { u.thrT = 0; u.thr = { phase: 'draw', p: 0, gone: false }; u.thrAim = a.aim.slice(); }
     if (a.fire === 'frag' && a.aim) { u.thrAim[0] = a.aim[0]; u.thrAim[1] = a.aim[1]; u.thrAim[2] = a.aim[2]; }
@@ -353,7 +353,23 @@ export function createGroundSim(o) {
     }
     if (!drillAt(u.thrT, u.thr)) { u.thrT = null; u.thr = null; u.cd = Math.max(u.cd, 0.4); }
   }
-  function dropDrill(u) { if (u.thrT != null) { u.thrT = null; u.thr = null; } }
+  // ngc/marine-polish: a man who goes down (or is killed) with the pin out drops the grenade LIVE: his hand opens, the
+  // spoon flies, it rolls off him and goes off with the fuse left (4.5 s, less what he had cooked). Before the pin is
+  // out it just falls (safe, still on him). Peace (the island taken): he puts the pin back.
+  function dropDrill(u) {
+    if (u.thrT == null) return;
+    const t = u.thr, M = u.body;
+    const live = t && !t.gone && (t.phase === 'ready' || t.phase === 'cook' || t.phase === 'throw' || (t.phase === 'pin' && t.p > 0.6)) && (!M.alive || !M.able);
+    if (live) {
+      const cooked = t.phase === 'cook' ? t.p : t.phase === 'throw' ? AI_COOK_S : 0, ry = M.yaw + (R() - 0.5) * 2.4;
+      const from = [M.x, M.y + (M.stanceTo === 'prone' ? 0.4 : 1.1), M.z], to = [M.x - Math.sin(ry) * 1.2, M.y, M.z - Math.cos(ry) * 1.2];
+      shoot(1, u, 'm67', from, to, 0, 2.2, { lob: true, loud: 10, fuse: Math.max(0.3, 4.5 - cooked), life: 12 });
+      M.frags = Math.max(0, (M.frags || 1) - 1); u.frags = M.frags; t.gone = true;
+      GS.stats.fragsDropped = (GS.stats.fragsDropped || 0) + 1;
+      ev('fragDropped', { id: u.id, x: M.x, y: M.y + 0.4, z: M.z, cooked });
+    }
+    u.thrT = null; u.thr = null;
+  }
   // ------------------------------------------------------------------------------------------------- rich Marines
   // ngc/infdepth: the near men on INFANTRY's rifleman and MEDINV's medical sims. The squad AI's intent drives the
   // rifleman (richmarine.js); his shots become game-level projectiles here; his body is copied into marine.js's body so

@@ -134,6 +134,7 @@ export function createMarineSim(o = {}) {
     if (med && med.weaponUse === 'none') inp.fire = false;
     if (W.ladder || W.swim) { inp.fire = false; inp.ads = false; }
     MS.listener.x = S.eye.x; MS.listener.y = S.eye.y; MS.listener.z = S.eye.z;
+    MS.mods.vCap = MS.burden ? MS.burden.v : null;   // ngc/marine-polish: the soldier sim walks at the carry / drag speed (the clamp below stays)
     const evs = R.step(h, inp, renv, MS.mods);
     let jumped = false;
     for (const e of evs) { MS.events.push(e); if (e.e === 'body' && e.ev.e === 'jump') jumped = true; }

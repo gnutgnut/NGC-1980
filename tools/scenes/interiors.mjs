@@ -96,6 +96,8 @@ export default async function (h) {
   // 9. a CH-46 off the deck with its Marines: seen through the ramp and windows, sitting in the red troop seats
   await h.eval("(__G.G.mat = 999, __G.selIsl = __G.ISLANDS.find(i => !i.cave && i.owner !== 1), __G.command(1), __G.G.msg || 1)");
   await h.waitFor("__G.war.units.some(u => u.kind === 'ch46')", 20000);
+  // (ngc/marine-polish: the stick walks up the ramp while the rotors spool now - wait for them to sit down)
+  await h.waitFor("(() => { const u = __G.war.units.find(u => u.kind === 'ch46'); return u.rot.squad.figs.filter(F => F.st === 'aboard').length >= 10 || u.rot.AI.phase !== 'spool'; })()", 120000);
   await h.eval(`(() => { const u = __G.war.units.find(u => u.kind === 'ch46'), U = u.rot; if (U.squad.boardNow) U.squad.boardNow();   // AIRROT embark: the stick waits on deck and files up the ramp; take them all aboard for the seats check
     const aboard = U.squad.figs.filter(F => F.st === 'aboard' && F.f.group.visible).length;
     const c = Math.cos(u.yaw), s = Math.sin(u.yaw), x = u.p.x + c * 7 + s * 9, z = u.p.z - s * 7 + c * 9; __G.foot.spawnAt({ x, y: u.p.y, z, yaw: Math.atan2(x - u.p.x, z - u.p.z) }); window.__ch = u; return { aboard, y: u.p.y }; })()`);

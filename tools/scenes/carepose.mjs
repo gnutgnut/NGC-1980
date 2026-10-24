@@ -61,6 +61,9 @@ export default async function (h) {
   await h.expect(`/carrying/.test(__drg.ai.state) && __cas.cas.carry === __drg.id && __hand(__drg, 'L').y > 1.3 && __G.war.ground.views.get(__cas.id).group.position.y - __drg.body.y > 1.0`, "nobody shooting, a long way to go: a fireman's carry (the casualty across his shoulders, a hand on him)");
   await h.shot('ai-fireman-carry');
   await h.eval(`(window.__cam = { follow: __drg, rel: true, yaw: -2.4, d: 4.5, h: 0.6, ty: 1.1 }, 1)`); await h.wait(1200); await h.shot('ai-fireman-carry-behind');
+  // ngc/marine-polish: under the load he walks at MEDINV's carry speed (BUDDY.carrySpeed 1.21 m/s), not his 1.52 m/s walk
+  await h.eval(`(() => { let n = 0, s = 0; __ff(2, 1 / 30, () => { if (/carrying/.test(__drg.ai.state)) { n++; s += Math.hypot(__drg.body.vx, __drg.body.vz); } return false; }); window.__cv = n ? s / n : null; return { v: __cv && +__cv.toFixed(2), rich: !!__drg.richOn, paceV: __drg.ai.paceV }; })()`);
+  await h.expect(`__cv !== null && __cv > 0.6 && __cv < 1.32`, "carrying, he walks at the carry speed (~1.2 m/s), not at his full walk");
   await h.eval(`__ff(60, 1 / 30, () => !__cas.cas || __cas.cas.carry == null)`);
   await h.eval(`({ state: __drg.ai.state, atCCP: __cas.cas && __cas.cas.atCCP, carry: __cas.cas && __cas.cas.carry, care: __GS.FC.stats })`);
   await h.expect(`__cas.cas && __cas.cas.atCCP && __cas.cas.carry == null`, 'carried to the casualty collection point and put down');
@@ -90,8 +93,22 @@ export default async function (h) {
   await h.eval(`__ff(2.7, 1 / 30, () => (__GS.stats.frags || 0) > __f0)`);
   await h.eval(`(() => { const p = __GS.proj.find(p => p.frag); window.__cam = p ? { at: [p.x + 6, p.y + 3, p.z + 6], look: [p.x, p.y, p.z] } : window.__cam; return { thrown: (__GS.stats.frags || 0) - __f0, proj: p && { y: +p.y.toFixed(1), fuse: +p.fuse.toFixed(2) } }; })()`);
   await h.expect(`(__GS.stats.frags || 0) > __f0 && __GS.proj.some(p => p.frag && p.fuse > 2 && p.fuse < 3.6)`, 'he lets it go cooked ~1 s: the fuse in flight is 4.5 s less the cook');
+  // ngc/marine-polish: the grenade is drawn in flight (an instanced M67 per live grenade)
+  await h.eval(`(() => { if (!window.__holdOn) { window.__holdOn = 1; const u0 = __G.war.update; __G.war.update = (...a) => (window.__hold && !window.__ffing) ? undefined : u0(...a); const ff0 = window.__ff; window.__ff = (...a) => { window.__ffing = true; try { return ff0(...a); } finally { window.__ffing = false; } }; } __ff(0.25); window.__hold = true; const p = __GS.proj.find(p => p.frag); if (p) window.__cam = { at: [p.x + 1.3, p.y + 0.5, p.z + 1.3], look: [p.x, p.y, p.z] }; const im = __G.war.ground.root.getObjectByName('gw-grenades'); return { im: im && im.count, y: p && +p.y.toFixed(2), rest: p && !!p.rest }; })()`);
+  await h.wait(900); await h.shot('ai-m67-in-flight'); await h.eval('(window.__hold = false, 1)');
+  await h.expect(`__G.war.ground.root.getObjectByName('gw-grenades').count >= 1 && __G.war.ground.root.getObjectByName('gw-grenades').visible`, 'the grenade in flight is drawn (M67 with its fuze, spoon and ring)');
   await h.eval(`__ff(6, 1 / 30, () => __blasts > 0)`);
   await h.wait(300); await h.shot('ai-m67-5-burst');
   await h.eval(`({ blasts: __blasts, at: __bl, d: __bl && +Math.hypot(__bl.x - __gaim[0], __bl.z - __gaim[2]).toFixed(1), from: __bl && +Math.hypot(__bl.x - __g.x, __bl.z - __g.z).toFixed(1) })`);
   await h.expect(`__blasts > 0 && Math.hypot(__bl.x - __gaim[0], __bl.z - __gaim[2]) < 6 && Math.hypot(__bl.x - __g.x, __bl.z - __g.z) > 14`, 'it lands near his aim point, well away from him, and bursts when the fuse runs out');
+  // ---- 3. ngc/marine-polish: hit while cooking it - the hand opens, the spoon is gone: the M67 falls at his feet LIVE
+  await h.eval(`(() => { window.__freeze = { u: __g, t: 1.9, gone: false, aim: __gaim, at: __gat }; return 1; })()`);
+  await h.eval(`__ff(0.2)`);
+  await h.eval(`(() => { window.__freeze = null; window.__d0 = __GS.stats.fragsDropped || 0; window.__blasts = 0; const M = __g.rich.M; M.ko = 300; __GS.richState(__g); return { phase: __g.thr && __g.thr.phase, able: __g.able }; })()`);
+  await h.eval(`__ff(0.4)`);
+  await h.eval(`(() => { const p = __GS.proj.find(p => p.frag); if (p) window.__cam = { at: [p.x + 1.7, p.y + 1.0, p.z + 1.7], look: [p.x, p.y + 0.1, p.z] }; return { dropped: (__GS.stats.fragsDropped || 0) - __d0, proj: p && { d: +Math.hypot(p.x - __g.x, p.z - __g.z).toFixed(2), fuse: +p.fuse.toFixed(2), rest: !!p.rest } }; })()`);
+  await h.eval('(window.__hold = true, 1)'); await h.wait(900); await h.shot('ai-m67-dropped-live'); await h.eval('(window.__hold = false, 1)');
+  await h.expect(`(__GS.stats.fragsDropped || 0) > __d0 && __GS.proj.some(p => p.frag && Math.hypot(p.x - __g.x, p.z - __g.z) < 2.5)`, 'knocked down mid-cook, he drops it LIVE at his feet');
+  await h.eval(`__ff(5, 1 / 30, () => __blasts > 0)`);
+  await h.expect(`__blasts > 0 && Math.hypot(__bl.x - __g.x, __bl.z - __g.z) < 3`, 'and it goes off next to him');
 }

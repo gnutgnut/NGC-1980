@@ -2734,3 +2734,68 @@ figures (they vanish with the wreck); no per-unit sounds for the towed guns' cre
   groundwar 9-10/10: 'both sides fire' fails about 1 run in 2, the same on the unpatched merge (1 of 2 baseline runs
   failed). 'Hover tank came ashore' failed once in 4 runs under load. Benches: runaway 50/50, groundwar 33/33, world
   pass, worldsolid 10/10.
+
+## 2026-10-24 — NGC-1980 MARINE polish batch 2: the 1980 Marine and his medical / inventory kit (branch ngc/marine-polish)
+- **Known issues fixed.** (1) *A Marine carrying a casualty walked at full pace*: soldier.js takes a host ground-speed cap
+  (`mods.vCap`, after the direction factor); richmarine.js sets it from fieldcare.js's `a.paceV` (MEDINV
+  `BUDDY.carrySpeed` 1.21 m/s, `dragSpeed` 0.97 m/s), marinesim.js from `MS.burden` (the player). (2) *A grenade in flight
+  was not drawn*: the AI's M67s (groundsim projectiles with `p.frag`) are one instanced draw in groundwar.js, tumbling in
+  the air, on their side where they come to rest. (3) *A Marine hit before throwing kept the grenade*: groundsim.js
+  `dropDrill` - a man who goes down (or dies) with the pin out (late 'pin', 'ready', 'cook', 'throw' before release)
+  drops it LIVE at his feet with the fuse left (4.5 s less his cook), a 'fragDropped' event ("GRENADE! - HE DROPPED IT
+  LIVE"); before the pin is out it stays on him. The player the same (marine.js `throwDrop`): killed, knocked out, his
+  throwing arm out (MEDINV `weaponUse 'none'` or the right arm blacked) with the pin out -> live at his feet; a cooked one
+  can no longer vanish (walking into the sea or onto a ladder mid-cook drops it too: the spoon is gone).
+- **The M67 and M18 as objects** (`units/infantry/grenademodel.js`, Kit geometry): the M67's 64 mm olive body with its
+  yellow band, the M213 fuze, spoon, pull ring and pin; the M18 canister with its smoke-coloured top (green / red /
+  yellow / violet) - the player's thrown grenades, the AI's, the one in a figure's hand, and `m67Into` for the kit.
+- **1980 USMC kit on the model** (soldiermodel.js): an M67 on the side of each ammo pouch (FM 21-75), the M7 bayonet in
+  its M8A1 scabbard on the left hip, the folding e-tool in its LC-1 carrier at the back, the butt pack; the ALICE medium
+  pack with three outer pockets, flap straps and the poncho / liner roll under it (the M1 / Mitchell cover, M1955 flak
+  vest, LC-2 belt and suspenders, canteens and the first-aid case were there).
+- **Poses.** New `stancePose` states in poseSkeleton: `sit` (pose.seat: on a troop seat, knees apart, the M16 standing
+  upright between the knees, butt on the floor, both hands on it - the CH-46's seated squad now uses it through
+  marinefigure.js's 'seated'), `climb` (pose.climb = metres climbed: a knee up per rung), `swim` (breaststroke, head up,
+  frog kick). carepose.js `climbHands` (hand over hand: a hand holds the rail while the body climbs past it, then reaches
+  up), `swimHands`, `selfAidHands` (both hands on his own wound; one hand on the other arm). marine.js uses them in third
+  person (the rifle on its sling); swimming was the prone pose 1.2 m under the water before.
+- **First person** (`units/infantry/bodyvm.js`, after throwvm.js): on a ladder the rifle is slung and both hands are on
+  the rails (they stay put on the rail as you climb past them: they move down the view exactly as fast as you climb);
+  swimming, a breaststroke (sculling when treading water); self aid, the rifle lowered and both hands on the wound with
+  the OD field dressing in the right hand. Body frame turned by the view pitch (the hands stay on the rails when you look
+  up). The viewmodel now draws on ladders and in the water (it was switched off).
+- **Self aid (K)**: the next step FM 21-11 calls for, from your own kit, by fieldcare.js `pickAid` (the corpsman's
+  chooser: bleeding worst first - a field dressing with pressure, a tourniquet for a spurting artery or a limb bleeding
+  through its dressing, the best one for that limb by MEDINV's odds; a tourniquet that didn't hold tightened; then the
+  chest, splints, morphine never in shock). MEDINV's own self-aid times; you go down on one knee, the rifle on its sling,
+  fire blocked; K again: time left; sprinting off stops it. HUD: "YOU ARE BLEEDING - K: SELF AID", the count down. (K was
+  the global keyboard-only toggle; on foot it is first aid, elsewhere it still toggles.)
+- **HEALTH screen clarity** (medui.js `opt.advise`): a NEXT STEP panel over CONDITIONS (the item, the part, the time),
+  the item's tile glows in the list and the body part is outlined on the figure ("DRAG THE GLOWING ITEM ONTO THE OUTLINED
+  PART · OR K"); also on a casualty's screen (buddy aid with your kit) and in the medinv sandbox.
+- **Sound** (infantryaudio.js): the kit on every step - LC-2 metal ticks even at a walk, canteen slosh, pack / e-tool
+  knock on the run, nylon and vest rustle crouched, a crawl's drag; first aid you hear (the dressing wrapper torn and the
+  tails tied, the strap drawn and the windlass turned, the syrette's cap and squeeze, the wire splint bent, the chest
+  seal's wrapper, the ammonia ampule); a hand on each ladder rung; the pull of each swimming stroke. Footsteps: dirt tracks
+  are 'dirt' now (SURF_MAP), a floor above the ground that is not a ship (houses, shops, church, quonsets, porches,
+  stairs) sounds of boards.
+- **Shared-file lines**: soldier.js (vCap, 3 lines), marinesim.js (SURF_MAP dirt, vCap), richmarine.js (vCap),
+  groundsim.js (dropDrill, AI_COOK_S), groundwar.js (grenade instances, the fragDropped shout), marinefigure.js (seat),
+  soldiermodel.js (kit, sit / climb / swim, seated rifle), carepose.js, medui.js (advise), marinecare.js (advise),
+  marine.js (all of the above on the player), infantryaudio.js; dev/infantry.html (four more poses), dev/medinv.js
+  (advise); README (K, tests).
+- **Tests**: buddyaidbench 28/28 (new: a rich Marine in a fireman's carry walks 1.21 m/s = BUDDY.carrySpeed, his walk
+  1.52; hit mid-cook he drops the M67 live 0.1 m from him, it bursts 3.9 s later; hit while still drawing it, nothing goes
+  off); medinvbench 109/109, infantrybench 90/90, marinebench and footbench all. Scenes: new `marinepolish.mjs` 9/9 (kit
+  close-ups, K self aid - first and third person, the HUD count, the leg dressed; the ladder in first and third person;
+  swimming; a cooked M67 dropped live when the throwing arm is hit, and its burst), `carepose.mjs` 15/15 (+ carry speed
+  1.21 m/s on the rich carrier, the AI's M67 drawn in flight, knocked down mid-cook he drops it live and it goes off by
+  him), `infantrymodels.mjs` (kit, seated, ladder, swim, self aid), marine 15/15, foot 12/12, buddyaid 23/23, ladder 9/9,
+  smoke 5/5, medinv_ui 11/11. groundwar 9/10 and interiors 19/20 fail the same checks on the untouched experimental tree:
+  groundwar's "both sides fire" (the door gun and the war kill the last STRIDERs before the Sea Knight lands, so nobody is
+  left to shoot), interiors' "squad seated aboard" (the stick now walks up the ramp while the rotors spool: the scene
+  waits for them now).
+- **Untested / next**: the K binding on real hardware next to the global keyboard-only toggle; a gamepad button for self
+  aid; AI Marines don't react to a dropped live grenade (no dive for cover: they take the fragments); the first-person
+  fists stay fists when swimming (no open-hand mesh); hands on the rails are placed for the island ladders' width, not
+  each ladder's real rails; the AI's grenades are drawn within 260 m only.

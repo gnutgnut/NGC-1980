@@ -25,7 +25,10 @@ import { createMedUI, createMedHud, createVisionFX, FEEDTXT } from './units/infa
 import { addSmoke } from './units/defence/cm.js';   // ngc/cmpolish: M18 smoke blocks sight lines and the LANCE beam
 import { createMarineCare } from './marinecare.js';   // ngc/infdepth: buddy aid both ways, drag / carry, the ground war's dead
 import { createThrowVM } from './units/infantry/throwvm.js';   // ngc/infdepth: the grenade drill in the viewmodel
-import { careHands, throwHands } from './units/infantry/carepose.js';   // ngc/infdepth-fix: the same in third person
+import { careHands, throwHands, climbHands, swimHands, selfAidHands } from './units/infantry/carepose.js';   // ngc/infdepth-fix: the same in third person (ngc/marine-polish: ladder, swim, self aid)
+import { createBodyVM } from './units/infantry/bodyvm.js';   // ngc/marine-polish
+import { pickAid } from './units/groundwar/fieldcare.js';   // ngc/marine-polish: K = self aid, the next thing FM 21-11 says to do
+import { m67Geometry, m18Geometry, grenadeMaterial } from './units/infantry/grenademodel.js';   // ngc/marine-polish
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const SENS = 0.0022;   // mouse: rad per pixel (as foot.js)
@@ -230,7 +233,7 @@ export function createMarine(ctx) {
     invUI = createInvUI({ inv: MS.inv, med: M, parent: document.body, tabs: TABS, cell: 40, bodyKg: 80,
       onTab: t => openScreen(t === 'HEALTH' ? 'health' : 'gear'), onClose: () => { if (Mr.ui === 'gear') closed(); },
       onDrop: () => {} });
-    medUI = createMedUI({ med: M, inv: MS.inv, parent: document.body, tabs: TABS, title: 'LCPL J. RIVERA, 3/3 MARINES', onTab: t => openScreen(t === 'GEAR' ? 'gear' : 'health'), onClose: () => { if (Mr.ui === 'health') closed(); } });
+    medUI = createMedUI({ med: M, inv: MS.inv, parent: document.body, tabs: TABS, title: 'LCPL J. RIVERA, 3/3 MARINES', advise: (m, b) => pickAid(m, [MS.inv], b), adviseKey: 'K', onTab: t => openScreen(t === 'GEAR' ? 'gear' : 'health'), onClose: () => { if (Mr.ui === 'health') closed(); } });
   }
   function hudParts() {
     if (medHud || typeof document === 'undefined') return;
@@ -299,6 +302,7 @@ export function createMarine(ctx) {
     if (code === 'ControlLeft' || code === 'CapsLock') { walkMode = !walkMode; say(walkMode ? 'WALK' : 'RUN', 0.8); return true; }
     if (code === 'KeyF' && e?.shiftKey) return Mr.care.cycleHold();   // ngc/infdepth: drag / fireman's carry / put down
     if (code === 'KeyF') { interact(); return true; }
+    if (code === 'KeyK') { quickAid(); return true; }   // ngc/marine-polish: self aid (on foot K is the first-aid key)
     if (code === 'KeyV') { Mr.view = Mr.view === 'first' ? 'third' : 'first'; say(Mr.view === 'first' ? 'FIRST PERSON' : 'THIRD PERSON', 1); return true; }
     return ['KeyQ', 'KeyE'].includes(code);
   };
@@ -353,6 +357,27 @@ export function createMarine(ctx) {
     say('NOTHING HERE  -  F BY A CRATE, A BODY OR ON A FRIENDLY PAD', 1.6);
   }
   Mr.interact = interact;
+  // ngc/marine-polish: SELF AID (K) - the next thing FM 21-11 says to do, from your own kit (the corpsman's doctrine in
+  // fieldcare.js pickAid: bleeding worst first - a field dressing with pressure, a tourniquet for a spurting artery or a
+  // limb bleeding through its dressing -, a tourniquet that didn't hold tightened, then the chest, a splint, morphine if
+  // not in shock). It runs MEDINV's own self-aid times; K again tells you how long is left. The HEALTH screen (H) does
+  // the same by hand.
+  function selfAid() { const a = MS.M.action; return a && a.by && a.by.self && !MS.dead ? a : null; }
+  Mr.selfAid = selfAid;
+  function quickAid() {
+    if (MS.dead) return null;
+    const cur = MS.M.action;
+    if (cur) { say(`${cur.label}  -  ${Math.max(0, Math.ceil(cur.T - cur.t))} S LEFT`, 1.4); return null; }
+    if (TH || Mr.care.hold || W.ladder || W.swim) { say('YOUR HANDS ARE FULL', 1); return null; }
+    const by = { self: true, skill: MS.M.skill }, a = pickAid(MS.M, [MS.inv], by);
+    if (!a) { say(MS.M.bleedRate() > 1 || MS.M.pain() > 40 ? 'NOTHING IN YOUR KIT FOR IT  -  CALL THE CORPSMAN, OR H: HEALTH' : 'NOTHING TO TREAT', 1.6); return null; }
+    const r = MS.M.startTreatment({ item: a.item, region: a.region, by });
+    if (r.ok && S.stance === 'stand' && !W.swim) presses.push('stance:crouch');   // (down on one knee to work on it: FM 21-11)
+    if (!r.ok) { say(`CAN'T: ${r.reason || 'NOT NOW'}`, 1.2); return null; }
+    say(`SELF AID: ${r.label}${r.region ? '  -  ' + REGION[r.region].name : ''}  (${r.time} S)  ·  STAY STILL`, 2.2);
+    return r;
+  }
+  Mr.quickAid = quickAid;
 
   // ================================================================ the frame
   // (called from foot.js update): input -> marinesim -> events -> sound, effects, war damage
@@ -362,6 +387,13 @@ export function createMarine(ctx) {
     const inp = buildInput(input);
     if (MS.dead) { inp.move = [0, 0]; inp.fire = false; inp.actions = []; }
     if (Mr.care.hold) { inp.fire = false; inp.ads = false; inp.sprint = false; inp.actions = inp.actions.filter(a => !/^slot|^reload|^law|^gl/.test(a)); }   // (both hands on the casualty)
+    // ngc/marine-polish: self aid takes both hands too (the rifle on its sling); sprinting off pulls the dressing loose
+    const aid = selfAid();
+    if (aid) { inp.fire = false; inp.ads = false; inp.actions = inp.actions.filter(a => !/^slot|^reload|^law|^gl/.test(a)); if (inp.sprint && Math.hypot(...inp.move) > 0.3) { MS.M.cancelTreatment(); say('YOU STOPPED THE SELF AID', 1.2); } inp.sprint = false; }
+    Mr.aidT = (Mr.aidT || 0) + dt;
+    Mr.swimPh = W.swim ? ((Mr.swimPh || 0) + dt * (0.55 + 0.5 * clamp(Math.hypot(W.vx, W.vz) / 0.9, 0, 1))) % 1 : 0;
+    if (W.swim && Mr.swimPh >= 0.35 && (Mr.swimPrev ?? 0) < 0.35) A()?.swim(Math.hypot(W.vx, W.vz) > 0.15 ? 1 : 0.35);   // (the pull of each stroke)
+    Mr.swimPrev = Mr.swimPh;
     throwInput(inp, dt);   // ngc/infdepth: a grenade in the hand - the rifle is down
     const evs = MS.step(dt, inp, GR);
     Mr.firedT += dt;
@@ -404,7 +436,7 @@ export function createMarine(ctx) {
     } else if (e.e === 'swap') a?.mech('chargeFwd', 'M1911A1');
     else if (e.e === 'body') {
       const b = e.ev;
-      if (b.e === 'footstep') a?.footstep(b.surface === 'metal' ? 'metal' : b.surface, b.gait, b.load, b.stance);
+      if (b.e === 'footstep') a?.footstep(floorSurface(b.surface), b.gait, b.load, b.stance);   // (ngc/marine-polish: floors indoors, dirt tracks)
       else if (b.e === 'stance') a?.mech('stance');
       else if (b.e === 'breath' && !b.hold && b.gasp) a?.gasp();
       else if (b.e === 'blown') say('BLOWN  -  YOU NEED A BREATHER', 1.6);
@@ -414,7 +446,7 @@ export function createMarine(ctx) {
       if (w.e === 'splash') { fx.water?.add?.({ x: W.x, y: 0.1, z: W.z, size: 1.2, grow: 5, a: 0.6, life: 1.2, tile: 1, pow: 1.5 }); sfx.thump?.(0.25); }
       else if (w.e === 'land' && w.v > 3) sfx.thump?.(Math.min(0.5, w.v * 0.04));
       else if (w.e === 'ladder') say(`${w.name}  -  W / S TO CLIMB`, 1.4);
-      else if (w.e === 'rung') a?.footstep('metal', 'walk', 10, 'stand');
+      else if (w.e === 'rung') { a?.footstep('metal', 'walk', 10, 'stand'); a?.rung(); }
     } else if (e.e === 'wpn') {
       const v = e.ev, wk = e.weapon, m = MECH[v.e];
       if (m) a?.mech(m, wk);
@@ -459,7 +491,15 @@ export function createMarine(ctx) {
       if (md < 6) { b._cr = true; a.crack(md); }
     }
   }
+  // ngc/marine-polish: what his boots are on - a ship's deck rings (steel), a floor above the ground that is not a ship
+  // (a house, a shop, the church, a quonset hut, a porch, stairs) is boards / lino (wood), else the ground host's surface
+  function floorSurface(s) {
+    if (W.plat || s === 'metal') return 'metal';
+    if (W.onGround && W.y > 0.3 && W.y > ctx.terrainH(W.x, W.z) + 0.2) return 'wood';
+    return s;
+  }
   function medEvent(e) {
+    if (e.type === 'treatStart') A()?.aid(e.action);   // ngc/marine-polish: the procedure you can hear
     if (e.type === 'unconscious') say('YOU PASS OUT', 2);
     else if (e.type === 'conscious') say('YOU COME TO', 1.5);
     else if (e.type === 'bleed' && e.bleed !== 'light') say(`${e.bleed.toUpperCase()} BLEEDING  -  ${REGION[e.region].name}  -  H: HEALTH`, 2.4);
@@ -552,13 +592,22 @@ export function createMarine(ctx) {
       if (Mr.care.hold) { p.ads = 0; p.sling = 1; p.hands = careHands(Mr.care.hold.mode, 0, p.gaitPhase || 0); if (Mr.care.hold.mode === 'drag') { p.stance = p.stanceFrom = p.stanceTo = 'crouch'; p.stanceT = 1; } }
       else if (TH && TH.phase !== 'recover') { p.ads = 0; p.sling = 1; p.hands = throwHands(TH.phase, TH.p, TH.under); }
       p.grenade = !!TH && TH.phase !== 'recover' && !(TH.phase === 'throw' && TH.gone);   // (in his right hand in third person, through the drill)
-      if (W.swim) { p.stance = p.stanceFrom = p.stanceTo = 'prone'; p.stanceT = 1; }
+      // ngc/marine-polish: on a ladder (hand over hand, a knee up per rung), swimming (breaststroke, head up), self aid
+      // (on a knee, both hands on his own wound) - the rifle on its sling
+      p.climb = null; p.swim = null; p.seat = false;
+      const aid = selfAid();
+      if (W.ladder) { p.climb = W.y; p.hands = climbHands(W.y); p.sling = 1; p.ads = 0; p.grenade = false; }
+      else if (W.swim) { p.swim = { ph: Mr.swimPh || 0, speed: Math.hypot(W.vx, W.vz) }; p.hands = swimHands(Mr.swimPh || 0, p.swim.speed > 0.15 ? 1 : 0); p.sling = 1; p.ads = 0; }
+      else if (aid && !Mr.care.hold && !TH) { p.ads = 0; p.sling = 1; p.hands = selfAidHands(aid.region || 'thorax', Mr.aidT || 0); if (p.stance === 'stand') { p.stance = p.stanceFrom = p.stanceTo = 'crouch'; p.stanceT = 1; } }
       poseSkeleton(me, p, dt);
     }
-    // first person: arms and weapon (own pass, see overlay)
-    vmOn = fp && !MS.dead && !W.ladder && !W.swim;
+    // first person: arms and weapon (own pass, see overlay). ngc/marine-polish: on ladders and in the water too - the
+    // hands on the rails / swimming (bodyvm.js), the rifle slung
+    vmOn = fp && !MS.dead;
+    const bodySt = !vmOn ? null : W.ladder ? { mode: 'ladder', pitch: S.camPitch, climbY: W.y } : W.swim ? { mode: 'swim', pitch: S.camPitch, speed: Math.hypot(W.vx, W.vz) }
+      : selfAid() && !TH && !Mr.care.hold ? { mode: 'aid', pitch: S.camPitch, region: selfAid().region, item: selfAid().kind } : null;
     // (the viewmodel's springs are explicit: at low frame rates they would blow up, so they are stepped at <= 1/60 s)
-    if (vmOn) { let t = dt; while (t > 1e-6) { const h = Math.min(t, 1 / 60); vm.update(h, R); TV.update(h, TH ? { kind: TH.kind, phase: TH.phase, p: Math.min(1, TH.p), under: TH.under, cooked: TH.cooked, smokeCol: TH.T && M18_COL[TH.T.smoke] } : null, !!Mr.care.hold); t -= h; } if (!Number.isFinite(vm.lag.x + vm.lag.y + vm.kick.z + vm.kick.p)) { Object.assign(vm.lag, { x: 0, y: 0, vx: 0, vy: 0 }); Object.assign(vm.kick, { z: 0, zv: 0, p: 0, pv: 0 }); } }
+    if (vmOn) { let t = dt; while (t > 1e-6) { const h = Math.min(t, 1 / 60); vm.update(h, R); TV.update(h, TH ? { kind: TH.kind, phase: TH.phase, p: Math.min(1, TH.p), under: TH.under, cooked: TH.cooked, smokeCol: TH.T && M18_COL[TH.T.smoke] } : null, !!Mr.care.hold || (bodySt && bodySt.mode === 'aid')); BV.update(h, bodySt); t -= h; } if (!Number.isFinite(vm.lag.x + vm.lag.y + vm.kick.z + vm.kick.p)) { Object.assign(vm.lag, { x: 0, y: 0, vx: 0, vy: 0 }); Object.assign(vm.kick, { z: 0, zv: 0, p: 0, pv: 0 }); } }
     // tracers
     let nT = 0;
     for (const P of R.projectiles) {
@@ -579,11 +628,12 @@ export function createMarine(ctx) {
   // ================================================================ hand grenades (G): the M67 from the rig
   // Game level: thrown at ~14 m/s along the view (a little lofted), 4.5 s fuse (FM 3-23.30: 4-5.5 s), bounces and
   // rolls, then MEDINV's fragment table for anyone near (him too) and war.blast for the war's units.
-  const grenades = [], grenGeo = new THREE.SphereGeometry(0.045, 8, 6).scale(1, 1.25, 1), grenMat = new THREE.MeshLambertMaterial({ color: 0x4d5636 });
+  const grenades = [], grenGeo = m67Geometry(), grenMat = grenadeMaterial();   // (ngc/marine-polish: the M67 with its fuze, spoon and ring)
   // CM (ngc/cmpolish): kind 'smoke' throws an M18 from the rig instead: it pops after ~1.5 s and pours coloured smoke for
   // its burn time (items.js: 60 s; FM 3-23.30: 50-90 s); cm.js turns the plume into sight-blocking spheres
   const M18_COL = { green: [0.42, 0.62, 0.36], red: [0.78, 0.3, 0.26], yellow: [0.85, 0.78, 0.3], violet: [0.55, 0.38, 0.68] };
-  const smokeGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.145, 10), smokeMat = new THREE.MeshLambertMaterial({ color: 0x5c6448 });
+  const M18_HEX = { green: 0x6aa056, red: 0xb04a3a, yellow: 0xd2c050, violet: 0x8a62a8 };
+  const smokeGeo = c => m18Geometry(M18_HEX[c] || M18_HEX.green), smokeMat = grenadeMaterial();
   // ngc/infdepth: THE THROW AS A DRILL (FM 3-23.30) instead of a grenade out of the rig at once. G (Shift+G: an M18):
   // draw from the pouch, pull the pin (the left forefinger in the ring), cock the arm back - and throw when G is let go.
   // HOLD G past the pin and you COOK it: the spoon flies, the 4.5 s fuse burns in your hand (count it: the HUD does),
@@ -592,6 +642,7 @@ export function createMarine(ctx) {
   // hand where the hand is at the release, with his own velocity added.
   const TH_T = { frag: { draw: 0.55, pin: 0.45, throw: 0.34, recover: 0.5 }, smoke: { draw: 0.45, pin: 0.35, throw: 0.34, recover: 0.45 } };
   const TV = createThrowVM(vm); Mr.TV = TV;
+  const BV = createBodyVM(vm); Mr.BV = BV;   // ngc/marine-polish: hands on a ladder, swimming, self aid
   let TH = null;
   function throwGrenade(kind = 'frag') {
     if (MS.dead || W.swim || W.ladder || TH || Mr.care?.hold) return null;
@@ -604,11 +655,32 @@ export function createMarine(ctx) {
   }
   Mr.throwGrenade = throwGrenade; Mr.grenades = grenades;
   Mr.throwState = () => TH;
-  function throwCancel() { if (TH && TH.phase !== 'recover' && TH.phase !== 'throw' && !TH.cooked) I.autoStore(MS.inv, TH.item); TH = null; }   // (pin back in: into the rig)
+  // (pin back in: into the rig. ngc/marine-polish: a cooked one - the spoon is gone - can't be made safe: it is dropped live)
+  function throwCancel() { if (TH && TH.cooked && !TH.gone) { dropLive(); return; } if (TH && TH.phase !== 'recover' && TH.phase !== 'throw') I.autoStore(MS.inv, TH.item); TH = null; }
+  // ngc/marine-polish: hit before he throws - killed, knocked out, or the arm won't hold it - with the pin out, the hand
+  // opens and the spoon flies: the grenade falls at his feet, LIVE, with what is left of its fuse (4.5 s less the cook).
+  // Before the pin is out it just falls back into the rig (safe).
+  function throwDrop() {
+    if (!TH) return;
+    const pinOut = TH.phase === 'ready' || TH.phase === 'cook' || (TH.phase === 'throw' && !TH.gone) || (TH.phase === 'pin' && TH.p > 0.6);
+    if (pinOut) dropLive(); else { if (TH.phase !== 'recover' && !TH.gone) I.autoStore(MS.inv, TH.item); TH = null; }
+  }
+  function dropLive() {
+    const smoke = TH.kind === 'smoke', h = Mr.firstPerson() ? handWorld() : { x: S.eye.x, y: S.eye.y - 0.3, z: S.eye.z }, a = Math.random() * Math.PI * 2;
+    const g = smoke ? { smoke: TH.T, x: h.x, y: h.y, z: h.z, vx: Math.cos(a) * 0.6, vy: 0.5, vz: Math.sin(a) * 0.6, fuse: TH.T.fuseS ?? 1.5, burn: TH.T.burnS ?? 60, mesh: new THREE.Mesh(smokeGeo(TH.T.smoke), smokeMat) }
+      : { x: h.x, y: h.y, z: h.z, vx: Math.cos(a) * 0.6 + (W.vx || 0), vy: 0.5, vz: Math.sin(a) * 0.6 + (W.vz || 0), fuse: Math.max(0.3, 4.5 - TH.cook), cooked: TH.cook, dropped: true, mesh: new THREE.Mesh(grenGeo, grenMat) };
+    if (!smoke) TV.spoon();
+    scene.add(g.mesh); grenades.push(g); Mr.lastThrow = g; Mr.stats.dropped = (Mr.stats.dropped || 0) + 1;
+    say(smoke ? 'YOU DROPPED THE SMOKE' : 'YOU DROPPED THE GRENADE  -  IT\'S LIVE!', 2.2);
+    TH = null; return g;
+  }
+  Mr.throwDrop = throwDrop;
   const _rel = new THREE.Vector3(), _qe = new THREE.Euler(), _qq = new THREE.Quaternion();
   function throwInput(inp, dt) {
     if (!TH) return;
-    if (MS.dead || W.swim || W.ladder) { throwCancel(); return; }
+    const md = MS.mods.med;
+    if (MS.dead || md?.unconscious || md?.weaponUse === 'none' || (MS.M.regions.armR && MS.M.regions.armR.hp <= 0)) { throwDrop(); return; }   // ngc/marine-polish
+    if (W.swim || W.ladder) { throwCancel(); return; }
     const D = TH_T[TH.kind];
     TH.held = !!(kd('KeyG') || dbg.throwHeld);
     TH.under = TH.under || (TH.phase === 'ready' || TH.phase === 'cook') && (held.ads || !!dbg.ads);
@@ -643,7 +715,7 @@ export function createMarine(ctx) {
     const cp = Math.cos(S.camPitch + lift), d = [-Math.sin(S.camYaw) * cp, Math.sin(S.camPitch + lift), -Math.cos(S.camYaw) * cp];
     const h = Mr.firstPerson() ? handWorld() : { x: S.eye.x + d[0] * 0.4, y: S.eye.y + 0.1, z: S.eye.z + d[2] * 0.4 };
     if (smoke) {
-      const T = TH.T, g = { smoke: T, x: h.x, y: h.y, z: h.z, vx: d[0] * v + (W.vx || 0), vy: d[1] * v, vz: d[2] * v + (W.vz || 0), fuse: T.fuseS ?? 1.5, burn: T.burnS ?? 60, mesh: new THREE.Mesh(smokeGeo, smokeMat) };
+      const T = TH.T, g = { smoke: T, x: h.x, y: h.y, z: h.z, vx: d[0] * v + (W.vx || 0), vy: d[1] * v, vz: d[2] * v + (W.vz || 0), fuse: T.fuseS ?? 1.5, burn: T.burnS ?? 60, mesh: new THREE.Mesh(smokeGeo(T.smoke), smokeMat) };
       scene.add(g.mesh); grenades.push(g); A()?.mech('pin'); say(`SMOKE OUT  -  M18 ${String(T.smoke).toUpperCase()}`, 1.2); Mr.lastThrow = g; return g;
     }
     const g = { x: h.x, y: h.y, z: h.z, vx: d[0] * v + (W.vx || 0), vy: d[1] * v, vz: d[2] * v + (W.vz || 0), fuse: 4.5 - TH.cook, cooked: TH.cook, mesh: new THREE.Mesh(grenGeo, grenMat) };
@@ -701,12 +773,14 @@ export function createMarine(ctx) {
     else if (Mr.ui) hint = 'TAB GEAR  ·  H HEALTH  ·  ESC CLOSE';
     else if (Mr.care.hint()) hint = Mr.care.hint();   // ngc/infdepth: casualties, carrying, a corpsman on you
     else if (thr) hint = thr;
+    else if (selfAid()) { const a = selfAid(); hint = `SELF AID: ${a.label}  ${Math.round(a.t)} / ${Math.round(a.T)} S  -  STAY STILL (SPRINT STOPS IT)`; }   // ngc/marine-polish
+    else if (MS.M.bleedRate() > 20) hint = 'YOU ARE BLEEDING  -  K: SELF AID  ·  H: HEALTH';
     else if (lt) hint = `F: SEARCH ${lt.name}`;
     else if (ctx.useHint && (uh = ctx.useHint(W.x, W.y, W.z, S.camYaw ?? W.yaw))) hint = uh;   // ngc/interiors: F opens / shuts the door in front of you
     else if (ctx.serviceAt(W.x, W.z) && (I.countRounds(MS.inv, '556') < 200 || !MS.inv.slots.secondary)) hint = 'F: REARM AND RESUPPLY HERE';
     else if (W.ladder) hint = `${W.ladder.name}  -  W / S TO CLIMB, SPACE TO LET GO`;
     else if (W.swim) hint = W.y < -2 ? `UNDER WATER  -  BREATH ${Math.ceil(W.breath)} S  ·  LET GO OF C TO SURFACE` : 'SWIMMING  -  HOLD C TO DIVE  ·  MAKE FOR A BEACH OR THE ALBATROSS STERN LADDER';   // (ngc/waterfish)
-    else { tip = true; hint = 'CLICK: LOOK  ·  LMB FIRE  ·  RMB AIM  ·  R RELOAD  ·  TAB GEAR  ·  H HEALTH  ·  F USE  ·  C / Z STANCE  ·  Q / E LEAN'; }
+    else { tip = true; hint = 'CLICK: LOOK  ·  LMB FIRE  ·  RMB AIM  ·  R RELOAD  ·  TAB GEAR  ·  H HEALTH  ·  K SELF AID  ·  F USE  ·  C / Z STANCE  ·  Q / E LEAN'; }
     return { line, hint, tip, weap, fuel: S.staminaFrac * 100, fuelLabel: 'STAMINA' };
   };
   Mr.pl = { detect: () => ({ stand: 0.45, crouch: 0.32, prone: 0.18 })[S.stanceT < 1 ? S.stanceTo : S.stance] + (S.sprinting ? 0.12 : 0) + (Mr.firedT < 3 ? 0.25 : 0) };
