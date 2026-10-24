@@ -83,8 +83,9 @@ function frame(now) {
   cockpit.group.visible = inside;
   if (inside) {
     cockpit.update(A, ctl, dt, hudState());
-    const E = TEYE[X.seat]; camera.position.copy(E).applyQuaternion(A.q).add(A.pos);
-    camera.quaternion.copy(A.q).multiply(_q.setFromEuler(_e.set(X.look + (X.seat ? -0.16 : 0), X.yaw, 0, 'YXZ'))); camera.near = 0.05;
+    const lean = Math.min(1, Math.max(0, (Math.abs(X.yaw) - 0.9) / 1.4));   // as tomcatplay.js cockpitCam: lean out to look back
+    const E = TEYE[X.seat].clone().add(_v.set(-Math.sign(X.yaw) * 0.27 * lean, 0.07 * lean, 0.38 * Math.min(1, Math.max(0, (Math.abs(X.yaw) - 1.6) / 0.9)))); camera.position.copy(E).applyQuaternion(A.q).add(A.pos);
+    camera.quaternion.copy(A.q).multiply(_q.setFromEuler(_e.set(X.look + (X.seat ? -0.16 : 0), X.yaw + Math.sign(X.yaw) * 0.6 * Math.max(0, Math.abs(X.yaw) - 1.9), 0, 'YXZ'))); camera.near = 0.05;
   } else {
     camera.position.set(Math.sin(orbit.yaw) * Math.cos(orbit.pitch), Math.sin(orbit.pitch), Math.cos(orbit.yaw) * Math.cos(orbit.pitch)).multiplyScalar(orbit.dist).add(A.pos);
     camera.lookAt(A.pos); camera.near = 0.5;

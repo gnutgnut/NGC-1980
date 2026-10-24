@@ -54,7 +54,7 @@ export function createPlatforms({ deckY, shipAt, alive = () => true, subY = null
     o.carried = { dx, dy, dz, dyaw };
   };
   PF.settle = (o, onGround = true) => {
-    const deck = deckY(o.x, o.z);
+    const deck = deckY(o.x, o.z, o.y + 0.45);   // ngc/interiors: the deck under him (a hangar deck under the flight deck)
     let ship = deck > -1e8 && onGround && Math.abs(o.y - deck) < 0.6 ? shipAt(o.x, o.z) : null;
     // in the air over the deck it left (a jump, a step off a ledge onto the deck below): stay with that ship, so the
     // jump is relative to the deck

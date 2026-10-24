@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { TOMCAT, TOMCAT_AF } from './units/air/tomcatfm.js';
 import { createTomcatPlay } from './units/air/tomcatplay.js';
+import { startSet } from './units/air/tomcatsys.js';   // COMMANDER + TOMCAT cockpit: a jet you switch into is handed over hot
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -31,10 +32,21 @@ export function createTomcatCraft(ctx) {
   D.frame = out => { out.x = A.pos.x; out.y = A.pos.y; out.z = A.pos.z; out.yaw = yawOf(); return out; };
   D.bounds = () => D.present() && A.onGround ? (D._b ||= {}, Object.assign(D._b, (() => { const y = yawOf(), c = Math.cos(y), s = Math.sin(y), ox = 0.8; return { x: A.pos.x + ox * s, z: A.pos.z + ox * c, yaw: y, hl: 9.6, hw: 1.7, y0: A.pos.y - H0, y1: A.pos.y + 2.6, def: D }; })())) : null;
   // ---------------------------------------------------------------- taking a Tomcat (8 on the ALBATROSS deck, in the helicopter)
-  D.launch = () => {
-    if (G.mode !== 'zarch') { say('CLIMB OUT OF THE CAVE FIRST', 1.6); return; }
-    const c = war.carrier; if (!c || c.sinking !== undefined) { say('NO CARRIER  -  NO TOMCATS', 1.6); return; }
+  // COMMANDER (o.command): taken out from any unit, as craftjet.js does it for the HORNET
+  D.launch = (o = {}) => {
+    if (G.mode !== 'zarch') { say('CLIMB OUT OF THE CAVE FIRST', 1.6); return false; }
+    const c = war.carrier; if (!c || c.sinking !== undefined) { say('NO CARRIER  -  NO TOMCATS', 1.6); return false; }
+    if (o.command) {
+      if (D.present()) return false;
+      if (ctx.catBusy && ctx.catBusy(D)) { say(ctx.catBusy(D), 2); return false; }
+      const stowed = ctx.heliOnDeck() && !ctx.heliStowed(); if (stowed) ctx.stowHeli();
+      if (!TP.launch()) { if (stowed) ctx.unstowHeli(); return false; }
+      park.on = false; D.wing = null;
+      if (!crafts.control('tomcat', 0, 'command')) return false;
+      TP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return true;
+    }
     if (G.craft === 'tomcat') { if (TP.stoppedOnDeck() || A.cat) { TP.respot(); ctx.turnIntoClear(); } else say('TRAP ON THE ALBATROSS FIRST: GEAR, FLAPS DN, HOOK DOWN', 2); return; }
+    if (D.present() && !park.on) { crafts.control('tomcat', 0, 'command'); return; }   // COMMANDER: out with the wingman - take her where she is
     if (G.craft !== 'heli') { say(D.present() && park.on ? 'WALK TO THE PARKED TOMCAT AND CLIMB IN (Y AT THE LADDER, LEFT SIDE)' : 'LAND THE HELICOPTER ON THE ALBATROSS TO TAKE A TOMCAT', 1.8); return; }
     if (!ctx.heliOnDeck()) { say('LAND ON THE ALBATROSS TO TAKE A TOMCAT', 1.8); return; }
     if (ctx.catFouled && ctx.catFouled()) { say('CAT 1 IS FOULED  -  A PARKED JET IS ON IT', 1.8); return; }
@@ -50,22 +62,46 @@ export function createTomcatCraft(ctx) {
   // ---------------------------------------------------------------- in and out
   D.enter = (seat, from) => {
     if (!D.present()) return false;
+    if (D.wing) {   // COMMANDER: back from another unit - the wingman hands over where he is
+      TP.thr = clamp(D.wing.FD.thr, 0, 1); TP.thrSrc = 'kb'; TP.kb.pitch = TP.kb.roll = TP.kb.yaw = 0; TP.pbrake = false; D.wing = null;
+      say(A.onGround ? 'YOU HAVE THE TOMCAT' : `YOU HAVE THE TOMCAT  -  ${Math.round(A.pos.y * 3.28)} FT  ${Math.round(A.eas * 1.944)} KT`, 2);
+    }
     TP.seat = 0; if (seat === 1) TP.setSeat(1);
-    if (from === 'foot') { say(`IN THE TOMCAT  -  ${seat ? 'RIO' : 'PILOT'}  ·  I ENGINES  ·  8 TO THE CATAPULT  ·  [ ] SEAT  ·  Y CLIMB OUT`, 2.5); head.yaw = head.pitch = 0; A.canopyCmd = 0; }
+    if (from === 'foot') { say(`IN THE TOMCAT  -  ${seat ? 'RIO' : 'PILOT'}  ·  I: AUTO START (OR CRANK + THROTTLES BY HAND)  ·  8 TO THE CATAPULT  ·  [ ] SEAT  ·  Y CLIMB OUT`, 2.5); head.yaw = head.pitch = 0; A.canopyCmd = 0; }
+    if (from === 'command') { head.yaw = head.pitch = 0; TP.snapChase(); if (park.on) { A.canopyCmd = 0; TP.pbrake = true; startSet(TP.ss, true); for (const e of A.eng) if (!e.run && e.n < 0.5) e.start = 0.01; } }
     park.on = false; return true;
   };
   D.setSeat = i => TP.setSeat(i);
   D.canExit = () => (TP.stoppedOnDeck() || (A.cat && A.cat.state === 'hold')) ? '' : 'STOP ON THE ALBATROSS DECK FIRST';
   D.exitSpots = () => { const s = D.seats[crafts.seat] || D.seats[0], w = crafts.toWorld(D, s.exit), w2 = crafts.toWorld(D, [2.2, -H0, -5.0]), w3 = crafts.toWorld(D, [0, -H0, -12]); return [w, w2, w3].filter(Boolean).map(p => ({ x: p.x, y: p.y, z: p.z, yaw: yawOf() })); };
-  D.exit = () => {   // the crew climbs down: engines off, canopy up, parking brake set; it rides the deck where it stopped
-    if (A.cat) { A.cat = null; A.launchBar = false; }
-    for (const e of A.eng) { e.run = false; e.start = 0; e.stalled = false; }
+  // COMMANDER: switched away in flight (or rolling, or on the cat stroke): the wingman flies her (craftjet.js has the same)
+  D.flying = () => D.present() && (!A.onGround || (A.cat && A.cat.state !== 'hold') || (!A.cat && !TP.stoppedOnDeck()));
+  D.wing = null;
+  D.exit = next => {
+    if (D.present() && D.flying() && next && next !== D) {
+      D.wing = ctx.createWingman(A, 'TOMCAT', 'TOMCAT'); TP.firing = false; TP.silence(); TP.seat = 0; A.canopyCmd = 0;
+      feed(A.onGround ? 'TOMCAT: THE DECK CREW HAS HER' : 'TOMCAT: WINGMAN HAS THE JET  -  CAP OVER THE ALBATROSS', 'info'); return;
+    }
+    parkHere();
+  };
+  D.recall = () => { if (D.wing) D.wing.recall(); };
+  D.status = () => !D.present() ? '' : D.wing ? (D.wing.state === 'cap' || D.wing.state === 'climb' ? 'CAP' : D.wing.state === 'trapped' ? 'RECOVERING' : D.wing.state === 'cat' ? 'LAUNCHING' : 'RETURNING') : park.on ? 'PARKED ON DECK' : 'FLYING';
+  function parkHere() {   // the crew climbs down: engines off, canopy up, parking brake set; it rides the deck where it stopped
+    D.wing = null;
+    if (A.cat) { A.cat = null; A.launchBar = false; park.cat = true; } else park.cat = false;
+    TP.shutdown();   // throttles OFF, crank OFF: a cold jet for the next crew (the start on the switches, or I)
     A.canopyCmd = 1; TP.pbrake = true; TP.firing = false; TP.silence(); TP.seat = 0;
     park.x = A.pos.x; park.y = A.pos.y - H0; park.z = A.pos.z; park.yaw = yawOf(); park.plat = null; park.loc = null;
     ctx.GR.settle(park, true); park.on = true;
     if (ctx.heliStowed()) ctx.spotHeli();
   };
   D.idle = dt => {
+    if (D.wing) {   // COMMANDER: the wingman flies her; trapped and stopped, she parks
+      if (!D.present()) { D.wing = null; return; }
+      TP.wingman(dt, D.wing, ctx.aiEnv);
+      if (D.wing && D.wing.recovered && A.onGround && !A.wire) { feed('TOMCAT RECOVERED ABOARD THE ALBATROSS', 'good'); parkHere(); }
+      return;
+    }
     if (!park.on || !D.present()) return;
     for (const e of A.eng) { e.n = Math.max(0, e.n - 0.1 * dt); e.ab = 0; e.egt += (20 - e.egt) * Math.min(1, 0.1 * dt); }
     A.canopy = Math.min(1, A.canopy + dt * 0.25); park.dt = dt;
@@ -90,11 +126,12 @@ export function createTomcatCraft(ctx) {
     }
   };
   D.lost = (why, ejected) => {
-    G.tomcatDownT = ejected ? 0.5 : 3; park.on = false; feed(ejected ? 'TOMCAT LOST  -  CREW RECOVERED' : 'TOMCAT AND CREW LOST', 'bad');
-    if (ejected) say(why, 2.5);
-    else { G.lives--; if (G.lives < 0) ctx.gameOver(); }
+    const mine = crafts.active === D; park.on = false; D.wing = null;   // COMMANDER: the fleet's loss (craftjet.js has the same)
+    feed(ejected ? 'TOMCAT LOST  -  CREW RECOVERED' : 'TOMCAT AND CREW LOST', 'bad');
+    if (mine) { G.tomcatDownT = ejected ? 0.5 : 3; if (ejected) say(why, 2.5); }
+    ctx.onUnitLost?.('tomcat', why, mine);
   };
-  D.writeOff = () => { TP.stow(); park.on = false; G.tomcatDownT = 0; };
+  D.writeOff = () => { TP.stow(); park.on = false; G.tomcatDownT = 0; D.wing = null; };
   D.key = code => {
     if (code === 'KeyJ') { CTL.toggle(); return true; }
     if (TP.key(code)) return true;
@@ -121,7 +158,7 @@ export function createTomcatCraft(ctx) {
   D.render = (dt, time, fp) => {
     if (!TP.active) return;
     if (crafts.active === D) TP.render(dt, time, fp, ctx.hover());
-    else { const cam = ctx.camZ(), d = cam ? cam.position.distanceTo(A.pos) : 0; TP.renderParked(dt, time, Math.max(0, 1 - d / 160) * (A.eng[0].n > 0.05 || A.eng[1].n > 0.05 ? 1 : 0)); }
+    else { const cam = ctx.camZ(), d = cam ? cam.position.distanceTo(A.pos) : 0; TP.renderParked(dt, time, Math.max(0, 1 - d / (D.wing ? 320 : 160)) * (A.eng[0].n > 0.05 || A.eng[1].n > 0.05 ? 1 : 0), !!D.wing); }   // COMMANDER: the wingman's crew sits in it
   };
   D.silence = () => TP.silence();
   D.hud = () => {

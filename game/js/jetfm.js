@@ -1,4 +1,4 @@
-// Carrier fighter flight model (F/A-18C-like "HORNET"). Pure: three.js maths only, no DOM, so it runs in node tests.
+// Carrier fighter flight model: the F/A-18A "HORNET" of 1980 (full-scale development jets, F404-GE-400 engines). Pure: three.js maths only, no DOM, so it runs in node tests.
 //
 // World scale: the archipelago is ~1.3 km across, so a real-speed jet would cross it in seconds. Instead the air here is
 // 4x sea-level density (and sound travels at 170 m/s). Every force, moment and g-load is the real aircraft's at the
@@ -28,7 +28,9 @@ export { ATM, KT, FT, LB, DECKOPS, rhoAt };
 export const HORNET = {
   EMPTY: 10400, FUEL_MAX: 2720, GUN_MAX: 120,   // kg; gun "rounds" are tracer bursts of 5 real rounds
   S: 37.16, B: 11.43, C: 3.51, I: [31000, 205000, 230000],
-  TMIL: 48900, TAB: 79200,                        // N per engine (F404-GE-402)
+  // N per engine. 1980 = F404-GE-400: 16,000 lbf with afterburner (GE, Jane's Aero-Engines: CONFIRMED), ~10,600 lbf
+  // dry (sources give 10,500-10,700: INFERRED). Was 48,900 / 79,200 N, the 1990s F404-GE-402 EPE of the F/A-18C.
+  TMIL: 47150, TAB: 71170,
   GEAR: [[0, -2.05, -4.6], [-1.6, -2.05, 0.6], [1.6, -2.05, 0.6]],   // nose, left main, right main: wheel bottoms
   K: [260000, 480000, 480000], DAMP: [55000, 95000, 95000], STROKE: 0.42,
   HOOK_TIP: [0, -1.95, 6.9],

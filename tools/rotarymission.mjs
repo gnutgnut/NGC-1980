@@ -6,7 +6,8 @@
 //          land on the (moved) deck.
 //   MV-22: the same from the KRAKEN, converting to airplane mode for the long leg and back to the hover for the LZ.
 // Checks touchdown sink rates, landing accuracy, terrain clearance, limits and timings.
-//   node tools/rotarymission.mjs [--v] [ch46|mv22]
+//   CH-46 wave-off: the zone is fouled on the first approach; it waves off, comes round and lands.
+//   node tools/rotarymission.mjs [--v] [ch46|waveoff|mv22]
 import { ROT, DT, deg, KT, table } from './rotarykit.mjs';
 const { createDevWorld } = await import(ROT + 'devworld.js');
 const { createPilot, stateOf } = await import(ROT + 'pilot.js');
@@ -34,7 +35,7 @@ async function mission(name, build) {
     if (S.corridor) { const n = deg(S.nac), cor = S.corridor(n); if (!S.landed && (S.ias < cor.min - 10 || S.ias > cor.max + 10)) corridorOut += DT; minNac = Math.min(minNac, n); maxNacSpeed = Math.max(maxNacSpeed, S.ias); }
     if (V && (Math.round(t / DT) % (TR && t > TR[0] && t < TR[1] ? 15 : 120) === 0)) console.log(`${t.toFixed(0).padStart(4)} ${AI.phase.padEnd(9)} pos ${st.x.toFixed(0)},${st.y.toFixed(1)},${st.z.toFixed(0)} agl ${S.agl.toFixed(1)} gs ${(Math.hypot(st.vx, st.vz) * KT).toFixed(0)}kt vy ${st.vy.toFixed(1)} pitch ${deg(st.pitch).toFixed(1)} roll ${deg(st.roll).toFixed(1)} hdg ${deg(st.yaw).toFixed(0)} ${m.extra ? m.extra() : ''} d ${(AI.cmd.dist ?? 0).toFixed(0)}`);
   }
-  console.log('   phases', JSON.stringify(AI.log));
+  console.log('   phases', JSON.stringify(AI.log), AI.waveoffs ? 'wave-offs: ' + AI.waveoffs + ' ' + JSON.stringify(AI.woLog) : '');
   const lzLand = sinks.find(s => s.phase === 'ground' || s.phase === 'descend'), deckLand = sinks.find(s => s.phase === 'parked' || s.phase === 'descend2');
   T.check(`${name}: flew the whole mission and parked on the deck`, parked && !S.dead, `${parked ? 'parked' : 'not parked'} ${S.dead || ''} after ${AI.tAll.toFixed(0)} s`);
   T.check(`${name}: soft touchdown at the LZ`, lzLand && lzLand.vy < 1.5, lzLand ? `${lzLand.vy.toFixed(2)} m/s sink` : 'none', '< 1.5 m/s');
@@ -54,6 +55,18 @@ if (!only || only === 'ch46') {
     const AI = createTransportAI(CH46_AI, { lz: () => lz, home: () => W.spot(-2, -2), unload: () => true });
     return { S, AI, lz, fly: (st, cmd) => flyCH46(S, P, st, cmd, DT), torque: () => S.torque, extra: () => `coll ${S.c.coll.toFixed(2)} tq ${(S.torque * 100).toFixed(0)}%` };
   });
+}
+if (!only || only === 'waveoff') {
+  console.log('--- CH-46E wave-off: the LZ is fouled on the first approach -> power on, climb away, come round again ---');
+  const { createCH46Sim, CH46 } = await import(ROT + 'ch46fm.js');
+  const { flyCH46, CH46_AI } = await import(ROT + 'ch46ai.js');
+  const r = await mission('CH-46 wave-off', W => {
+    const S = createCH46Sim(), sp = W.spot(-2, -2); S.reset([sp.x, sp.y + CH46.CG_H + 0.05, sp.z], sp.hdg, true, W.env);
+    const P = createPilot(CH46.PILOT); P.reset(0); const lz = W.lz(18);
+    const AI = createTransportAI(CH46_AI, { lz: () => lz, home: () => W.spot(-2, -2), unload: () => true, fouled: () => !AI.waveoffs });
+    return { S, AI, lz, fly: (st, cmd) => flyCH46(S, P, st, cmd, DT), torque: () => S.torque };
+  });
+  T.check('CH-46 wave-off: waved off once (fouled), then landed', r.AI.waveoffs === 1 && r.AI.why === 'fouled', `${r.AI.waveoffs} wave-off(s), ${r.AI.why}`);
 }
 if (!only || only === 'mv22') {
   console.log('--- MV-22B: KRAKEN deck -> conversion -> airplane -> conversion -> island LZ (troopers out) -> KRAKEN ---');

@@ -112,7 +112,7 @@ export function buildTankInterior() {
   const lOil = lamp(IP, 0xff3020, -0.2, 0.15, 0.004), lGen = lamp(IP, 0xffa020, -0.15, 0.15, 0.004), lPark = lamp(IP, 0xff3020, -0.1, 0.15, 0.004), lMaster = lamp(IP, 0x30ff40, 0.18, 0.15, 0.004), lHot = lamp(IP, 0xff3020, -0.05, 0.15, 0.004);
   [['OIL', -0.2], ['GEN', -0.15], ['PARK', -0.1], ['TEMP', -0.05], ['MASTER', 0.18]].forEach(([t, x]) => label(IP, t, 0.06, 0.016, x, 0.128, 0.003, 0, 0, '#d8d6c8', null, 60));
   // master switch, start button, fire extinguisher pulls
-  add(box(0.03, 0.05, 0.03, 0.18, -0.15, 0.015), metal, IP); add(new THREE.CylinderGeometry(0.018, 0.018, 0.03, 10).rotateX(Math.PI / 2).translate(0.1, -0.15, 0.015), red, IP);
+  // (the MASTER switch and the START button: armorstations.js, with their hit boxes)
   for (const x of [-0.6, -0.68]) add(box(0.05, 0.07, 0.03, x, 1.2, -1.7), red);
   label(D, 'FIRE', 0.1, 0.03, -0.64, 1.27, -1.69, 0, 0, '#f0e8d0', '#a01c12', 30);
   // T-bar steering control: column from the floor, the bar rotates with the steer input
@@ -143,7 +143,7 @@ export function buildTankInterior() {
   ga(box(2.4, 1.6, 0.04, 0, 0.2, 1.98), white);                            // bustle rear wall
   ga(box(2.4, 0.04, 2.0, 0, -0.62, -0.3), olive); ga(box(2.4, 0.04, 0.9, 0, 0.3, 1.55), grey);   // basket floor; the bustle's raised floor                           // turret basket floor at knee level (legs below)
   // the bustle ready rack: rows of round bases (brass) facing the loader, the radio above
-  for (let r = 0; r < 2; r++) for (let k = 0; k < 7; k++) ga(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 12).rotateX(Math.PI / 2).translate(-0.6 + k * 0.2, 0.47 + r * 0.16, 1.5), brass);
+  // (the round bases themselves: armorstations.js, painted by type and taken out as the rack empties)
   ga(box(1.6, 0.4, 0.42, 0, 0.55, 1.73), dark);
   ga(box(0.8, 0.22, 0.25, 0.1, 0.86, 1.8), olive); label(GU, 'AN/VRC-12', 0.3, 0.05, 0.1, 0.86, 1.67, 0, Math.PI, '#d8d6c8', null, 40);
   ga(box(0.36, 0.06, 0.36, -0.65, -0.15, 0.1), seatM);                     // loader's seat (folded down)
@@ -210,7 +210,7 @@ export function buildTankInterior() {
     // the M85 receiver hung under the cupola roof, its feed tray and ammo can; the sight periscope ahead
     CU.add(new THREE.Mesh(box(0.14, 0.11, 0.18, -0.34, 0.3, 0.06), olive));   // the .50 ammunition can (the receiver is the exterior mount, in the cupola)
     CU.add(new THREE.Mesh(box(0.1, 0.08, 0.08, 0.22, 0.31, -0.33), dark));
-    CU.add(new THREE.Mesh(box(0.04, 0.04, 0.1, 0.3, -0.14, -0.24), red));   // the override handle
+    CU.add(new THREE.Mesh(box(0.04, 0.04, 0.1, 0.3, 0.08, -0.24), red));   // the override handle (above the turret roof line: the roof hides anything lower)
   }
   g.userData.commander = CU;
   // ------------------------------------------------------------------------------------------- update
@@ -237,7 +237,7 @@ export function buildTankInterior() {
     breech.position.z = -0.25 + (V.gun.recoil || 0); roundBase.visible = V.gun.state === 'ready';
     if (GU.visible && (k % 3 === 0)) drawCP(V);
   };
-  return { group: g, driver: D, gunner: GU, commander: CU, update };
+  return { group: g, driver: D, gunner: GU, commander: CU, panel: IP, update };
 }
 
 // ====================================================================================================== shared
@@ -363,5 +363,5 @@ export function buildM113Interior() {
     for (let i = 0; i < 11; i++) soldiers[i].visible = !!V.seats[i];
     for (const d of dome) d.color.setHex(0xfff4d8);
   };
-  return { group: g, driver: D, troops: C, rampIn, cargoIn, update };
+  return { group: g, driver: D, troops: C, rampIn, cargoIn, panel: IP, update };
 }

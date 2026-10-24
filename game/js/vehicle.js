@@ -102,6 +102,7 @@ export function createVehicleCraft(ctx, spec) {
     if (S.hp <= 0) {
       S.hp = 0; S.dead = true; S.engineOn = false; V.wreckT = 0;
       fx.explode(S.x, S.y + 1, S.z, 1.6, { fire: 70, debris: 10, color: 0x3d4430 }); sfx.boom(0.9);
+      ctx.unitLost?.(V, `${spec.label} DESTROYED`, crafts.active === V);   // COMMANDER: the fleet's loss
       if (crafts.active === V) ctx.crewKilled?.(`${spec.label} DESTROYED`);
       else ctx.feed?.(`${spec.label} DESTROYED`, 'bad');
     }

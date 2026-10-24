@@ -8,7 +8,8 @@
 //   banks under 7° roll out and hold the heading) and ALTITUDE HOLD. It drops out past 70° of bank, with the gear
 //   handle down, on the ground, or with the stab aug off / failed.
 // - the TF30 start: air for the starter from the deck's start cart, cross-bleed from the other engine, or ram air
-//   (windmill airstart above ~225 KEAS).
+//   (windmill airstart above ~225 KEAS); the start sequence on the switches (ENG CRANK, throttles OFF / IDLE, wet
+//   starts) and the generators / electrical buses (createStart, startStep: see below).
 import { cadcSweep } from './tomcatfm.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -89,3 +90,78 @@ export function startAir(A, ks) {
   if (A.eas * KT > 225) return 'WINDMILL';
   return null;
 }
+
+// ------------------------------------------------------------------------------------------------ electrics and the TF30 start
+// The pilot's start (NATOPS F-14A order, game-paced): external power and the deck's air cart (huffer) connected; ENG
+// CRANK switch R (the right engine first), the starter motors the TF30; at 20% rpm the right THROTTLE from OFF to IDLE
+// (fuel and ignition): light-off at ~24% and TIT rises; the crank switch drops back to OFF by itself at 50% rpm (a
+// solenoid-held switch); the generator comes on line past ~55% and idles at ~68%. Then the left engine the same way
+// (or on cross-bleed air from the right one). The throttle to IDLE before 15% rpm is a WET start: fuel pools in the
+// burner and the light-off is a hot start (TIT over the red line, a little engine damage). Throttle OFF shuts an
+// engine down. In flight the same switches do an airstart: cross-bleed off the other engine or windmill air above
+// ~225 KEAS (startAir). Generators: L / R GEN (NORM / OFF); with neither on line in flight the emergency generator
+// (driven off the combined hydraulics / ram air) keeps the essential bus (caution lights, standby instruments, VDI).
+// A pure state machine: it moves the sim's e.start / e.run / e.n only (the flight model is untouched).
+export const START = { MOTOR: 0.25, IGN: 0.2, WET: 0.15, CUTOUT: 0.5, GEN: 0.55, RATE: { CART: 0.032, XBLEED: 0.045, WINDMILL: 0.05 } };
+export function createStart(hot = true) {
+  return {
+    crank: 'OFF', thrOff: [!hot, !hot], gen: [true, true], wet: [false, false], cn: [0, 0], cranking: [null, null],
+    gens: [hot, hot], ext: false, bus: hot, emerg: false, ess: hot, auto: null,
+  };
+}
+// set the whole thing hot (engines turning: the jet on the cat) or cold (shut down on deck)
+export function startSet(SS, hot) { Object.assign(SS, createStart(hot)); return SS; }
+// a click on a start / electrics control: 'crankL' | 'crankR' | 'thrL' | 'thrR' | 'genL' | 'genR'. Returns a message.
+export function startPress(SS, A, id) {
+  const k = id.endsWith('R') ? 1 : 0, side = k ? 'R' : 'L', e = A.eng[k];
+  if (id === 'crankL' || id === 'crankR') {
+    if (SS.crank === side) { SS.crank = 'OFF'; SS.auto = null; return 'ENG CRANK  OFF'; }
+    SS.auto = null;
+    if (e.run) { SS.crank = 'OFF'; return `${side} ENGINE IS RUNNING`; }
+    SS.crank = side; const air = startAir(A, [k]);
+    return air ? `ENG CRANK ${side}  -  ${{ CART: 'AIR START CART', XBLEED: 'CROSS-BLEED', WINDMILL: 'WINDMILL' }[air]}  -  ${side} THROTTLE TO IDLE AT 20% RPM` : `ENG CRANK ${side}  -  NO START AIR (DECK CART, THE OTHER ENGINE, OR 225 KNOTS)`;
+  }
+  if (id === 'thrL' || id === 'thrR') {
+    SS.auto = null; SS.thrOff[k] = !SS.thrOff[k];
+    if (SS.thrOff[k]) { SS.wet[k] = false; return `${side} THROTTLE OFF${e.run ? '  -  ENGINE SHUTDOWN' : ''}`; }
+    if (!e.run && e.n < START.WET && SS.cranking[k] === 'CART') SS.wet[k] = true;
+    return `${side} THROTTLE IDLE${e.run ? '' : SS.wet[k] ? '  -  TOO EARLY: FUEL BEFORE 15% (WET START)' : e.n >= START.IGN ? '  -  FUEL AND IGNITION' : ''}`;
+  }
+  if (id === 'genL' || id === 'genR') { SS.gen[k] = !SS.gen[k]; return `${side} GEN ${SS.gen[k] ? 'NORM' : 'OFF'}`; }
+  return '';
+}
+// the one-key start (I): right engine, then left, moving the same switches a pilot would
+export function startAuto(SS, A) { if (A.eng.every(e => e.run)) return false; SS.auto = { k: A.eng[1].run ? 0 : 1 }; return true; }
+// every frame before the sim step. o: { ext (deck power and air connected), eng: [hp 0..1] }. Returns events [[name, k], ...]
+export function startStep(SS, A, dt, o = {}) {
+  const ev = [];
+  if (SS.auto) {   // the auto-start: crank, throttle IDLE at 21%, wait for the crank cut-out, then the other side
+    const k = SS.auto.k, e = A.eng[k], side = k ? 'R' : 'L';
+    if (e.run && e.n > START.CUTOUT) { const o2 = 1 - k; if (A.eng[o2].run) { SS.auto = null; ev.push(['autodone', k]); } else SS.auto = { k: o2 }; }
+    else if (!e.run) {
+      if (SS.crank !== side) { SS.crank = side; ev.push(['autocrank', k]); }
+      if (SS.thrOff[k] && SS.cn[k] >= START.IGN + 0.01) { SS.thrOff[k] = false; ev.push(['autoidle', k]); }
+      if (!startAir(A, [k])) { SS.auto = null; SS.crank = 'OFF'; ev.push(['noair', k]); }
+    }
+  }
+  for (let k = 0; k < 2; k++) {
+    const e = A.eng[k], side = k ? 'R' : 'L', hp = o.eng ? o.eng[k] : 1;
+    if (SS.thrOff[k] && (e.run || e.start > 0)) { e.run = false; e.start = 0; e.stalled = false; ev.push(['shutdown', k]); }
+    const air = SS.crank === side && !e.run ? startAir(A, [k]) : null;
+    SS.cranking[k] = air;
+    if (air) {
+      if (!SS.thrOff[k] && e.n < START.WET && air === 'CART') SS.wet[k] = true;   // throttle already at IDLE as it turns: fuel too early
+      SS.cn[k] =Math.min(START.MOTOR, Math.max(SS.cn[k], e.n) + START.RATE[air] * dt);
+      e.start = !SS.thrOff[k] && A.fuel > 0 && hp > 0.05 && SS.cn[k] >= START.IGN ? 0.01 : 0;   // fuel + ignition: the sim lights it at ~24%
+    } else SS.cn[k] = e.n;
+    if (SS.crank === side && e.run && e.n >= START.CUTOUT) { SS.crank = 'OFF'; ev.push(['crankout', k]); }
+    SS.gens[k] = SS.gen[k] && e.n > START.GEN && hp > 0.05;
+  }
+  SS.ext = !!o.ext;
+  SS.bus = SS.gens[0] || SS.gens[1] || SS.ext;
+  SS.emerg = !SS.bus && !A.onGround && (A.eng.some(e => e.n > 0.3) || A.eas * KT > 120);
+  SS.ess = SS.bus || SS.emerg;
+  return ev;
+}
+// every frame after the sim step: a cranking engine turns at the starter's speed (the sim would let it run down)
+export function startPost(SS, A) { for (let k = 0; k < 2; k++) { const e = A.eng[k]; if (SS.cranking[k] && !e.run) e.n = SS.cn[k]; } }

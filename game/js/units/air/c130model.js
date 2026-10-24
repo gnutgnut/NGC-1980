@@ -483,6 +483,17 @@ export function buildC130Mesh() {
   decal(g, starT, 3.6, 1.8, [-15.0, 3.1, 1.0], 0, 'insigniaWing', -Math.PI / 2);   // upper left wing
   { const d = decal(g, starT, 3.6, 1.8, [15.0, 2.36, 1.0], 0, 'insigniaWingLow', Math.PI / 2); d.rotation.z = Math.PI; }   // lower right wing
   for (const s of [-1, 1]) decal(g, noStepT, 1.4, 0.26, [s * 11.8, 3.12, 2.4], 0, 'noStep', -Math.PI / 2);
+  // the red propeller warning band on the fuselage sides in the plane of the props, white border and lettering
+  const propT = decalTex('propwarn', 64, 512, (x, w, h) => { x.fillStyle = '#f2f2ea'; x.fillRect(0, 0, w, h); x.fillStyle = '#c0281c'; x.fillRect(8, 0, w - 16, h);
+    x.save(); x.translate(w / 2, h / 2); x.rotate(-Math.PI / 2); x.font = 'bold 26px Arial'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#f2f2ea'; x.fillText('DANGER  PROPELLER', 0, 1); x.restore(); });
+  for (const s of [-1, 1]) decal(g, propT, 0.32, 2.6, [s * 2.117, -0.2, C130M.PROP_Z], s * Math.PI / 2, 'propWarning');
+  // wing walkways: black edge lines from the fuselage out past the inboard nacelles
+  const walkT = decalTex('walk', 256, 32, (x, w, h) => { x.fillStyle = '#1a1a1a'; x.fillRect(0, 2, w, 3); x.fillRect(0, h - 5, w, 3); });
+  for (const s of [-1, 1]) decal(g, walkT, 3.4, 0.9, [s * 3.9, 3.06, 1.2], 0, 'walkway', -Math.PI / 2);
+  // the HF long-wire antenna from the flight deck roof to the fin, a C-130 signature
+  { const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute([0, 2.35, -9.7, 0, 2.75, 2.5, 0, 2.75, 2.5, 0, 8.7, 12.7], 3));
+    const wire = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x202020 })); wire.name = 'hfWire'; g.add(wire);
+    body.add(rodG([0, 2.4, 2.5], [0, 2.78, 2.5], 0.04), blackM); }
 
   // ---- the crew seen through the windscreen from outside (the flight deck module draws its own inside)
   { const crewM = M(0x55603f), helmM = M(0x2b2f2a), skinM = M(0xc19a77);

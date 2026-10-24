@@ -4,13 +4,15 @@
 // Bindings are keyed by USB vendor:product (or the id string), so they survive the pads swapping order.
 const KEY = 'tz_controls_v1';
 export const HAT_DIRS = [[0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1]];   // up, then clockwise
-const PID_NAME = { b67c: 'T.Flight Hotas 4', b679: 'T-Rudder' };
+const PID_NAME = { b67c: 'HOTAS 4', b679: 'T-Rudder' };   // short: the J panel's binding column is narrow
 
 export const ACTIONS = [
-  { id: 'fire', label: 'GUN / TRIGGER' }, { id: 'pickle', label: 'WEAPON RELEASE' }, { id: 'missile', label: 'FIRE MISSILE' },
-  { id: 'bomb', label: 'DROP BOMB' }, { id: 'airbrake', label: 'SPEED BRAKE (HOLD)' }, { id: 'gear', label: 'LANDING GEAR' },
-  { id: 'flaps', label: 'FLAPS CYCLE' }, { id: 'hook', label: 'TAIL HOOK' }, { id: 'view', label: 'COCKPIT / CHASE VIEW' },
-  { id: 'zoom', label: 'ZOOM VIEW (HOLD)' }, { id: 'wheelbrake', label: 'WHEEL BRAKES (HOLD)' }, { id: 'eject', label: 'EJECT (HOLD 1S)' },
+  // ngc/hornethuey: one binding, two aircraft - the label says what the button does in the jets and (after the dot) in
+  // the UH-1H, where heli.js reads the same actions: door gun, rockets, bombs, hoist, stab assist, force trim, light, starter
+  { id: 'fire', label: 'GUN / TRIGGER · HUEY DOOR GUN' }, { id: 'pickle', label: 'WEAPON RELEASE · HUEY HOIST' }, { id: 'missile', label: 'FIRE MISSILE · HUEY ROCKETS' },
+  { id: 'bomb', label: 'DROP BOMB · HUEY BOMBS' }, { id: 'airbrake', label: 'SPEED BRAKE (HOLD) · HUEY HOIST' }, { id: 'gear', label: 'LANDING GEAR · HUEY STAB ASSIST' },
+  { id: 'flaps', label: 'FLAPS CYCLE · HUEY FORCE TRIM' }, { id: 'hook', label: 'TAIL HOOK · HUEY LANDING LIGHT' }, { id: 'view', label: 'COCKPIT / CHASE VIEW' },
+  { id: 'zoom', label: 'ZOOM VIEW (HOLD)' }, { id: 'wheelbrake', label: 'WHEEL BRAKES (HOLD) · HUEY STARTER (HOLD)' }, { id: 'eject', label: 'EJECT (HOLD 1S)' },
   // TOMCAT: the wing sweep switch on the outboard throttle (no default buttons: bind them in the J panel)
   { id: 'sweepfwd', label: 'WING SWEEP FWD (HOLD, TOMCAT)' }, { id: 'sweepaft', label: 'WING SWEEP AFT (HOLD, TOMCAT)' }, { id: 'sweepauto', label: 'WING SWEEP AUTO (TOMCAT)' },
   { id: 'flare', label: 'FLARES (COUNTERMEASURES)' }, { id: 'chaff', label: 'CHAFF (COUNTERMEASURES)' },   // ngc/cmpolish: Huey M130, Hornet ALE-39
@@ -25,7 +27,7 @@ export const AXIS_FNS = [
   { id: 'rudder', label: 'RUDDER PEDALS', type: 'ctr', prompt: 'PUSH RIGHT PEDAL FORWARD, THEN FULL LEFT AND RIGHT' },
   { id: 'brakeL', label: 'LEFT TOE BRAKE', type: 'brk', prompt: 'PRESS LEFT TOE BRAKE FULLY, THEN RELEASE' },
   { id: 'brakeR', label: 'RIGHT TOE BRAKE', type: 'brk', prompt: 'PRESS RIGHT TOE BRAKE FULLY, THEN RELEASE' },
-  { id: 'rocker', label: 'THROTTLE ROCKER', type: 'ctr', prompt: 'ROCK THE ROCKER RIGHT FIRST, THEN BOTH WAYS' },
+  { id: 'rocker', label: 'ROCKER: FLARE R / CHAFF L', type: 'ctr', prompt: 'ROCK THE ROCKER RIGHT FIRST, THEN BOTH WAYS' },
 ];
 const FN = Object.fromEntries(AXIS_FNS.map(f => [f.id, f]));
 const DZ = { roll: 0.04, pitch: 0.04, twist: 0.06, rudder: 0.06, rocker: 0.1 };
@@ -183,7 +185,9 @@ export function createControls({ say = () => {}, getPads, storage, now } = {}) {
       const sus = C.suspend || open || !!wig || !!bindBtn;
       for (const a of ACTIONS) {
         if (a.setting) { S.actions[a.id] = cfg[a.id]; S.pressed[a.id] = false; continue; }
-        const b = btnOf(a.id), d = b && byKey[b.dev], h = !!d && btnDown(d.pad.buttons[b.btn]);
+        // the HOTAS 4 throttle rocker doubles as the countermeasures switch (yaw comes from the pedals or the stick twist,
+        // so it is otherwise unused; the stick has no buttons 13 / 14): rock right = FLARES, rock left = CHAFF
+        const b = btnOf(a.id), d = b && byKey[b.dev], h = (!!d && btnDown(d.pad.buttons[b.btn])) || (a.id === 'flare' && S.rocker > 0.6) || (a.id === 'chaff' && S.rocker < -0.6);
         held[a.id] = h; S.actions[a.id] = !sus && h; S.pressed[a.id] = !sus && h && !prevHeld[a.id]; prevHeld[a.id] = h;
       }
       if (wig) stepWiggle(); if (bindBtn) stepBindBtn();
@@ -265,7 +269,7 @@ background:rgba(0,10,25,.92);border:1px solid #4aa;color:#9ff;font:12px/1.35 Con
 #tzc button{font:inherit;color:#9ff;background:rgba(0,40,60,.7);border:1px solid #4aa;padding:1px 6px;margin-left:3px;cursor:pointer;text-transform:uppercase}#tzc button:hover{background:#0a5a6a;color:#fff}
 #tzc .hd{display:flex;align-items:center;gap:14px}#tzc .hd .src{flex:1;color:#bde}#tzc .pr{min-height:20px;margin:6px 0 2px;color:#ff8;font-size:14px;letter-spacing:1px}
 #tzc .cols{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:16px}#tzc table{width:100%;border-collapse:collapse}#tzc td{padding:1px 3px;white-space:nowrap}
-#tzc td.b{color:#bde;overflow:hidden;text-overflow:ellipsis;max-width:190px}#tzc td.r{text-align:right}#tzc .def{color:#6aa}#tzc .no{color:#866}
+#tzc td.b{color:#bde;overflow:hidden;text-overflow:ellipsis;max-width:160px}#tzc td.r{text-align:right}#tzc .def{color:#6aa}#tzc .no{color:#866}
 #tzc .br{display:inline-block;position:relative;width:90px;height:9px;border:1px solid #4aa;vertical-align:middle;background:rgba(0,30,40,.6)}#tzc .br i{position:absolute;top:0;bottom:0;background:#4df}
 #tzc .br.c:after{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;border-left:1px solid #4aa}#tzc .lmp{display:inline-block;width:10px;height:10px;border:1px solid #4aa;border-radius:50%}#tzc .lmp.on{background:#ff8;box-shadow:0 0 6px #ff8}
 #tzc .dev{border:1px solid #4aa6;padding:4px 6px;margin-bottom:6px}#tzc .dev .t{color:#fff}#tzc .axs{display:grid;grid-template-columns:1fr 1fr;gap:1px 12px;margin:3px 0}
@@ -332,7 +336,10 @@ background:rgba(0,10,25,.92);border:1px solid #4aa;color:#9ff;font:12px/1.35 Con
     for (const a of ACTIONS) {
       const r = ui.btRow[a.id]; let h;
       if (a.setting) h = cfg[a.id] ? 'ON' : '<span class="no">OFF</span>';
-      else { const b = btnOf(a.id); h = cfg.btns[a.id] === null ? '<span class="no">- UNBOUND -</span>' : !b ? '<span class="no">NO DEVICE</span>' : `${esc(byKey[b.dev]?.short || b.dev)} BTN ${b.btn + 1}${cfg.btns[a.id] ? '' : ' <span class="def">(DEFAULT)</span>'}`;
+      else { const b = btnOf(a.id), d = b && byKey[b.dev], rk = (a.id === 'flare' || a.id === 'chaff') && !cfg.btns[a.id] && d && b.btn >= d.pad.buttons.length && axisOf('rocker');
+        // (the HOTAS 4 has 12 buttons: its default FLARES / CHAFF are the throttle rocker, see poll())
+        h = cfg.btns[a.id] === null ? '<span class="no">- UNBOUND -</span>' : !b ? '<span class="no">NO DEVICE</span>' : rk ? `${esc(d.short)} ROCKER ${a.id === 'flare' ? 'RIGHT' : 'LEFT'} <span class="def">(DEFAULT)</span>`
+          : `${esc(byKey[b.dev]?.short || b.dev)} BTN ${b.btn + 1}${cfg.btns[a.id] ? '' : ' <span class="def">(DEFAULT)</span>'}`;
         r.l.classList.toggle('on', !!held[a.id]); r.bind.classList.toggle('busy', bindBtn?.id === a.id); }
       if (r.h !== h) r.b.innerHTML = r.h = h;
     }

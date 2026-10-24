@@ -1,6 +1,6 @@
 // THE 1980 MARINE, the rest of his life (ngc/foot2): search the ammunition crate on the ALBATROSS deck (F), rearm on
 // the carrier deck, ride the TEST CAR and get out again with the same kit and wounds, then bleed out from an untreated
-// femoral wound: the life ends (lives - 1), his body stays on the deck with his kit, a new crew starts in the Huey and
+// femoral wound: the life ends (COMMANDER: one Marine lost to the fleet), his body stays on the deck with his kit, a new crew starts in the Huey and
 // the next Marine out is a fresh one.
 //   CHROME_PATH=/home/jayjay/.cache/chs/chrome.sh node snap.mjs scenes/marinelife.mjs
 export default async function (h) {
@@ -32,12 +32,12 @@ export default async function (h) {
   await h.key('tap', 'KeyY'); await h.wait(600);
   await h.expect("__G.G.craft === 'foot' && Math.round(__G.marine.M.regions.armL.hp) === __hp && __G.marine.inv.slots.belt.slots.ammoL.grids.flat().length === __mags", 'out of the car: the same Marine (wound and kit kept)');
   // 4. an untreated femoral bleed: he bleeds out -> the life ends
-  await h.eval(`(() => { const c = __G.war.carrier, p = __G.GR.fromShip(c, -6, 8, 0, {}); __G.foot.spawnAt({ x: p.x, y: __G.GR.deckH(p.x, p.z), z: p.z, yaw: c.yaw }); const M = __G.marine.M; M.bleeds.push({ id: 901, region: 'legR', zone: 'thigh', type: 'arterial', rate: 500, ctl: 'tq', name: 'FEMORAL A.', clot: 0, ctrl: 1, t: 0, dressed: false, packed: false, stopped: false }); window.__lives = __G.G.lives; return __lives; })()`);
+  await h.eval(`(() => { const c = __G.war.carrier, p = __G.GR.fromShip(c, -6, 8, 0, {}); __G.foot.spawnAt({ x: p.x, y: __G.GR.deckH(p.x, p.z), z: p.z, yaw: c.yaw }); const M = __G.marine.M; M.bleeds.push({ id: 901, region: 'legR', zone: 'thigh', type: 'arterial', rate: 500, ctl: 'tq', name: 'FEMORAL A.', clot: 0, ctrl: 1, t: 0, dressed: false, packed: false, stopped: false }); window.__lives = __G.fleet.lost.marine; return __lives; })()`);
   await h.eval('(() => { const M = __G.marine.M; let t = 0; while (M.lossFrac() < 0.4 && !M.unconscious && t < 600) { M.update(0.25, {}); t += 0.25; } return { t, cls: M.cls(), conscious: M.conscious, vision: __G.marine.MS.mods.med && __G.marine.MS.mods.med.vision }; })()');
   await h.wait(800); await h.shot('bleeding-out-tunnel-vision');
   await h.eval('(() => { const M = __G.marine.M; let t = 0; while (!M.dead && t < 900) { M.update(0.25, {}); t += 0.25; } return { t, cause: M.cause }; })()');
   await h.waitFor('!__G.foot.alive', 5000);
-  await h.expect('!__G.foot.alive && __G.G.lives === __lives - 1 && __G.marine.bodies.length >= 1', 'bled out: the life ends, his body stays');
+  await h.expect('!__G.foot.alive && __G.fleet.lost.marine === __lives + 1 && __G.marine.bodies.length >= 1', 'bled out: a Marine lost to the fleet (COMMANDER), his body stays');
   await h.wait(1200); await h.shot('killed-bled-out');
   await h.waitFor("__G.G.craft === 'heli'", 15000);
   await h.expect("__G.G.craft === 'heli' && __G.Z.alive", 'a new crew in the Huey');

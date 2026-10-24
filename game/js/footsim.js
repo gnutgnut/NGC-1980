@@ -55,7 +55,7 @@ export function createWalker(P = SOLDIER) {
   // rise over the next metre along (dx, dz) - a ramp's grade; steps and edges (more than STEP) are not slopes
   function grade(dx, dz, env, d = 1) {
     const l = Math.hypot(dx, dz) / d; if (l < 1e-6) return 0;
-    const g = env.floor(W.x + dx / l, W.z + dz / l, W.y + 1.2, P.STEP + 1.2, W.tall);
+    const g = env.floor(W.x + dx / l, W.z + dz / l, W.y + 0.8, P.STEP + 0.8, W.tall);   // (ngc/interiors: was +1.2: a deck 2.6 m overhead, the next level, read as a wall of a slope)
     return g === Infinity ? 0 : g - W.y;
   }
   W.step = (dt, intent, env) => {
@@ -113,7 +113,8 @@ export function createWalker(P = SOLDIER) {
     const fx = -Math.sin(W.yaw), fz = -Math.cos(W.yaw), rx = Math.cos(W.yaw), rz = -Math.sin(W.yaw);
     let sp = speedFor(I) * (W.swim ? 1 : 1 - 0.55 * W.wade) * (W.onGround && !W.swim ? Math.max(0.6, (env.SURF && env.SURF[_s.surface] ? env.SURF[_s.surface].speed : 1)) : 1);
     if (mz < 0) sp *= W.stance === 'stand' && !W.swim ? 0.7 : 1;   // walking backwards is slower
-    if (W.onGround && ml > 0.1 && !W.swim && !W.wade) {   // hills: Tobler's hiking function relative to the flat (Tobler 1993, CONFIRMED form)
+    if (W.onGround && ml > 0.1 && env.stairAt && env.stairAt(W.x, W.z, W.y)) sp *= 0.6;   // ngc/interiors: a stair is climbed step by step (~0.9 m/s up its slope), not at a hill's pace
+    else if (W.onGround && ml > 0.1 && !W.swim && !W.wade) {   // hills: Tobler's hiking function relative to the flat (Tobler 1993, CONFIRMED form)
       const dx = fx * mz + rx * mx, dz = fz * mz + rz * mx, S = grade(dx, dz, env), S2 = grade(dx * 0.5, dz * 0.5, env, 0.5) * 2;
       if (Math.abs(S) < 1.2 && Math.abs(S - S2) < 0.3) sp *= Math.max(0.3, Math.min(1.1, Math.exp(-3.5 * (Math.abs(S + 0.05) - 0.05))));   // a drop off an edge is not a slope
     }

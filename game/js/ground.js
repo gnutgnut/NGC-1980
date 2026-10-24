@@ -91,7 +91,7 @@ export function createGround(ctx) {
   // below you, else the terrain / seabed. Walls (a superstructure, a shaft mouth) come back as +Infinity.
   GR.floor = (x, z, y, step = 0.45, tall = 1.8) => {
     if (holeOf(x, z)) return Infinity;   // the shafts are fenced: walk round them
-    const t = terrainH(x, z), deck = deckH(x, z);
+    const t = terrainH(x, z), deck = deckH(x, z, y + step);   // ngc/interiors: a ship with an interior answers by height (hangar deck, island levels)
     if (deck > -1e8) {
       if (deck <= y + step) return Math.max(deck, t);          // on it, or dropping onto it
       const u = war.shipAt(x, z), bottom = u ? u.p.y - 4 : deck - 12;   // hulls reach 4 m under the waterline
@@ -102,7 +102,16 @@ export function createGround(ctx) {
     let f = t; for (const fl of floors) { const v = fl(x, z, y, step); if (v !== null && v > f) f = v; }
     return f;
   };
-  GR.addFloor = fn => { floors.push(fn); };   // fn(x, z, y, step) -> a surface height at or below y + step, or null
+  GR.addFloor = fn => { floors.push(fn); };
+  // ngc/interiors: on a stair (a building's, a ship's inclined ladder)? footsim climbs it at a stair's pace
+  const stairSrc = [], _st = { x: 0, y: 0, z: 0 };
+  GR.addStairs = fn => { stairSrc.push(fn); };
+  GR.stairAt = (x, z, y) => {
+    const c = war.carrier;
+    if (c && c.interior && Math.abs(x - c.p.x) < 70 && Math.abs(z - c.p.z) < 70) { PF.toShip(c, x, y, z, _st); if (c.interior.stairAt(_st.x, _st.y, _st.z)) return true; }
+    for (const f of stairSrc) if (f(x, z, y)) return true;
+    return false;
+  };   // fn(x, z, y, step) -> a surface height at or below y + step, or null
 
   // ------------------------------------------------------------------ ships: frames, decks, carrying
   // wave 2 (ngc/foot2): the ALBATROSS island as NAVAL built it (units/naval/albatross.js buildIsland, tower frame:
@@ -138,10 +147,18 @@ export function createGround(ctx) {
     if (tx >= -3.4 && tx <= 1.0 && tz >= 0.3 && tz <= 4.9) h = 15.8;                        // pri-fly roof
     return h === null ? null : D.DECK + h;
   }
-  // the deck under (x, z): war.deckY, with the ALBATROSS island replaced by its real levels
-  function deckH(x, z) {
+  // the deck under (x, z): war.deckY, with the ALBATROSS island replaced by its real levels.
+  // ngc/interiors: y (optional) = the highest you could stand at: inside the ALBATROSS's interior zones (the hangar deck,
+  // the island: interiors/shipint.js) the floor is the highest one at or under y, so decks stack (hangar under flight deck)
+  const _ish = { x: 0, y: 0, z: 0 };
+  function deckH(x, z, y) {
     const c = war.carrier;
     if (c && c.dims && c.side === 1 && Math.abs(x - c.p.x) < 70 && Math.abs(z - c.p.z) < 70 && !(c.sinking > 4)) {
+      if (y !== undefined && c.interior) {
+        PF.toShip(c, x, y, z, _ish);
+        const f = c.interior.floorAt(_ish.x, _ish.y, _ish.z);
+        if (f !== undefined) { if (f === -Infinity) return -1e9; const a = c.att; return a ? shipPointY(c.p.y, a.heave, a.pitch, a.roll, _ish.x, f, _ish.z) : c.p.y + f; }
+      }
       const [lx, lz] = toLocal(c, x, z), h = albIsland(c.dims, lx, lz, c.parts);
       if (h !== null) { const a = c.att; return a ? shipPointY(c.p.y, a.heave, a.pitch, a.roll, lx, h, lz) : c.p.y + h; }
     }
@@ -165,8 +182,9 @@ export function createGround(ctx) {
     { ship: 'carrier', side: 1, name: 'ISLAND LADDER', lx: CARRIER.TOWER_X - 2.75, lz: CARRIER.TOWER_Z - 6.6, yaw: -Math.PI / 2, y0: CARRIER.DECK, y1: CARRIER.DECK + ALB_TOP, w: 0.9, top: [1.0, 0.9] },
   ];
   GR.LADDERS = LADDERS;
-  // NAVAL: a ship model that exports its ladders (parts.ladders, ship frame, drawn by the model) is the authority
-  GR.laddersOf = u => u.parts && u.parts.ladders ? u.parts.ladders : LADDERS.filter(L => L.ship === u.type && (L.side === undefined || L.side === u.side));
+  // NAVAL: a ship model that exports its ladders (parts.ladders, ship frame, drawn by the model) is the authority;
+  // ngc/interiors: plus a ship interior's own ladders (the ALBATROSS bridge ladder, usable while its hatch is open)
+  GR.laddersOf = u => { const a = u.parts && u.parts.ladders ? u.parts.ladders : LADDERS.filter(L => L.ship === u.type && (L.side === undefined || L.side === u.side)); return u.interior ? a.concat(u.interior.laddersOpen()) : a; };
   const _lw = { x: 0, y: 0, z: 0 };
   // the world-space description of a ladder on ship u: base point, facing, top / bottom heights (deck motion included)
   GR.ladderWorld = (L, u, out = {}) => {
@@ -261,7 +279,8 @@ export function createGround(ctx) {
     for (const u of war.units) {
       if (!u.dims || Math.abs(o.x - u.p.x) > 70 || Math.abs(o.z - u.p.z) > 70) continue;
       const D = u.dims;
-      if (u.type === 'carrier') n += shipBoxes(o, u, u.parts.islandBoxes || (isAlb(u) ? ALB_BOXES : KRK_BOXES), D.TOWER_X, D.TOWER_Z, D.DECK);
+      if (u.type === 'carrier' && u.interior) n += shipBoxes(o, u, u.interior.boxes(), 0, 0, 0);   // ngc/interiors: the island hollow (rooms, doors), the hangar's walls
+      else if (u.type === 'carrier') n += shipBoxes(o, u, u.parts.islandBoxes || (isAlb(u) ? ALB_BOXES : KRK_BOXES), D.TOWER_X, D.TOWER_Z, D.DECK);
       else if (u.type === 'battleship') n += shipBoxes(o, u, BS_BOXES, 0, 4, D.DECK);
       else if (u.type === 'freighter') n += shipBoxes(o, u, FR_BOXES, 0, D.L / 2 - 6, D.DECK);
       if (u.parts && u.parts.boxes) {   // SEAWORLD: the lift railings (ship-frame boxes that move with each lift)

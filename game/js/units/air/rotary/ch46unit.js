@@ -10,6 +10,7 @@ import { createTransportAI } from './transportai.js';
 import { flyCH46, CH46_AI } from './ch46ai.js';
 import { buildCH46Mesh } from './ch46model.js';
 import { createSquad, padSlots } from './squad.js';
+import { createEmbark } from './embark.js';
 
 const _v = new THREE.Vector3();
 export function createCH46Unit(o) {
@@ -18,7 +19,7 @@ export function createCH46Unit(o) {
   S.reset([o.start.x, o.start.y + CH46.CG_H + 0.05, o.start.z], o.start.yaw, true, o.env); P.reset(0);
   const model = buildCH46Mesh({ modex: o.modex }); o.parent.add(model.group);
   const squad = createSquad({ parent: o.parent, side: 1, n, kind: 'marine', groundY: (x, z) => o.env.groundY(x, z) });
-  const U = { S, P, model, squad, ramp: 0, rampT: 0, unloadT: 0, deployed: false, time: 0, engines: true, dead: false };
+  const U = { S, P, model, squad, ramp: 0, rampT: 0, unloadT: 0, deployed: false, time: 0, engines: true, dead: false, gunAim: null, gunFiring: false };   // gunAim: world direction the door gunners swing onto (set by the war)
   const AI = U.AI = createTransportAI(CH46_AI, {
     lz: o.lz, home: o.home,
     unload(ai, dt) {   // ramp down, Marines out (up the cabin, down the ramp, out to the pad), ramp up once they're clear
@@ -37,6 +38,8 @@ export function createCH46Unit(o) {
     },
     parked() { U.parked = true; if (o.onParked) o.onParked(U); },
   });
+  // loading on the deck / pad before lift-off (o.board), with the deck crew on a ship's spot (o.deck() -> the spot)
+  if (o.board) { U.embark = createEmbark({ kind: 'ch46', U, deck: o.deck, parent: o.parent, jersey: o.jersey || 'yellow' }); AI.hooks.board = U.embark.board; }
   const animS = { nr: 1, F: { tx: 0, ty: 0 }, A: { tx: 0, ty: 0 }, coll: 0, ramp: 0, run: true, n1: 0.9, cone: 0.06 };
   U.update = (dt, time) => {
     U.time = time;
@@ -51,17 +54,19 @@ export function createCH46Unit(o) {
     }
     U.ramp += Math.max(-dt / 2.5, Math.min(dt / 2.5, U.rampT - U.ramp));
     U.sync(dt, time);
+    if (U.embark) { model.group.updateMatrixWorld(); U.embark.update(dt, time, AI.phase); }
     if (!U.squadExternal) squad.update(dt, time);
   };
   U.sync = (dt, time) => {
     const b = S.body, g = model.group;
     g.position.set(b.pos[0], b.pos[1], b.pos[2]); g.quaternion.set(b.q[0], b.q[1], b.q[2], b.q[3]);
     animS.nr = S.rpm; animS.F.tx = S.rf.tx; animS.F.ty = S.rf.ty; animS.A.tx = S.ra.tx; animS.A.ty = S.ra.ty; animS.coll = S.c.coll;
+    animS.gunAim = U.gunAim; animS.gunFiring = U.gunFiring;
     animS.ramp = U.ramp; animS.n1 = S.eng[0].n1; animS.light = AI.phase === 'descend' || AI.phase === 'descend2' || (AI.phase === 'transit' && AI.cmd.dist < 200);
     animS.cone = Math.min(0.12, 0.75 * Math.max(0, (S.rf.ct + S.ra.ct) / 2) / 0.058);   // coning ~ CT / sigma
     model.animate(animS, dt, time);
   };
   U.setPad = p => { o.pad = p; };
-  U.dispose = () => { o.parent.remove(model.group); squad.dispose(); };
+  U.dispose = () => { o.parent.remove(model.group); if (U.embark) U.embark.dispose(); squad.dispose(); };
   return U;
 }

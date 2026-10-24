@@ -25,6 +25,19 @@ export function createSight({ canvas }) {
     const W = ov.width, H = ov.height; c.clearRect(0, 0, W, H);
     const pxPerRad = (H / 2) / Math.tan(s.fov * Math.PI / 360), cx = W / 2, cy = H / 2;
     if (s.mode === 'chase' || s.mode === 'cupola') { chaseReticle(s, W, H, pxPerRad); return; }
+    if (s.mode === 'binos') {   // the commander's 7x50 binoculars: two overlapping eyepiece circles, the mil reticle (10-mil marks)
+      const r = Math.min(W * 0.3, H * 0.47), dx = r * 0.62, cx = W / 2, cy = H / 2;
+      c.fillStyle = '#000'; c.fillRect(0, 0, W, H);   // black, then cut both eyepieces out of it
+      c.save(); c.globalCompositeOperation = 'destination-out'; c.beginPath(); c.arc(cx - dx, cy, r, 0, Math.PI * 2); c.moveTo(cx + dx + r, cy); c.arc(cx + dx, cy, r, 0, Math.PI * 2); c.fill('nonzero'); c.restore();
+      const g = c.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 1.6); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+      c.strokeStyle = 'rgba(12,12,10,0.85)'; c.fillStyle = c.strokeStyle; c.lineWidth = Math.max(1, H / 600); c.font = `${Math.round(H / 60)}px "Courier New", monospace`; c.textAlign = 'center';
+      const mil = 1e-3 * pxPerRad, x0 = cx + dx;   // the reticle is in the right eyepiece, as in the M19/M17
+      c.beginPath(); c.moveTo(x0 - 50 * mil, cy); c.lineTo(x0 + 50 * mil, cy); c.stroke();
+      for (let m = -50; m <= 50; m += 10) { c.beginPath(); c.moveTo(x0 + m * mil, cy - (m ? 5 : 9) * mil * 0.4); c.lineTo(x0 + m * mil, cy); c.stroke(); if (m) c.fillText(String(Math.abs(m / 10)), x0 + m * mil, cy - 5 * mil * 0.4 - 4); }
+      for (let m = 5; m <= 20; m += 5) { c.beginPath(); c.moveTo(x0 - 3, cy + m * mil); c.lineTo(x0 + 3, cy + m * mil); c.stroke(); }
+      c.beginPath(); c.moveTo(x0, cy); c.lineTo(x0, cy + 20 * mil); c.stroke();
+      return;
+    }
     const V = s.V, R = Math.min(W, H) * 0.46, tts = s.mode === 'tts', cool = V.ttsCool > 0.95;
     // eyepiece: black outside the circle, a soft dark rim
     c.save(); c.fillStyle = '#000'; c.beginPath(); c.rect(0, 0, W, H); c.arc(cx, cy, R, 0, Math.PI * 2, true); c.fill();
@@ -45,7 +58,7 @@ export function createSight({ canvas }) {
     c.font = `${Math.round(H / 48)}px "Courier New", monospace`;
     c.fillText(`${tts ? 'TTS ' + V.ttsMag + 'X ' + (V.ttsPolarity === 'wh' ? 'WH' : 'BH') : 'DAY 8X'}   ${V.stabMode === 'STAB RUN-UP' ? 'STAB RUN-UP ' + Math.round(V.gyro * 100) + '%' : V.stabMode || (V.hydP > 0.5 ? (V.stab ? 'STAB' : 'POWER') : 'MANUAL')}${V.fc.solved ? '   COMP ' + V.fc.range : '   BS 1200'}`, cx, cy - R * 0.85);
     if (tts && !cool) c.fillText(`COOLING ${Math.round(V.ttsCool * 100)} %`, cx, cy - R * 0.2);
-    if (s.note) { c.font = `${Math.round(H / 52)}px "Courier New", monospace`; c.fillText(s.note, cx, cy + R * 0.92); }
+    if (s.note) { c.font = `${Math.round(H / 52)}px "Courier New", monospace`; c.fillText(s.note, cx, cy - R * 0.74); }   // (under the status line: at the bottom it ran under the HUD hint)
   };
   // chase view / commander's cupola: a light crosshair where the gun (or the .50) points, a ring at the camera's aim
   function chaseReticle(s, W, H, pxPerRad) {

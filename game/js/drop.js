@@ -14,6 +14,7 @@ import { createC130Sim, C130, KT } from './units/air/c130fm.js';
 import { C130M } from './units/air/c130model.js';
 import { buildC130Deck, DECK_EYE, DECK_EYE_PITCH } from './units/air/c130cockpit.js';
 import { createC130Audio } from './units/air/c130audio.js';
+import { buildDoorBundle } from './units/air/jumper.js';
 
 const CALL = 'RAIDER 21';
 const N_JUMPERS = 3, WORK = 10, FUEL_EACH = 20, ENTRY = 1400, RUN = 4.5;
@@ -23,6 +24,13 @@ const DROP_KIAS = 130, CRUISE_KIAS = 150, DROP_AGL = 170, JUMP_MIN_AGL = 120, JU
 // MC1-1 (FM 3-21.220 / TM 10-1670-1): ~8 kt forward drive, ~18 ft/s descent, 360 deg in ~9 s; the static line pulls it
 // at once, it is out of the bag at ~2 s and fully open at ~3.5 s (the "four-second count"). The canopy flies in real air
 // (the 4x density of the aircraft world is a scale trick for the aeroplanes only). Rear-riser slip (S) kills the drive.
+// Jump commands (FM 3-21.220 / FM 57-220 sequence, the C-130 has outboard seats along the sides): issued by time to the
+// release point, compressed from minutes to seconds like the whole run. The stick hooks its static lines to the anchor
+// line cables, the door bundle (A-21 bag on a G-14) goes first on the green light, the static lines and deployment bags
+// trail from the doors until the jumpmaster pulls them in.
+const JM_CMDS = [['GET READY', 34], ['OUTBOARD PERSONNEL, STAND UP', 30], ['HOOK UP', 26], ['CHECK STATIC LINES', 22], ['CHECK EQUIPMENT', 18],
+  ['SOUND OFF FOR EQUIPMENT CHECK', 14], ['STAND BY', 6]];
+const HOOKED = 2, DOORS_OPEN = 5;   // stage index after which the stick is hooked up / the jumpmaster has the doors open
 const DRIVE = 4.1, SINK = 5.5, TURN = 0.7, SLIP_DRIVE = 1.2, SLIP_SINK = 6.2, DEPLOY = 3.5, HARD_LANDING = 7.0;
 const rnd = (a, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -73,6 +81,9 @@ export function createDrop(ctx) {
     else if (id === 'flap') { S.flapSel = S.flapSel >= 1 ? 0 : S.flapSel + 0.5; M.flapManual = true; }
     else if (id === 'ap' || id === 'apAlt') api.toggleAP();
     else if (id === 'af') S.autoFeatherArm = !S.autoFeatherArm;
+    else if (id === 'bat') S.battery = !S.battery;
+    else if (id === 'gtc') S.gtc.cmd = !S.gtc.cmd;
+    else if (id === 'bleed') S.bleedValve = !S.bleedValve;
     else if (id === 'jump') { M.jumpSwitch = { off: 'red', red: 'green', green: 'off' }[M.jumpSwitch]; M.lightManual = true; if (M.jumpSwitch === 'green') callGreen(); }
     else if (id === 'bell') { if (M.left > 0) { say('ALARM BELL  -  ABANDON AIRCRAFT', 2); while (M.left > 0) jump(true); } }
     else if (id === 'doorL' || id === 'doorR') { const i = id === 'doorL' ? 0 : 1; S.doorCmd[i] = S.doorCmd[i] ? 0 : 1; M.doorManual = true; }
@@ -85,6 +96,8 @@ export function createDrop(ctx) {
     if (M.hadStick) ctx.releaseStick();
     M.plane.mesh.remove(deck.group); scene.remove(M.plane.mesh); M.plane.u.gone = true;
     for (const j of M.jumpers) scene.remove(j.m.group);
+    if (M.bundle) scene.remove(M.bundle.m.group);
+    for (const L of M.statics) scene.remove(L.line);
     tRing.visible = pRing.visible = false; snd.stop(); M = null;
   }
 
@@ -112,7 +125,7 @@ export function createDrop(ctx) {
       plane: { u, sim, mesh: m.group, parts: m, p: sim.pos, entry: e, lastHp: u.hp }, ap: true, view: 'cockpit', ctl: { roll: 0, pitch: 0, yaw: 0, throttle: [0.5, 0.5, 0.5, 0.5] }, kb: { roll: 0, pitch: 0 },
       jumpers: [], left: N_JUMPERS, jumpCd: 0, work: 0, arrived: 0, fixed: false, t: 0, smokeT: 0, hadStick: false, apJump: true,
       cam: new THREE.Vector3().copy(sim.pos).add(_v.set(0, 25, 70)), look: new THREE.Vector3().copy(target), lost: 0, light: 'off', jumpSwitch: 'off', exits: 0,
-      doorMen: [null, null], doorT: [0, 0], hold: null, noInput: 9, env: { groundY: (x, z) => Math.max(groundY(x, z), 0), water: (x, z) => isWater(x, z), wind: { x: 0, z: 0 } },
+      doorMen: [null, null], jmFig: null, safetyFig: null, doorT: [0, 0], hold: null, jm: { stage: 0, lastT: -9 }, bundle: null, bundleOut: false, bundleOK: false, statics: [], trail: [], retrieved: false, lastExitT: 0, noInput: 9, env: { groundY: (x, z) => Math.max(groundY(x, z), 0), water: (x, z) => isWater(x, z), wind: { x: 0, z: 0 } },
     };
     M.env.wind.x = M.wind.x; M.env.wind.z = M.wind.y;
     const dir = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((Math.atan2(M.wind.x, -M.wind.y) + 6.283) % 6.283) / 0.785) % 8];
@@ -126,11 +139,23 @@ export function createDrop(ctx) {
   // ---------------------------------------------------------------- jumpers
   // where a jumper leaving the aircraft now lands if he does not steer: the static-line deployment (he slows to the
   // wind and falls), then the canopy drives along the run heading and drifts with the wind
-  function predict(out) { const S = M.plane.sim; return predictFrom(S.pos.x, S.pos.y, S.pos.z, S.vel.x, S.vel.z, S.vel.y, S.heading, out); }
-  function predictFrom(x, y, z, vx, vz, vy, h, out) {
+  // While the door bundle is still aboard the release point is set inside the pattern: the bundle (no drive, ~28 ft/s)
+  // lands short and the jumpers' unsteered point long; the aim sits 80 % of the way toward the bundle (it cannot steer,
+  // the men can: from 800 ft an MC1-1 has ~120 m of drive), so the bundle lands near the helicopter and the stick
+  // steers back onto it (a release point set for the men alone dropped the bundle ~120 m short, often in the sea).
+  function predict(out) { const S = M.plane.sim; return predictPattern(S.pos.x, S.pos.y, S.pos.z, S.vel.x, S.vel.z, S.vel.y, S.heading, out); }
+  const _pb = new THREE.Vector3();
+  function predictPattern(x, y, z, vx, vz, vy, h, out) {
+    predictFrom(x, y, z, vx, vz, vy, h, out);
+    if (M.bundleOut || M.left === 0) return out;
+    predictFrom(x, y, z, vx, vz, vy, h, _pb, true);
+    return out.set(out.x * 0.2 + _pb.x * 0.8, 0, out.z * 0.2 + _pb.z * 0.8).setY(groundY(out.x, out.z));
+  }
+  function predictFrom(x, y, z, vx, vz, vy, h, out, bundle = false) {
     const dt = 0.25;
     for (let t = 0; t < 90; t += dt) {
-      if (t < DEPLOY) { const k = Math.exp(-0.9 * dt); vx = M.wind.x + (vx - M.wind.x) * k; vz = M.wind.y + (vz - M.wind.y) * k; vy = t < 2 ? Math.max(vy - 9.8 * dt, -25) : vy + (-SINK - vy) * (1 - Math.exp(-3 * dt)); }
+      if (bundle) { const k = Math.exp(-0.9 * dt); vx = M.wind.x + (vx - M.wind.x) * k; vz = M.wind.y + (vz - M.wind.y) * k; vy = t < 1.8 ? Math.max(vy - 9.8 * dt, -25) : vy + (-8.5 - vy) * (1 - Math.exp(-3 * dt)); }
+      else if (t < DEPLOY) { const k = Math.exp(-0.9 * dt); vx = M.wind.x + (vx - M.wind.x) * k; vz = M.wind.y + (vz - M.wind.y) * k; vy = t < 2 ? Math.max(vy - 9.8 * dt, -25) : vy + (-SINK - vy) * (1 - Math.exp(-3 * dt)); }
       else { vx = fwdX(h) * DRIVE + M.wind.x; vz = fwdZ(h) * DRIVE + M.wind.y; vy = -SINK; }
       x += vx * dt; y += vy * dt; z += vz * dt;
       if (y < groundY(x, z) + 0.5) break;
@@ -151,13 +176,36 @@ export function createDrop(ctx) {
     if (d) d.group.visible = !!show;
   }
 
+  // the jumpmaster and the safety (the loadmaster) in the hold, part of the aircraft: the jumpmaster does his door check
+  // in the left door (leaning out, looking toward the nose for the DZ) from doors open until he pushes the door bundle,
+  // then stands at the aft edge of the door facing the stick, controlling the static lines; the safety stands at the
+  // aft edge of the right door the whole time the doors are open. Both stay aboard (they retrieve the bags).
+  function holdCrew(S) {
+    const fig = (key, pose, t, x, z, ry, show) => {
+      let f = M[key];
+      if (show && !f) { f = buildJumper(); f.canopy.visible = false; f.rig.setKit?.(false); M.plane.mesh.add(f.group); M[key] = f; f.cur = ''; }
+      if (!f) return;
+      f.group.visible = !!show; if (!show) return;
+      if (f.cur !== pose) { f.rig.pose(pose, t); f.cur = pose; }
+      f.group.position.set(x, C130M.FLOOR_Y, z); f.group.rotation.y = ry;
+    };
+    const live = !M.plane.down && !M.plane.gone, dz = C130M.DOOR[0][2];
+    const check = live && !M.egress && M.jm.stage > DOORS_OPEN && !M.bundleOut && S.door[0] > 0.9;
+    if (check) fig('jmFig', 'doorcheck', 1, -1.84, dz, Math.PI / 2, true);
+    else fig('jmFig', 'safety', 1, -1.5, dz + 0.78, 0.35, live && S.door[0] > 0.3 && M.jm.stage > DOORS_OPEN);
+    fig('safetyFig', 'safety', -1, 1.5, dz + 0.78, -0.35, live && S.door[1] > 0.3 && M.jm.stage > DOORS_OPEN);
+  }
+
   function jump(force) {
     const S = M.plane.sim;
     if (!force) {
       if (aglOf(S.pos) < JUMP_MIN_AGL) { say(`NO JUMP  -  TOO LOW: CLIMB ABOVE ${Math.round(JUMP_MIN_AGL * 3.28 / 50) * 50} FT`, 1.4); M.jumpCd = 0.8; M.jumpSwitch = 'red'; return; }
       if (S.kias > JUMP_MAX_KIAS) { say(`NO JUMP  -  TOO FAST: SLOW BELOW ${JUMP_MAX_KIAS} KIAS`, 1.4); M.jumpCd = 0.8; M.jumpSwitch = 'red'; return; }
     }
+    if (!force && M.jm.stage <= HOOKED) { say('JUMPMASTER: NOT HOOKED UP  -  HOLD', 1.4); M.jumpCd = 1; return; }
+    if (!force && !M.bundleOut) { pushBundle(); M.jumpCd = 0.5; return; }   // the door bundle goes first
     M.left--; M.jumpCd = force ? 0.15 : 0.6;   // two doors, one man a second from each
+    M.lastExitT = M.t;
     const i = M.exits % 2; M.exits++;   // alternate doors, left first
     if (M.doorMen[i]) { M.plane.mesh.remove(M.doorMen[i].group); M.doorMen[i] = null; M.doorT[i] = 0.9; }
     const m = buildJumper(); m.canopy.visible = false; m.rig.pose('exit'); scene.add(m.group);
@@ -165,6 +213,7 @@ export function createDrop(ctx) {
     const v = S.vel.clone().addScaledVector(side, 1.6); v.y -= 0.5;
     const j = { m, p: door, v, h: S.heading + (i ? -0.3 : 0.3), state: 'ff', t: 0, off: (M.jumpers.length - 1) * 4, door: i };
     M.jumpers.push(j); sfx.ui?.('select');
+    if (!force) { staticLine(j, i); if (M.jumpers.length === 1) feed('JUMPMASTER: GO!', 'good'); }
     say(M.left ? `JUMPER AWAY  -  ${M.left} LEFT` : 'STICK AWAY  -  STEER THE CANOPIES: A/D TURN, S RISER SLIP', 1.6);
   }
   // the green light: the jumpmaster starts the stick (the rest follow at a second's spacing while it stays green)
@@ -172,6 +221,87 @@ export function createDrop(ctx) {
     if (!M || M.left === 0) return;
     M.jumpSwitch = 'green';
     if (M.jumpCd <= 0) jump();
+  }
+
+  // ---- the jumpmaster: commands by time to the release point
+  function timeToGo() {
+    const S = M.plane.sim; if (!M.run || M.run.setup) return 99;
+    return -runGeom().s / Math.max(15, Math.hypot(S.vel.x, S.vel.z));
+  }
+  function jumpmaster() {
+    const J = M.jm; if (M.egress || M.plane.down || J.stage >= JM_CMDS.length) return;
+    const T = timeToGo(), [cmd, at] = JM_CMDS[J.stage];
+    if ((T < at || (J.stage === JM_CMDS.length - 1 && M.light === 'red')) && M.t - J.lastT > 1.6 && (J.stage < JM_CMDS.length - 1 || M.light !== 'off')) {
+      feed(`JUMPMASTER: ${cmd}${J.stage === 5 ? '  -  "OKAY!"' : ''}`, 'info'); J.stage++; J.lastT = M.t;
+      if (J.stage === DOORS_OPEN + 1) feed('JUMPMASTER: DOORS OPEN, AIR DEFLECTORS OUT, JUMP PLATFORMS DOWN', 'info');
+    }
+  }
+  // static line: anchor cable over the door -> the jumper's pack while it pays out (4.6 m, ~0.6 s), then the
+  // deployment bag stays on it and trails from the door
+  const ANCHOR = [[-1.55, 0.95, 6.45], [1.55, 0.95, 6.45]];
+  const lineM = new THREE.LineBasicMaterial({ color: 0xd8d0b0 });
+  function staticLine(j, i) {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3));
+    const line = new THREE.Line(g, lineM); line.frustumCulled = false; scene.add(line); M.statics.push({ line, j, i });
+  }
+  function updateStatics() {
+    const S = M.plane.sim;
+    for (let n = M.statics.length - 1; n >= 0; n--) {
+      const L = M.statics[n], p = L.line.geometry.attributes.position;
+      _v.set(...ANCHOR[L.i]).applyQuaternion(S.q).add(S.pos);
+      if (L.j.t < 0.7 && !M.plane.gone) { p.setXYZ(0, _v.x, _v.y, _v.z); p.setXYZ(1, L.j.p.x, L.j.p.y + 1.3, L.j.p.z); p.needsUpdate = true; continue; }
+      scene.remove(L.line); M.statics.splice(n, 1); trailBag(L.i);
+    }
+  }
+  function trailBag(i) {   // a spent static line and its deployment bag streaming aft from the door, flapping
+    const s = i ? 1 : -1, n = M.trail.filter(t => t.i === i).length, g = new THREE.Group();
+    const pts = [ANCHOR[i], [s * 2.15, -0.3, 6.95], [s * (2.4 + n * 0.12), -1.0 - n * 0.25, 11.2 + n * 0.5]];
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts.flat(), 3));
+    g.add(new THREE.Line(lg, lineM));
+    const bag = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.42), new THREE.MeshLambertMaterial({ color: 0x5a6038 })); bag.position.set(...pts[2]); g.add(bag);
+    M.plane.mesh.add(g); M.trail.push({ g, bag, i, n, base: pts[2] });
+  }
+  function updateTrail() {
+    for (const t of M.trail) t.bag.position.set(t.base[0] + Math.sin(M.t * 13 + t.n) * 0.08, t.base[1] + Math.sin(M.t * 17 + t.n * 2) * 0.1, t.base[2]);
+    if (M.left === 0 && M.trail.length && !M.retrieved && M.t - M.lastExitT > 7) {
+      for (const t of M.trail) M.plane.mesh.remove(t.g); M.trail.length = 0; M.retrieved = true;
+      feed('JUMPMASTER: STATIC LINES AND BAGS RETRIEVED  -  DOORS CLOSING', 'info');
+    }
+  }
+  // the door bundle: out of the left door, its G-14 opens on a static line; it carries the tools
+  function pushBundle() {
+    const S = M.plane.sim, b = buildDoorBundle(); b.canopy.visible = false; scene.add(b.group);
+    const p = doorWorld(0, new THREE.Vector3()), v = S.vel.clone().addScaledVector(S.right(_r), -1.4);
+    M.bundle = { m: b, p, v, state: 'ff', t: 0, h: S.heading }; M.bundleOut = true;
+    feed('JUMPMASTER: DOOR BUNDLE AWAY', 'info'); sfx.thump?.(0.4);
+  }
+  function updateBundle(dt) {
+    const B = M.bundle; if (!B || B.state === 'down') return;
+    B.t += dt;
+    const k = Math.exp(-0.9 * dt); B.v.x = M.wind.x + (B.v.x - M.wind.x) * k; B.v.z = M.wind.y + (B.v.z - M.wind.y) * k;
+    const sink = 8.5;   // G-14 with a full A-21: ~28 ft/s
+    B.v.y = B.t < 1.8 ? Math.max(B.v.y - 9.8 * dt, -25) : B.v.y + (-sink - B.v.y) * (1 - Math.exp(-3 * dt));
+    if (B.t > 1.2) { B.m.canopy.visible = true; B.m.animate(M.t, (B.t - 1.2) / 1.8); }
+    B.p.addScaledVector(B.v, dt);
+    const gy = groundY(B.p.x, B.p.z);
+    if (B.p.y < gy + 0.3) {
+      B.state = 'down'; B.p.y = gy; B.m.canopy.visible = false; B.m.bag.rotation.z = 0.3;
+      const d = Math.hypot(B.p.x - M.target.x, B.p.z - M.target.z);
+      if (isWater(B.p.x, B.p.z) && gy < 0.6) { B.p.y = -0.4; feed('DOOR BUNDLE IN THE WATER  -  THE TOOLS ARE LOST', 'bad'); }
+      else if (d < 200) { M.bundleOK = true; feed(`DOOR BUNDLE ON THE DZ, ${Math.round(d)} m FROM THE HELICOPTER  -  TOOLS: REPAIRS GO FASTER`, 'good'); }
+      else feed('DOOR BUNDLE DOWN TOO FAR OFF  -  THEY WORK WITH WHAT THEY CARRY', 'bad');
+    }
+    B.m.group.position.copy(B.p); B.m.group.rotation.y = B.h;
+  }
+  // the checklist card on the flight deck: what the crew is working through now
+  function checklist(S) {
+    const flaps = `${Math.round(S.flap * 100)} %`, agl = Math.round(aglOf(S.pos) * 3.28 / 10) * 10;
+    if (M.egress) return { title: 'COMPLETION OF DROP', items: [['JUMP LIGHTS', M.jumpSwitch === 'off', 'OFF'], ['STATIC LINES / BAGS', M.retrieved, 'RETRIEVED'],
+      ['PARA DOORS', S.door[0] < 0.05 && S.door[1] < 0.05, 'CLOSED'], ['AIR DEFLECTORS', S.door[0] < 0.05, 'RETRACTED'], ['FLAPS', S.flap < 0.05, 'UP'], ['DROP REPORT', true, 'SENT']] };
+    const J = M.jm.stage;
+    return { title: J >= 1 ? 'SLOWDOWN / AIRDROP' : 'DESCENT - TWENTY MINUTE', items: [['TWENTY MINUTE WARNING', true, 'GIVEN'], ['DROP ALTITUDE', Math.abs(aglOf(S.pos) - DROP_AGL) < 25, `${agl} FT AGL`],
+      ['FLAPS', S.flap > 0.45, flaps], ['AIRSPEED', Math.abs(S.kias - DROP_KIAS) < 8, `${Math.round(S.kias)} KIAS`], ['STICK', J > HOOKED, 'HOOKED UP'],
+      ['PARA DOORS / DEFLECTORS', S.door[0] > 0.9 && S.door[1] > 0.9, 'OPEN'], ['DOOR BUNDLE', J > HOOKED, 'IN THE DOOR'], ['JUMP LIGHTS', M.jumpSwitch !== 'off', M.jumpSwitch.toUpperCase()]] };
   }
 
   function landJumper(j) {
@@ -251,7 +381,7 @@ export function createDrop(ctx) {
   function planRun(h) {
     const T = M.target, alt = Math.max(T.y, 0) + DROP_AGL, rho = 4.9 * Math.exp(-alt / 6000), tas = DROP_KIAS / KT * Math.sqrt(1.225 / rho);
     const ux = fwdX(h), uz = fwdZ(h), along = tas + M.wind.x * ux + M.wind.y * uz;   // the autopilot crabs: ground track along the run
-    predictFrom(T.x, alt, T.z, ux * along, uz * along, 0, h, _w);
+    predictPattern(T.x, alt, T.z, ux * along, uz * along, 0, h, _w);
     M.run = { h, x: T.x - (_w.x - T.x), z: T.z - (_w.z - T.z), passes: 0, setup: false };
   }
   function runGeom() {   // along-track distance s (negative before the release point) and cross-track c (+ = right of it)
@@ -290,7 +420,7 @@ export function createDrop(ctx) {
       else if (!M.egress && M.run && runGeom().s > -1500 && runGeom().s < 300 && S.kias < 175) S.flapSel = 0.5;
       if (M.egress && S.kias > 140 && S.vel.y > -1) S.flapSel = 0;
     }
-    if (!M.doorManual) { const open = !M.egress && (M.light !== 'off' || M.jumpSwitch !== 'off') && S.kias < 180; S.doorCmd[0] = S.doorCmd[1] = open ? 1 : 0; }
+    if (!M.doorManual) { const open = (!M.egress || !M.retrieved) && (M.jm.stage > DOORS_OPEN || M.light !== 'off' || M.jumpSwitch !== 'off') && S.kias < 180 && !(M.egress && M.retrieved); S.doorCmd[0] = S.doorCmd[1] = open ? 1 : 0; }
     for (let k = 0; k < 4; k++) {
       const e = S.eng[k];
       if (!e.run && e.cond !== 'feather' && !e.autoFeathered && e.hp < 0.5 && (M.ap || !M.hadStick)) { e.crewT = (e.crewT || 0) + dt; if (e.crewT > 2.5) { S.setCond(k, 'feather'); if (e.fire) { e.fire = 'out'; e.firePulled = true; } feed(`${CALL}: NUMBER ${k + 1} FEATHERED`, 'info'); } }
@@ -347,6 +477,7 @@ export function createDrop(ctx) {
     } else c = { roll: 0.35 + Math.sin(M.t * 1.3) * 0.2, pitch: -0.25, yaw: 0.3, throttle: [0, 0, 0, 0] };
     M.ctl = c;
     crew(dt);
+    jumpmaster();
         S.step(dt, c, M.env);
     // jumps: the green light (you: F or the switch; the crew on autopilot); the jumpmaster sends one a second
     M.jumpCd -= dt;
@@ -358,8 +489,10 @@ export function createDrop(ctx) {
       if (M.jumpSwitch === 'green' && M.jumpCd <= 0) jump();
     }
     if (M.left === 0 && !M.egress) { M.egress = true; M.egressT = M.t; M.jumpSwitch = 'off'; }
+    updateStatics(); updateTrail();
     // the next men stand in the open doors
-    for (let i = 0; i < 2; i++) { M.doorT[i] -= dt; const need = M.left > (i === M.exits % 2 ? 0 : 1); doorMan(i, need && S.door[i] > 0.9 && M.doorT[i] <= 0 && !P.down); }
+    for (let i = 0; i < 2; i++) { M.doorT[i] -= dt; const need = M.left > (i === M.exits % 2 ? 0 : 1); doorMan(i, need && S.door[i] > 0.9 && M.doorT[i] <= 0 && !P.down && (i === 1 || M.bundleOut || M.jm.stage <= DOORS_OPEN)); }
+    holdCrew(S);
     // warnings
     if (!P.down && hasStick) {
       if (S.buffet > 0.3) sfx.alarm?.();
@@ -388,7 +521,7 @@ export function createDrop(ctx) {
     const S = M.plane.sim; predict(_w); let miss = Math.hypot(_w.x - M.target.x, _w.z - M.target.z);
     // on the run: the stick goes when the predicted landing point comes abeam the helicopter (a little early for a stick
     // of three at a second's spacing) and no more than 90 m to the side (they can steer that out under canopy)
-    if (M.run && !M.run.setup) { const ax = _w.x - M.target.x, az = _w.z - M.target.z, al = ax * fwdX(M.run.h) + az * fwdZ(M.run.h), lat = ax * Math.cos(M.run.h) - az * Math.sin(M.run.h); if (al > -30 && al < 20 && Math.abs(lat) < 90) miss = 0; }
+    if (M.run && !M.run.setup) { const ax = _w.x - M.target.x, az = _w.z - M.target.z, al = ax * fwdX(M.run.h) + az * fwdZ(M.run.h), lat = ax * Math.cos(M.run.h) - az * Math.sin(M.run.h); if (al > (M.bundleOut ? -30 : 0) && al < 20 && Math.abs(lat) < 90) miss = 0; else if (!M.bundleOut) miss = 99; }   // the bundle goes first: no early green for it
     const onRun = !M.run || (!M.run.setup && Math.abs(angDiff(S.track(), M.run.h)) < 0.5);
     if (miss < 35 && onRun && aglOf(S.pos) > JUMP_MIN_AGL && S.kias < JUMP_MAX_KIAS) return 'green';
     if (!M.run) return 'off';
@@ -420,7 +553,8 @@ export function createDrop(ctx) {
     if (!M.fixed && (M.smokeT -= dt) <= 0) { M.smokeT = 0.12; fx.mix.spawn(M.target.x + 2, M.target.y + 0.6, M.target.z, M.wind.x * 0.5, rnd(1.5, 3), M.wind.y * 0.5, rnd(4, 7), 0.8, 7, .3, .85, .35, 0.55, -0.15, 0.25, 0); }
     // repairs: man-seconds of work from whoever made it
     const working = M.jumpers.filter(j => j.state === 'work').length;
-    if (working && !M.fixed) { M.work += working * dt; if (M.work >= WORK) { M.fixed = true; ctx.onRepaired(); } }
+    updateBundle(dt);
+    if (working && !M.fixed) { M.work += working * dt * (M.bundleOK ? 1.5 : 1); if (M.work >= WORK) { M.fixed = true; ctx.onRepaired(); } }
     // markers, instruments, sound
     tRing.visible = !M.fixed; pRing.visible = M.left > 0 && !M.plane.gone && !M.plane.down;
     if (tRing.visible) { tRing.position.set(M.target.x, M.target.y + 0.4, M.target.z); tRing.scale.setScalar(1 + 0.08 * Math.sin(M.t * 5)); }
@@ -430,11 +564,13 @@ export function createDrop(ctx) {
       if (deck.group.visible) {
         const C = cautions(S); if (!Object.values(C).some(Boolean)) M.mcReset = false;
         deck.update(S, { ap: M.ap, jumpLight: M.jumpSwitch, jumpSwitch: M.jumpSwitch, dz: { brg: Math.atan2(-(M.target.x - S.pos.x), -(M.target.z - S.pos.z)), dist: Math.hypot(M.target.x - S.pos.x, M.target.z - S.pos.z) },
-          agl: aglOf(S.pos) - 2.6, cautions: C, mcReset: M.mcReset, time: M.t, ctl: M.ctl }, dt, hover);
+          agl: aglOf(S.pos) - 2.6, cautions: C, mcReset: M.mcReset, time: M.t, ctl: M.ctl, checklist: checklist(S) }, dt, hover);
       }
       if (camRef) {
         const d = camRef.position.distanceTo(S.pos), vr = d > 1 ? _v.subVectors(camRef.position, S.pos).dot(S.vel) / d : 0;
-        snd.update({ eng: S.eng, tas: S.tas, inside: deckView(), dist: d, vr });
+        // outside: each engine panned by where it is across the camera's view
+        const pans = deckView() ? null : C130M.ENG_X.map(x => { _w.set(x, C130M.ENG_Y, C130M.PROP_Z).applyQuaternion(S.q).add(S.pos).sub(camRef.position); _r.set(1, 0, 0).applyQuaternion(camRef.quaternion); return clamp(_w.dot(_r) / Math.max(5, _w.length()), -1, 1); });
+        snd.update({ eng: S.eng, tas: S.tas, inside: deckView(), dist: d, vr, pans });
       }
     }
     // finished? everyone is down (or lost) and nobody is still running
@@ -470,6 +606,10 @@ export function createDrop(ctx) {
       return;
     }
     hover = null;
+    if (api.camLocal) {   // test hook (scenes): camera at a point in the aeroplane's frame, looking at another
+      M.plane.mesh.updateMatrixWorld(); const [p, l] = api.camLocal;
+      cam.position.set(...p).applyMatrix4(M.plane.mesh.matrixWorld); cam.up.set(0, 1, 0); cam.lookAt(_w.set(...l).applyMatrix4(M.plane.mesh.matrixWorld)); return;
+    }
     if (L && !planeHasStick()) {
       const h = L.state === 'ff' ? S.heading : L.h;
       _v.set(L.p.x - fwdX(h) * 20, L.p.y + 9, L.p.z - fwdZ(h) * 20);   // far enough back to see the canopy over him
@@ -485,7 +625,7 @@ export function createDrop(ctx) {
   }
 
   const api = {
-    start, update, camera, cancel: cleanup,
+    start, update, camera, cancel: cleanup, camLocal: null,
     get active() { return !!M; },
     get camActive() { return !!M && (planeHasStick() || !!leadJumper()); },
     get controlling() { return this.camActive; },

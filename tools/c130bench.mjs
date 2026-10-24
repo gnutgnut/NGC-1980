@@ -217,5 +217,27 @@ console.log('--- ground: take-off, landing, taxi ---');
   const p0 = T.pos.clone(); fly(T, 10, ctl({ lever: [18, 18, 18, 18], brakeL: 1, brakeR: 1 }), land); const p1 = T.pos.clone(); fly(T, 6, ctl({ lever: [18, 18, 18, 18], brakeL: 1, brakeR: 1 }), land);
   check('brakes: stops, then no creep (< 1 cm/s)', T.pos.distanceTo(p1) < 0.06, `creep ${T.pos.distanceTo(p1).toFixed(3)} m, sits at ${T.pos.y.toFixed(2)} (wow ${T.wow.map(v => v.toFixed(2))}) pitch ${deg(T.pitch).toFixed(1)}°`);
 }
+console.log('--- ground start (T.O. 1C-130H-1 normal start; OPS card limits) ---');
+{
+  // cold and dark on the ground: battery, GTC, then engines 3, 4, 2, 1 on bleed air
+  const A = createC130Sim(G).resetGround(0, 0, 0, 0, { running: false }); A.fuel = 8000; A.payload = 2000;
+  const c0 = ctl({ lever: [18, 18, 18, 18], brakeL: 1, brakeR: 1 });
+  check('no battery: the start button does nothing', A.startEngine(2) === false && !A.eng[2].starter, `starter ${A.eng[2].starter}`);
+  A.battery = true;
+  check('no bleed air (GTC off): no start', A.startEngine(2) === false, `bleed ${A.bleed}`);
+  A.gtc.cmd = true; let tg = null; fly(A, 40, c0, land, (A, t) => { if (tg === null && A.bleed) tg = t; });
+  check('GTC on-speed, bleed air on the manifold', tg !== null && tg > 10 && tg < 35, `bleed after ${tg ? tg.toFixed(1) : '-'} s`, '~20 s', 'UNVERIFIED');
+  const ev3 = {}; A.setCond(2, 'run'); A.startEngine(2);
+  fly(A, 70, c0, land, (A, t, evs) => { for (const e of evs) if (e.k === 2 && !ev3[e.e]) ev3[e.e] = { t, ...e }; });
+  const lo = ev3.lightoff, so = ev3.starterout, on = ev3.onspeed;
+  check('#3 light-off at 16 % (fuel and ignition)', lo && lo.N > 0.15 && lo.N < 0.2, lo ? `${(lo.N * 100).toFixed(0)} % at ${lo.t.toFixed(1)} s` : 'no light-off', 'ignition by 35 % (OPS)', 'CONFIRMED');
+  check('#3 TIT peak in the normal start band', on && on.peakTit > 740 && on.peakTit < 830, on ? `${on.peakTit.toFixed(0)} C` : '-', '750-830 C (OPS)', 'CONFIRMED');
+  check('#3 starter drops out at 60 %', so && so.N >= 0.59 && so.N < 0.63, so ? `${(so.N * 100).toFixed(0)} % at ${so.t.toFixed(1)} s` : '-', '60 % (OPS)', 'CONFIRMED');
+  check('#3 to ground idle in under a minute', on && on.t < 60 && Math.abs(A.eng[2].N - 1) < 0.03, on ? `on speed at ${on.t.toFixed(1)} s, now ${(A.eng[2].N * 100).toFixed(1)} %` : '-', '94-102 % (OPS)', 'CONFIRMED');
+  // the others start on the running engine's bleed with the GTC off; the order 3-4-2-1
+  A.gtc.cmd = false; fly(A, 15, c0, land);
+  for (const k of [3, 1, 0]) { A.setCond(k, 'run'); A.startEngine(k); fly(A, 45, c0, land); }
+  check('3-4-2-1 all running on cross-bleed, rpm 94-102 %', A.eng.every(e => e.run && e.N > 0.94 && e.N < 1.02), A.eng.map(e => (e.N * 100).toFixed(0) + '%').join(' '));
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

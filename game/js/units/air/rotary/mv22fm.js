@@ -130,7 +130,7 @@ export function createMV22Sim(G = 9.81) {
     c.tcl = mv(c.tcl, clamp(ctl.tcl ?? 0, 0, 1), 1.2); c.lon = mv(c.lon, clamp(ctl.lon ?? 0, -1, 1), 4); c.lat = mv(c.lat, clamp(ctl.lat ?? 0, -1, 1), 4); c.ped = mv(c.ped, clamp(ctl.ped ?? 0, -1, 1), 4);
     // nacelles, gear, flaps (actuators)
     if (ctl.nac !== undefined) S.nacCmd = clamp(ctl.nac * D2R, 0, C.NAC_MAX);
-    S.nac = mv(S.nac, S.nacCmd, C.NAC_RATE); if (ctl.gear !== undefined) S.gearCmd = ctl.gear ? 1 : 0; S.gear = mv(S.gear, S.gearCmd, 0.12); body.gearDown = S.gear > 0.9;
+    S.nac = mv(S.nac, S.nacCmd, C.NAC_RATE * (0.45 + 0.55 * sstep(0, 0.2, Math.abs(S.nacCmd - S.nac))));   // the actuator eases into its stops (last ~10 deg slower) if (ctl.gear !== undefined) S.gearCmd = ctl.gear ? 1 : 0; S.gear = mv(S.gear, S.gearCmd, 0.12); body.gearDown = S.gear > 0.9;
     if (ctl.flap !== undefined) S.flap = mv(S.flap, clamp(ctl.flap, 0, 1), 0.2);
     axes(S.nac);
     body.bodyVel(_vb); const wb = body.w, u = _vb[0], V = Math.hypot(_vb[0], _vb[1], _vb[2]);
@@ -148,7 +148,7 @@ export function createMV22Sim(G = 9.81) {
     if (kH > 0.995) S.thGov = base + C.TH_SPAN * c.tcl + os; else S.thGov = clamp(S.thGov + gerr * 1.6 * h, base - 0.15, base + 0.5);
     const thAir = S.thGov + gerr * 0.9;
     const th = kH * (base + C.TH_SPAN * c.tcl + os) + (1 - kH) * thAir, rk = sn * sn, dif = C.DIFF * lat * (0.4 + 0.6 * rk);
-    inR.th75 = th - dif; inL.th75 = th + dif;
+    inR.th75 = th - dif; inL.th75 = th + dif; S.th75 = th;
     inR.lon = inL.lon = -C.CYC * lon * rk;                          // stick aft: both discs aft (helicopter pitch)
     inR.lon += -C.DCYC * ped * rk; inL.lon += C.DCYC * ped * rk;    // pedal right: right disc aft, left forward (yaw)
     inR.lat = inL.lat = 0; inR.lift = M.liftR ?? 1; inL.lift = M.liftL ?? 1;

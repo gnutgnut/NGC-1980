@@ -12,9 +12,10 @@ export function col(hex, k = 1) {   // sRGB hex -> linear [r, g, b] (what a THRE
 }
 export const shade = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
 export const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const GRIME = col(0x3e3628);   // damp, mud splash and soot at the foot of walls
 
 export class Geo {
-  constructor() { this.p = []; this.c = []; this.m = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]; this.stack = []; this.tris = 0; }
+  constructor() { this.p = []; this.c = []; this.m = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]; this.stack = []; this.tris = 0; this.wx = null; }
   // ---- transforms (3x3 rotation + translation, row-major)
   push(x = 0, y = 0, z = 0, yaw = 0, pitch = 0, roll = 0, s = 1) {
     this.stack.push(this.m);
@@ -36,7 +37,36 @@ export class Geo {
   // world position of a local point
   at(x, y, z) { const m = this.m; return [m[0] * x + m[1] * y + m[2] * z + m[9], m[3] * x + m[4] * y + m[5] * z + m[10], m[6] * x + m[7] * y + m[8] * z + m[11]]; }
   // ---- raw triangles (world-space points already) and quads
-  triW(a, b, c, color) { this.p.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); for (let k = 0; k < 3; k++) this.c.push(color[0], color[1], color[2]); this.tris++; }
+  triW(a, b, c, color) {
+    this.p.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); this.tris++;
+    const W = this.wx;
+    if (!W) { for (let k = 0; k < 3; k++) this.c.push(color[0], color[1], color[2]); return; }
+    // weathering (ngc/world-polish): every face a shade off its neighbours (hand-painted look, keyed on its first
+    // corner so both halves of a quad agree), and grime / damp splash darkening the bottom metre towards earth brown
+    let r = color[0], g = color[1], bl = color[2];
+    if (W.vary) { const h = Math.sin(a[0] * 12.9898 + a[2] * 78.233 + a[1] * 37.719) * 43758.5453, k = 1 + W.vary * ((h - Math.floor(h)) - 0.5); r *= k; g *= k; bl *= k; }
+    for (const v of [a, b, c]) {
+      const t = (v[1] - W.y0) / W.h;
+      if (t >= 1 || t < -6) { this.c.push(r, g, bl); continue; }
+      const m = W.k * (1 - Math.max(0, t));
+      this.c.push(r + (GRIME[0] - r) * m, g + (GRIME[1] - g) * m, bl + (GRIME[2] - bl) * m);
+    }
+  }
+  // weathering over everything already built (same rule as triW's), for recipes that were written without it
+  weatherAll(y0, h = 1.0, k = 0.3, vary = 0.06) {
+    const P = this.p, Cc = this.c;
+    for (let t = 0; t < P.length; t += 9) {
+      let kv = 1; if (vary) { const hh = Math.sin(P[t] * 12.9898 + P[t + 2] * 78.233 + P[t + 1] * 37.719) * 43758.5453; kv = 1 + vary * ((hh - Math.floor(hh)) - 0.5); }
+      for (let v = 0; v < 3; v++) {
+        const o = t + v * 3, tt = (P[o + 1] - y0) / h, m = tt >= 1 ? 0 : k * (1 - Math.max(0, tt));
+        for (let q = 0; q < 3; q++) { const c0 = Cc[o + q] * kv; Cc[o + q] = c0 + (GRIME[q] - c0) * m; }
+      }
+    }
+    return this;
+  }
+  // weathering on for what is built next: base level y0 (world), grime band height h, strength k, face variation vary
+  weather(y0, h = 1.0, k = 0.32, vary = 0.07) { this.wx = { y0, h, k, vary }; return this; }
+  unweather() { this.wx = null; return this; }
   tri(a, b, c, color) { this.triW(this.at(...a), this.at(...b), this.at(...c), color); }
   quad(a, b, c, d, color) { const A = this.at(...a), B = this.at(...b), C = this.at(...c), D = this.at(...d); this.triW(A, B, C, color); this.triW(A, C, D, color); }
   quadW(A, B, C, D, color) { this.triW(A, B, C, color); this.triW(A, C, D, color); }
@@ -64,7 +94,9 @@ export class Geo {
     const x0 = x - w / 2 - o, x1 = x + w / 2 + o, z0 = z - d / 2 - o, z1 = z + d / 2 + o, yr = y0 + h, ye = y0 - o * h / (d / 2);
     this.quad([x0, ye, z1], [x1, ye, z1], [x1, yr, z], [x0, yr, z], roofC);
     this.quad([x1, ye, z0], [x0, ye, z0], [x0, yr, z], [x1, yr, z], roofC);
-    this.quad([x0, ye - 0.12, z1], [x0, ye - 0.12, z0], [x1, ye - 0.12, z0], [x1, ye - 0.12, z1], shade(roofC, 0.55));   // soffit
+    // soffit: under the overhang only (ngc/interiors: it used to span the whole footprint, a dark false ceiling inside)
+    const ys = ye - 0.12, sc = shade(roofC, 0.55), gx0 = x - w / 2, gx1 = x + w / 2, sof = (xa, xb, za, zb) => { if (xb - xa > 1e-3 && zb - za > 1e-3) this.quad([xa, ys, zb], [xa, ys, za], [xb, ys, za], [xb, ys, zb], sc); };
+    sof(x0, x1, z1 - o, z1); sof(x0, x1, z0, z0 + o); sof(x0, gx0, z0 + o, z1 - o); sof(gx1, x1, z0 + o, z1 - o);
     if (gableC) { const gx0 = x - w / 2, gx1 = x + w / 2; this.tri([gx1, y0, z + d / 2], [gx1, y0, z - d / 2], [gx1, yr - 0.02, z], gableC); this.tri([gx0, y0, z - d / 2], [gx0, y0, z + d / 2], [gx0, yr - 0.02, z], gableC); }
     return this;
   }

@@ -73,20 +73,25 @@ export function createArmorDelivery(ctx) {
     return null;
   }
   DL.plan = plan;
+  // the boat's radio calls (to the beachmaster) in the feed
+  const radio = (r, t) => ctx.feed?.(`LCM ${r.hull}: ${t}`);
   DL.busy = def => DL.runs.some(r => r.def === def && r.state !== 'leaving');
   DL.start = (def, I, toward) => {
     const pl = plan(I, toward); if (!pl) return { ok: false, why: `NO BEACH ON ${I.name} A LANDING CRAFT CAN USE` };
-    const model = buildLCM8Mesh(); scene.add(model.group);
+    const hull = `8-${41 + ((DL.count = (DL.count || 0) + 1) - 1) % 30}`;   // the boat's number, painted on both bows
+    const model = buildLCM8Mesh({ num: hull }); scene.add(model.group);
     const P = { name: 'LCM-8', type: 'lcm', p: { x: pl.start[0], y: 0, z: pl.start[1] }, yaw: pl.yaw, ramp: LCM8.RAMP.up, gone: false };
     P.deck = (lx, lz) => lcmDeck(lx, lz, P.ramp);
     P.dry = (lx, lz) => Math.abs(lx) < LCM8.B / 2 && lz > LCM8.BOW && lz < LCM8.STERN;
     AW.addPlatform(P);
-    const run = { P, model, def, pl, I, state: 'inbound', t: 0, v: LCM8.SPEED, snd: null, wakeT: 0 };
+    const run = { P, model, def, pl, I, hull, state: 'inbound', t: 0, v: LCM8.SPEED, snd: null, wakeT: 0 };
     // the vehicle in the well, nose to the ramp
     const [vx, vz] = toWorld(P, 0, -1.2);   // (aft enough that the gun clears the raised ramp)
     def.spawnAt({ x: vx, z: vz, yaw: P.yaw, plat: P });
     DL.runs.push(run);
-    ctx.feed?.(`LCM-8 INBOUND TO ${pl.beach.name} WITH THE ${def.label}`, 'good');
+
+    const eta = Math.round(Math.hypot(pl.stop[0] - P.p.x, pl.stop[1] - P.p.z) / LCM8.SPEED + 10);
+    ctx.feed?.(`BEACHMASTER: LCM ${run.hull} WITH ONE ${def.label}, ETA ${pl.beach.name} ${eta} S`, 'good');
     return { ok: true, run };
   };
   const _v = new THREE.Vector3();
@@ -99,7 +104,9 @@ export function createArmorDelivery(ctx) {
         const d = Math.hypot(pl.stop[0] - P.p.x, pl.stop[1] - P.p.z);
         speed = Math.min(LCM8.SPEED, 0.3 + d * 0.16); rpm = 1300 + 900 * speed / LCM8.SPEED; load = 0.7;
         const step = Math.min(d, speed * dt); P.p.x += fx_ * step; P.p.z += fz_ * step;
-        if (d < 0.25) { r.state = 'beached'; r.t = 0; r.def.crankUp?.(); ctx.say?.(`LCM-8 ON THE BEACH  -  RAMP GOING DOWN`, 2); }
+        // the stern (kedge) anchor goes over ~50 m out, so the boat can winch itself back off the beach
+        if (!r.anchor && d < 50) { r.anchor = true; const [ax, az] = toWorld(P, 1.6, LCM8.STERN + 1); fx.splash(ax, az, 0.5); radio(r, 'STERN ANCHOR AWAY'); }
+        if (d < 0.25) { r.state = 'beached'; r.t = 0; r.def.crankUp?.(); radio(r, `BEACHED ON ${pl.beach.name}  -  RAMP GOING DOWN`); }
       } else if (r.state === 'beached') {
         rpm = 1000; load = 0.3;   // holding her on the beach with the engines
         P.ramp = Math.max(pl.down, P.ramp - dt * (LCM8.RAMP.up - pl.down) / 7);
@@ -113,11 +120,12 @@ export function createArmorDelivery(ctx) {
         const f = r.def.fm.origin(), ahead = (f[0] - P.p.x) * fx_ + (f[2] - P.p.z) * fz_;
         if (ahead > -LCM8.BOW + 7 || r.t > 70 || r.def.dead || !r.def.exists) {
           r.state = 'rampUp'; r.t = 0;
-          if (!r.def.dead && r.def.exists) ctx.feed?.(`${r.def.label} ASHORE AT ${pl.beach.name}`, 'good');
+          if (!r.def.dead && r.def.exists) ctx.feed?.(`BEACHMASTER: ${r.def.label} ASHORE AT ${pl.beach.name}`, 'good');
+          radio(r, 'RAMP COMING UP');
         }
       } else if (r.state === 'rampUp') {
         P.ramp = Math.min(LCM8.RAMP.up, P.ramp + dt * (LCM8.RAMP.up - pl.down) / 6);
-        if (P.ramp >= LCM8.RAMP.up - 1e-3) { r.state = 'backing'; r.t = 0; r.back = 0; }
+        if (P.ramp >= LCM8.RAMP.up - 1e-3) { r.state = 'backing'; r.t = 0; r.back = 0; radio(r, 'RETRACTING  -  HEAVING IN ON THE STERN ANCHOR'); }
       } else if (r.state === 'backing') {   // astern off the beach, then round and away
         speed = -Math.min(2.2, 0.4 + r.t * 0.4); rpm = 1600; load = 0.6;
         P.p.x += fx_ * speed * dt; P.p.z += fz_ * speed * dt; r.back += -speed * dt;
@@ -125,7 +133,7 @@ export function createArmorDelivery(ctx) {
       } else if (r.state === 'turning') {
         speed = 2.5; rpm = 1700; load = 0.6; const w = 0.16; P.yaw += w * dt; r.turned += w * dt;
         P.p.x += fx_ * speed * dt; P.p.z += fz_ * speed * dt;
-        if (r.turned > Math.PI) { r.state = 'leaving'; r.t = 0; }
+        if (r.turned > Math.PI) { r.state = 'leaving'; r.t = 0; r.anchor = false; radio(r, 'CLEAR OF THE BEACH, RETURNING TO THE GROUP'); }
       } else if (r.state === 'leaving') {
         speed = Math.min(LCM8.SPEED_LIGHT, 2.5 + r.t * 0.4); rpm = 2000; load = 0.8;
         P.p.x += fx_ * speed * dt; P.p.z += fz_ * speed * dt;
@@ -134,7 +142,7 @@ export function createArmorDelivery(ctx) {
       P.p.y = 0.04 * Math.sin(r.t * 0.9 + i) + (r.state === 'inbound' || r.state === 'leaving' ? 0 : 0);
       // the model, wake and spray, the diesels
       r.model.group.position.set(P.p.x, P.p.y, P.p.z); r.model.group.rotation.set(0, P.yaw, 0, 'YXZ');   // (no trim: the deck the vehicle rides is level)
-      r.model.animate({ ramp: P.ramp });
+      r.model.animate({ ramp: P.ramp, anchorOut: !!r.anchor });
       r.wakeT -= dt;
       if (Math.abs(speed) > 0.8 && r.wakeT <= 0) {
         r.wakeT = 0.18;

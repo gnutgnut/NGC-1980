@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { FIGURES } from './figures.js';
 
+const _w = { x: 0, y: 0, z: 0 };
 const ang = (a, b) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; return d; };
 // slots round a point: leader in the middle, the rest on two rings facing out (Marines: a 360 perimeter)
 export function padSlots(cx, cz, n, r0 = 5, r1 = 8.5, a0 = 0) {
@@ -36,6 +37,17 @@ export function createSquad(o) {
       Q.state = 'deploying';
       figs.forEach((F, i) => { if (F.st !== 'aboard') return; F.st = 'queue'; F.delay = i * gap; F.path = path; F.wp = 0; F.slot = slots[i % slots.length]; F.x = path[0].x; F.y = path[0].y; F.z = path[0].z; });
     },
+    // EMBARK (deck / pad loading): the stick waits in two files clear of the rotors (Marines kneeling, machines
+    // standing in ranks), then on the troop handler's call files up the ramp one after the other and into the cabin.
+    // Positions are in the aircraft's frame (it sits on a moving deck): toWorld(lx, ly, lz, out) -> world point, yaw()
+    // -> the aircraft's heading. stick: [{ x, y, z, yaw }] local; path: local points from the approach to the seats.
+    stick(stick, path, toWorld, yaw) {
+      Q.state = 'boarding'; Q.toWorld = toWorld; Q.yaw0 = yaw;
+      figs.forEach((F, i) => { const s = stick[i % stick.length]; F.st = 'stick'; F.l = { x: s.x, y: s.y, z: s.z }; F.lyaw = s.yaw; F.lpath = [s, ...path]; F.wp = 0; F.f.group.visible = true; F.t = Math.random() * 3; });
+    },
+    embark(gap = machine ? 0.6 : 0.45) { let k = 0; for (const F of figs) if (F.st === 'stick') { F.st = 'embark'; F.delay = k++ * gap; } },
+    get boarded() { for (const F of figs) if (F.st === 'stick' || F.st === 'embark') return false; return true; },
+    boardNow() { for (const F of figs) if (F.st === 'stick' || F.st === 'embark') { F.st = 'aboard'; F.f.group.visible = false; } if (Q.state === 'boarding') Q.state = 'aboard'; },
     // every deployed figure is at least r from (x, z): the transport can lift off
     clear(x, z, r) { for (const F of figs) if (F.st === 'queue' || F.st === 'path' || (F.st === 'run' && Math.hypot(F.x - x, F.z - z) < r)) return false; return true; },
     center(out) { let n = 0, sx = 0, sz = 0, sy = 0; for (const F of figs) if (F.st !== 'aboard' && F.st !== 'dead' && F.st !== 'fall') { sx += F.x; sy += F.y; sz += F.z; n++; } if (n) { out.x = sx / n; out.y = sy / n; out.z = sz / n; } return n; },
@@ -51,6 +63,20 @@ export function createSquad(o) {
         const G = F.f.group;
         switch (F.st) {
           case 'aboard': G.visible = false; continue;
+          case 'stick': case 'embark': {   // in the aircraft's frame: wait in the file, then up the ramp
+            let moving = false;
+            if (F.st === 'embark' && (F.delay -= dt) <= 0) {
+              const P = F.lpath, b = P[F.wp + 1], dx = b.x - F.l.x, dz = b.z - F.l.z, d = Math.hypot(dx, dz), inside = F.wp >= P.length - 4;
+              const v = speed * (inside ? 0.6 : 0.85) * dt; moving = true;   // a brisk jog bent under the disc, a walk inside
+              if (d <= v) { F.l.x = b.x; F.l.z = b.z; F.l.y = b.y; if (++F.wp >= P.length - 1) { F.st = 'aboard'; G.visible = false; continue; } }
+              else { const a = P[F.wp], L = Math.hypot(b.x - a.x, b.z - a.z) || 1; F.l.x += dx / d * v; F.l.z += dz / d * v; F.l.y = a.y + (b.y - a.y) * Math.max(0, Math.min(1, 1 - (d - v) / L)); F.lyaw += ang(F.lyaw, Math.atan2(-dx, -dz)) * Math.min(1, 10 * dt); }
+            }
+            const w = Q.toWorld(F.l.x, F.l.y, F.l.z, _w); F.x = w.x; F.y = w.y; F.z = w.z; F.yaw = F.lyaw + Q.yaw0();
+            if (F.lpath[F.wp].g && (F.st === 'stick' || F.lpath[F.wp + 1].g)) F.y = o.groundY(F.x, F.z);   // on the deck, not on the aircraft's (pitched) frame
+            if (moving) { F.ph += dt * (machine ? 7.2 : 9.5); F.f.pose(machine ? 'walk' : 'run', machine ? gph : F.ph); }
+            else { F.t += dt; F.f.pose(machine ? 'stand' : 'kneel', 0); }
+            break;
+          }
           case 'queue': F.delay -= dt; G.visible = false; if (F.delay <= 0) { F.st = 'path'; G.visible = true; } continue;
           case 'path': case 'run': {
             const tgt = F.st === 'path' ? F.path[F.wp + 1] : F.slot, dx = tgt.x - F.x, dz = tgt.z - F.z, d = Math.hypot(dx, dz);
@@ -82,6 +108,7 @@ export function createSquad(o) {
         }
         G.position.set(F.x, F.y, F.z); G.rotation.y = F.yaw;
       }
+      if (Q.state === 'boarding' && Q.boarded) Q.state = 'aboard';
       if (Q.state !== 'aboard' && Q.alive === 0) Q.deadT += dt;
     },
     dispose() { o.parent.remove(root); },

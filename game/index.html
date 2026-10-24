@@ -14,7 +14,7 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 .bar i{display:block;height:100%;background:linear-gradient(90deg,#f52,#fd2,#4f6);width:100%}
 #radar{position:absolute;right:16px;bottom:14px;width:150px;height:150px;border:1px solid #4aa;background:rgba(0,30,40,.45);border-radius:50%}
 #radar.big{position:fixed;inset:0;right:auto;bottom:auto;width:100%;height:100%;border:0;border-radius:0;background:transparent}
-#msg{position:absolute;left:0;right:0;top:22%;text-align:center;font-size:28px;color:#ff8;letter-spacing:3px;opacity:0;transition:opacity .3s}
+#msg{position:absolute;left:0;right:0;top:max(22%,236px);text-align:center;font-size:28px;color:#ff8;letter-spacing:3px;opacity:0;transition:opacity .3s}
 #hint{position:absolute;left:330px;right:330px;bottom:14px;text-align:center;font-size:15px;color:#cfc}
 @media (max-width:1000px){#hint{left:16px;right:16px;bottom:130px}}
 #fade{position:absolute;inset:0;background:#000;opacity:0}
@@ -25,10 +25,10 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 #title h2{margin:-6px 0 14px;font-size:22px;letter-spacing:12px;color:#ff8;text-shadow:0 0 10px #a60}
 #title .go{margin-top:18px;font-size:22px;color:#ff8;animation:bl 1s infinite alternate}
 @keyframes bl{to{opacity:.3}}
-#dbg{position:absolute;left:16px;top:150px;font-size:12px;color:#7aa}
+#dbg{font-size:12px;line-height:1.6;color:#7aa}   /* in the top-left block, under the weapons line (it overlapped a long one) */
 #war{position:absolute;left:0;right:0;top:12px;text-align:center;font-size:15px;letter-spacing:1px;color:#bde;pointer-events:none}
 #feed{position:absolute;right:16px;top:64px;width:460px;text-align:right;font-size:14px;line-height:1.5;text-shadow:0 0 4px #000,0 0 6px #000}
-#weap{color:#fd8}
+#weap{color:#fd8;max-width:calc(100vw - 520px)}   /* wraps before the message feed on the right (a long armour weapons line ran under it) */
 #radar.big{pointer-events:auto;cursor:crosshair;opacity:1}
 #result{font-size:22px;color:#ff8;margin:6px 0 14px}
 #menu{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,10,25,.6);pointer-events:auto}
@@ -47,10 +47,9 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 </style></head><body>
 <canvas id="gl"></canvas>
 <div id="hud">
-  <div id="tl"><div>SCORE <b id="score">0</b></div><div>HELICOPTERS <b id="lives"></b></div><div>HORNETS <b id="jets"></b></div><div>TOMCATS <b id="tomcats"></b></div><div id="modeTag"></div><div id="weap"></div></div>
+  <div id="tl"><div>SCORE <b id="score">0</b></div><div id="fleet"></div><div id="modeTag"></div><div id="weap"></div><div id="dbg"></div></div>
   <div id="war"></div><div id="feed"></div>
   <div id="tr">HI <b id="hi">0</b><br><span id="pad"></span></div>
-  <div id="dbg"></div>
   <div id="bot"><span id="fuelLbl">FUEL</span><div class="bar"><i id="fuel"></i></div><span id="alt"></span></div>
   <canvas id="radar" width="150" height="150"></canvas>
   <div id="msg"></div><div id="hint"></div>
@@ -64,6 +63,7 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
     <p><b>TAKE ISLANDS</b>: knock out their AA guns, then land on the pad and hold it &mdash; or send a CH-46 <b>SEA KNIGHT</b> with a squad of Marines. Cave fortresses fall when you steal the pod from their cave. Sink the KRAKEN or take its headquarters IRONHOLD to win; lose the ALBATROSS and the war is lost.</p>
     <p>The enemy's factories are building the <b>LEVIATHAN</b>, a railgun monitor &mdash; bomb the factories and its shipyard to hold it back. Their islands ship their output home in autonomous <b>CONTAINER SHIPS</b>: sink them to cut the supply.</p>
     <p><b>M</b> command map: click the sea to sail the carrier there, click an island to select it &middot; <b>1</b> SEA KNIGHT + 13 Marines &middot; <b>2</b> AA gun on our island &middot; <b>3</b> new helicopter &middot; <b>4</b> Tomcat escort (top cover) &middot; <b>6</b> SKY CARRIER refit: the ALBATROSS gets lift fans and flies &mdash; land on her and press <b>Tab</b> to take the helm on the bridge (W/S telegraph, A/D wheel, Space/Ctrl lift, V outside, click + mouse to look round; she is slow and heavy). Bombs land on the yellow ring. Land on the carrier or any friendly pad to refuel, repair and rearm.</p>
+    <p><b>YOU COMMAND THE TASK FORCE</b> &nbsp;<b>\</b> command board: take out any unit at the ALBATROSS or a friendly island &mdash; Huey, Hornet, Tomcat, M60A3, M113A2, the motor pool, a Marine &mdash; or switch to one already out (<b>/</b> next unit). The unit you leave carries on: crews fly it home, the wingman flies the jet, vehicles park. Your lives are the fleet's reserves: the war is lost when the fleet is spent.</p>
     <p><b>DOWNED?</b> Set down on land and press <b>L</b>: home base sends the dropship MULE 1 with a para repair team, from over the horizon. You fly it from the flight deck &mdash; same controls as the helicopter (stick / W S A D, Q E rudder, collective keys = throttle); <b>H</b> autopilot, <b>V</b> outside view. Jump with <b>F</b> on the green light (above 40 m, below 140 kt) &mdash; the green smoke shows the wind. Then steer the canopies (A/D, S brakes). Stuck for good? <b>Esc</b> &rarr; respawn on the carrier.</p>
     <p><b>HELICOPTER</b> &nbsp;W/S A/D cyclic &middot; Q/E pedals &middot; Space/Shift collective up, Ctrl/Z down &middot; F/X door gun &middot; <b>G rockets &middot; B bombs</b> &middot; S/R winch (caves) &middot; hat or mouse aims the door gun in caves &middot; H stability assist &middot; I engine &middot; O extinguisher &middot; U hydraulics &middot; L logistics &middot; N light &middot; C chase cam &middot; V cockpit (T free look) &middot; <b>Esc / P menu</b> (respawn if stuck)</p>
     <p><b>HORNET JET</b> &nbsp;land the helicopter on the ALBATROSS, press <b>5</b>: a Hornet on the catapult &middot; throttle to MIL (80%) or afterburner and the cat fires &middot; W/S A/D stick &middot; Q/E rudder &middot; Shift/Space, Ctrl/Z throttle &middot; <b>G</b> gear &middot; <b>L</b> flaps &middot; <b>H</b> hook &middot; <b>O</b> speed brake &middot; . wheel brakes &middot; F/X gun &middot; <b>R</b> A/A missiles (again to fire) &middot; <b>B</b> A/G bombs, CCIP (again to drop) &middot; , master arm &middot; I engines &middot; U canopy &middot; hold Backspace: EJECT &middot; V cockpit / chase, mouse wheel zoom, hat looks around &middot; clickable cockpit switches &middot; land: gear, full flaps, hook, 8&deg; AoA, fly the ICLS needles &middot; Y stopped on deck: climb out &middot; <b>J</b> controls &amp; HOTAS / pedal binding</p>

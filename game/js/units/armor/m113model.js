@@ -131,7 +131,7 @@ export function buildM113Mesh(opts = {}) {
     ramp.rotation.x = (st.ramp || 0) * 1.32;                // down to the ground (~76 deg)
     vane.rotation.x = -Math.PI / 4 - (st.vane || 0) * 1.31;   // folded on the 45 deg glacis -> standing forward of the bow
     const h = st.hatches || {};
-    dHatch.rotation.x = (h.driver || 0) * 1.7; cHatch.rotation.x = (h.cupola || 0) * 1.7; cargo.rotation.x = (h.cargo || 0) * 1.6;
+    dHatch.rotation.x = (h.driver || 0) * 1.7; cHatch.rotation.x = (h.cupola || 0) * 2.6; cargo.rotation.x = (h.cargo || 0) * 1.6;
     for (const m of glassIn) m.visible = !st.inside;
   };
   api.animate({});

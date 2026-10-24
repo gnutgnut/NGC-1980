@@ -2,11 +2,12 @@
 // to the tandem's controls (pilot.js loops, torque limiting, hands on the ground). Pure JS.
 import { clamp } from './rb.js';
 
-// Mission profile (INFERRED, typical HMM assault profile scaled to a 1.3 km war zone): cruise 90 kt, 50 m above the
-// terrain, 1.2 m/s2 deceleration (a ~7 deg nose-up flare), 7 deg approach to a 6 m hover, vertical descent.
+// Mission profile (INFERRED from the usual Marine assault-support habits, scaled to a 1.3 km war zone): cruise 90 kt,
+// ~45 m above the terrain, a 10 deg approach, 1.2 m/s2 deceleration rising to a ~10-12 deg flare over the last 70 m,
+// a hover check at 5 m, vertical descent; ship recovery from a hover off the port quarter.
 export const CH46_AI = {
-  cruise: 46, aDec: 1.2, stop: 0.6, glide: 7 * Math.PI / 180, flat: 18, hover: 6, agl: 45, clear: 18, kh: 0.45, vDesc: 4, vClimb: 6,
-  hdgDist: 70, liftAgl: 7, spool: 2.5,
+  cruise: 46, aDec: 1.2, stop: 0.6, glide: 10 * Math.PI / 180, flat: 18, hover: 5, agl: 45, clear: 18, kh: 0.45, vDesc: 4, vClimb: 6,
+  hdgDist: 70, liftAgl: 7, spool: 2.5, flareTilt: 0.33, flareA: 2.6,   // flare: up to ~15 deg nose up while behind the braking plan
 };
 // guidance cmd -> controls. On the ground: collective as asked, stick and pedals centred, the loops' memory reset.
 // In the air: pilot.js, with the torque held under the transmission limit (a pilot watches the torque gauge).

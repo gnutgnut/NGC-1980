@@ -65,3 +65,16 @@ console.log('hotas self-test OK');
   D.bindAxis('roll'); tt += 11000; D.poll(); assert.equal(D.bindings.axes.roll.axis, 0);
 }
 console.log('wiggle self-test OK');
+// HOTAS 4 + T-Rudder defaults: the throttle rocker (axis 6) is the countermeasures switch, right = FLARES, left = CHAFF
+// (the stick has 12 buttons, so the FLARES / CHAFF button defaults 12 / 13 do not exist on it); the pedals stay the rudder
+{
+  const r = { id: 'T-Rudder (Vendor: 044f Product: b679)', index: 0, connected: true, axes: [-1, -1, 0], buttons: [] }, h = { ...hotas, axes: axes10(), buttons: btns(12) };
+  const m3 = {}, st = { getItem: k => m3[k] ?? null, setItem: (k, v) => m3[k] = v };
+  const F = createControls({ getPads: () => [r, h], storage: st, now: () => 0 });
+  let s = F.poll(); assert.equal(s.pressed.flare, false); assert.equal(s.hasPedals, true);
+  h.axes[6] = 1; s = F.poll(); assert.equal(s.pressed.flare, true); assert.equal(s.pressed.chaff, false); assert.equal(s.rudder, 0);
+  s = F.poll(); assert.equal(s.pressed.flare, false, 'one press per rock');
+  h.axes[6] = 0; F.poll(); h.axes[6] = -1; s = F.poll(); assert.equal(s.pressed.chaff, true); assert.equal(s.pressed.flare, false);
+  h.axes[6] = 0; r.axes[2] = 1; s = F.poll(); assert.equal(s.rudder, 1); assert.equal(s.actions.flare || s.actions.chaff, false);
+}
+console.log('rocker countermeasures self-test OK');

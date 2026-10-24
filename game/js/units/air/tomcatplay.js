@@ -11,11 +11,11 @@ import * as THREE from 'three';
 import { createTomcatSim, TOMCAT, STATIONS, loadout } from './tomcatfm.js';
 import { KT, FT, LB, DECKOPS } from './airframe.js';
 import { buildTomcatModel } from './tomcatmodel.js';
-import { buildTomcatCockpit, TEYE } from './tomcatcockpit.js';
+import { buildTomcatCockpit, TEYE, ADVS } from './tomcatcockpit.js';
 import { createTomcatDamage, TPARTS } from './tomcatdamage.js';
 import { createTomcatSound } from './tomcatsound.js';
 import { createFD } from './fd.js';
-import { createSweepControl, sweepPress, sweepStep, createAfcs, afcsEngage, afcsStep, startAir } from './tomcatsys.js';
+import { createSweepControl, sweepPress, sweepStep, createAfcs, afcsEngage, afcsStep, createStart, startSet, startPress, startAuto, startStep, startPost, START } from './tomcatsys.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
@@ -31,6 +31,9 @@ export const TCFG = {
 };
 const KG_PER_UNIT = TOMCAT.FUEL_MAX / 100;   // fleet fuel stores: a full Tomcat tank = 100 units
 const WNAME = { aim9: 'SW', aim7: 'SP', aim54: 'PH' }, WOF = { SW: 'aim9', SP: 'aim7', PH: 'aim54' };
+// what each cockpit control sounds like when it moves (tomcatsound.js click): handles clunk, buttons tick, bats snap
+const SWKIND = { gear: 'handle', hook: 'handle', flaps: 'handle', emer: 'guard', emerFwd: 'lever', emerAft: 'lever', eject: 'guard', thrL: 'lever', thrR: 'lever', engines: 'lever', canopy: 'handle', pbrake: 'handle',
+  mc: 'button', wpn: 'button', hsdmode: 'button', fireL: 'button', fireR: 'button', jett: 'button', sweepFwd: 'thumb', sweepAft: 'thumb', sweepAuto: 'thumb', airbrake: 'thumb', crankL: 'crank', crankR: 'crank' };
 const THREAT = { shrike: 'S', reaper: 'R', shahed: 'D', gunship: 'G', transport: 'T', drone: 'D', wasp: 'W', osprey: 'O', carrier: 'K', battleship: 'L' };
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _f = new THREE.Vector3(), _u = new THREE.Vector3();
 const _iq = new THREE.Quaternion(), _p = new THREE.Vector3();
@@ -57,7 +60,7 @@ export function createTomcatPlay(ctx) {
   const P = {
     A, J: A, D, model, cockpit, snd, active: false, alive: false, ejected: null, seat: 0,
     thr: 0, thrSrc: 'kb', kb: { pitch: 0, roll: 0, yaw: 0 }, ctl: { pitch: 0, roll: 0, yaw: 0, throttle: [0, 0], brakeL: 0, brakeR: 0 },
-    sweep: createSweepControl(), ap: createAfcs(),
+    sweep: createSweepControl(), ap: createAfcs(), ss: createStart(true), sasCh: [true, true, true], dump: false,
     sas: true, hudMode: 'T.O.', hudAuto: true, hsdMode: 'NAV', arm: true, wpn: 'SW', lights: true, pbrake: false,
     tracks: [], hook: null, lock: false, lockT: 0, tgt: null, seek: null, seekT: 0, gunCd: 0, firing: false,
     rwr: [], rwrLaunch: false, cautions: [], mcSeen: new Set(), masterCaution: false,
@@ -81,14 +84,15 @@ export function createTomcatPlay(ctx) {
     if (!A.attachCat(env)) return false;
     A.flapSel = 2; for (const e of A.eng) { e.run = true; e.n = 0.68; e.egt = 430; }
     Object.assign(P, { active: true, alive: true, ejected: null, seat: 0, thr: 0, thrSrc: 'kb', blood: 0, red: 0, gloc: 0, deadT: 0, ejectHold: 0, hook: null, lock: false, tgt: null, sas: true, hudMode: 'T.O.', hudAuto: true, arm: true, wpn: 'SW' });
-    P.sweep = createSweepControl(); P.ap = createAfcs();
+    P.sweep = createSweepControl(); P.ap = createAfcs(); startSet(P.ss, true); P.sasCh = [true, true, true]; P.dump = false;
     A.nzMax = A.nzMin = 1; P.mcSeen.clear(); P.serviced = true; model.group.visible = true; for (const c of chutes) c.visible = false;
     model.parts.canopy.visible = true; for (const m of crewMeshes) m.visible = true;
     say('TOMCAT ON CAT 1  -  THROTTLES TO MIL (OR ZONE 5) FOR THE SHOT', 3); return true;
   };
   P.stow = () => { P.active = false; P.alive = false; model.group.visible = false; shadow.visible = false; for (const c of chutes) c.visible = false; cockpit.group.visible = false; P.silence(); };
   P.silence = () => { snd.silence(); sfx.seeker?.(0); sfx.jetGun?.(false); };
-  P.respot = () => { if (!A.attachCat(env)) return; A.flapSel = 2; for (const e of A.eng) if (!e.run) e.start = 0.01; say('SPOTTED ON CAT 1  -  MIL POWER FOR THE SHOT', 2.5); };
+  P.respot = () => { if (!A.attachCat(env)) return; A.flapSel = 2; P.ss.thrOff = [false, false]; P.ss.crank = 'OFF'; P.ss.auto = null; for (const e of A.eng) if (!e.run) e.start = 0.01; say('SPOTTED ON CAT 1  -  MIL POWER FOR THE SHOT', 2.5); };
+  P.shutdown = () => { startSet(P.ss, false); P.dump = false; for (const e of A.eng) { e.run = false; e.start = 0; e.stalled = false; } };   // the crew climbs out: cold
   P.stoppedOnDeck = () => P.alive && !P.ejected && A.onGround && !A.wire && !A.cat && relSpeed() < 0.6 && !!ctx.onCarrier(A.pos.x, A.pos.z);
   function relSpeed() { const sv = war.surfVel(A.pos.x, A.pos.z); return Math.hypot(A.vel.x - (sv ? sv.vx : 0), A.vel.z - (sv ? sv.vz : 0)); }
   function lose(why) {
@@ -137,7 +141,7 @@ export function createTomcatPlay(ctx) {
     const c = P.ctl, up = kd('ShiftLeft', 'ShiftRight', 'Space', 'PageUp', 'NumpadAdd'), dn = kd('ControlLeft', 'KeyZ', 'PageDown', 'NumpadSubtract');
     if (up || dn) { P.thrSrc = 'kb'; P.thr = clamp(P.thr + ((up ? 1 : 0) - (dn ? 1 : 0)) * 0.5 * dt, 0, 1); }
     if (st.throttle !== null && st.throttle !== undefined) { if (P.lastHw === undefined) P.lastHw = st.throttle; if (Math.abs(st.throttle - P.lastHw) > 0.02) { P.thrSrc = 'hotas'; P.lastHw = st.throttle; } if (P.thrSrc === 'hotas') { P.thr = st.throttle; P.lastHw = st.throttle; } }
-    c.throttle[0] = A.eng[0].run ? P.thr : 0; c.throttle[1] = A.eng[1].run ? P.thr : 0;
+    c.throttle[0] = A.eng[0].run && !P.ss.thrOff[0] ? P.thr : 0; c.throttle[1] = A.eng[1].run && !P.ss.thrOff[1] ? P.thr : 0;
   }
   function buttons() {   // HOTAS edges (keys come through P.key)
     const pr = CTL.state.pressed;
@@ -159,7 +163,7 @@ export function createTomcatPlay(ctx) {
   P.cmd = id => {
     if (!P.alive || P.ejected) return;
     cockpit.press(id);
-    const engOk = k => D.mods().eng[k] > 0.05 && A.fuel > 0;
+    if (id !== 'missile' && id !== 'nexttrk' && id !== 'prevtrk') snd.click(SWKIND[id] || (id.startsWith('hud:') || id.startsWith('rio:') ? 'button' : 'toggle'));
     if (id === 'gear') { if (A.onGround && A.gearCmd) { say('WEIGHT ON WHEELS  -  GEAR LOCKED DOWN', 1.4); return; } if (!D.mods().gearOk) { say('GEAR WILL NOT EXTEND  -  DAMAGED', 1.6); A.gearCmd = 0; return; } A.gearCmd = A.gearCmd ? 0 : 1; sfx.blip(300, 200, 0.15, 'square', 0.05); say(A.gearCmd ? 'GEAR DOWN' : 'GEAR UP', 1); }
     else if (id === 'hook') { A.hookCmd = A.hookCmd ? 0 : 1; if (A.hookCmd && !D.mods().hookOk) say('HOOK DAMAGED', 1.4); else say(A.hookCmd ? 'HOOK DOWN' : 'HOOK UP', 1); }
     else if (id === 'flaps') { A.flapSel = A.flapSel ? 0 : 2; say(A.flapSel ? (A.sweep > 21 ? 'FLAPS DN  -  WINGS COMING FORWARD' : 'FLAPS DN') : 'FLAPS UP', 1); }
@@ -167,18 +171,17 @@ export function createTomcatPlay(ctx) {
     else if (id === 'canopy') { if (!A.onGround && !A.canopyCmd) { say('CANOPY STAYS SHUT IN FLIGHT', 1.2); return; } A.canopyCmd = A.canopyCmd ? 0 : 1; }
     else if (id === 'lights') { P.lights = !P.lights; say(P.lights ? 'LIGHTS ON' : 'LIGHTS OFF', 1); }
     else if (id === 'pbrake') { P.pbrake = !P.pbrake; say(P.pbrake ? 'PARKING BRAKE SET' : 'PARKING BRAKE OFF', 1); }
-    else if (id === 'engines' || id === 'engL' || id === 'engR') {
-      const ks = id === 'engL' ? [0] : id === 'engR' ? [1] : [0, 1], anyRun = ks.some(k => A.eng[k].run);
-      if (anyRun) { for (const k of ks) { A.eng[k].run = false; A.eng[k].start = 0; A.eng[k].stalled = false; } say(ks.length > 1 ? 'BOTH THROTTLES OFF  -  ENGINES WINDING DOWN' : `${ks[0] ? 'RIGHT' : 'LEFT'} ENGINE OFF`, 1.6); return; }
-      // a start needs air: the deck's start cart, the other engine's bleed (cross-bleed) or ram air (windmill, > 225 KEAS)
-      const air = startAir(A, ks);
-      if (!air) { say('NO AIR FOR A START  -  DIVE FOR 225 KNOTS (WINDMILL) OR START THE OTHER ENGINE', 2.5); return; }
-      let n = 0; for (const k of ks) if (engOk(k)) { A.eng[k].start = 0.01; n++; }
-      say(n ? `${ks.length > 1 ? 'ENGINE START' : (ks[0] ? 'RIGHT' : 'LEFT') + ' ENGINE CRANK'}  -  ${{ CART: 'AIR START CART ON', XBLEED: 'CROSS-BLEED', WINDMILL: 'WINDMILL AIRSTART' }[air]}${A.onGround ? '' : '  -  THROTTLE IDLE'}` : 'NO START  -  ENGINE DAMAGED OR NO FUEL', 2);
+    else if (id === 'engines') {   // I: both throttles OFF, or the whole start on the switches (startAuto)
+      if (A.eng.some(e => e.run) || P.ss.auto) { P.ss.auto = null; P.ss.crank = 'OFF'; P.ss.thrOff = [true, true]; say('BOTH THROTTLES OFF  -  ENGINES WINDING DOWN', 1.6); return; }
+      if (!D.mods().eng.some(h => h > 0.05) || A.fuel <= 0) { say('NO START  -  ENGINES DAMAGED OR NO FUEL', 2); return; }
+      startAuto(P.ss, A); say('ENGINE START  -  RIGHT ENGINE FIRST: CRANK R, THROTTLE IDLE AT 20%, THEN THE LEFT', 2.5);
     }
+    else if (id === 'crankL' || id === 'crankR' || id === 'thrL' || id === 'thrR' || id === 'genL' || id === 'genR') { const m = startPress(P.ss, A, id); if (m) say(m, 2); }
+    else if (id === 'dump') { P.dump = !P.dump; say(P.dump ? 'FUEL DUMP ON  -  1,500 LB / MIN FROM THE TAIL (STOPS AT 4,000 LB)' : 'FUEL DUMP OFF', 1.8); }
     else if (id === 'fireL' || id === 'fireR') { const r = D.extinguish(id === 'fireL' ? 0 : 1); say(r === 'FIRE OUT' ? 'FIRE EXTINGUISHED' : r, 1.5); if (r === 'FIRE OUT') sfx.refuel?.(); }
     else if (id === 'arm') { P.arm = !P.arm; say(P.arm ? 'MASTER ARM ON' : 'MASTER ARM OFF', 1); }
-    else if (id === 'sas') { P.sas = !P.sas; if (!P.sas) afcsEngage(P.ap, A, 'OFF'); say(P.sas ? 'STAB AUG ON  -  PITCH ROLL YAW' : 'STAB AUG OFF  -  NO DAMPERS', 1.6); }
+    else if (id === 'sas') { const on = !P.sasCh.every(Boolean); P.sasCh = [on, on, on]; setSas(); say(on ? 'STAB AUG ON  -  PITCH ROLL YAW' : 'STAB AUG OFF  -  NO DAMPERS', 1.6); }
+    else if (id === 'sasP' || id === 'sasR' || id === 'sasY') { const i = 'PRY'.indexOf(id[3]); P.sasCh[i] = !P.sasCh[i]; setSas(); say(`${['PITCH', 'ROLL', 'YAW'][i]} STAB AUG ${P.sasCh[i] ? 'ON' : 'OFF'}${P.sas ? '' : '  -  ALL THREE FOR THE DAMPERS AND THE AUTOPILOT'}`, 1.6); }
     else if (id === 'afcs' || id === 'afcsCycle') {
       const next = id === 'afcs' ? (P.afcs === 'OFF' ? 'ATT' : 'OFF') : { OFF: 'ATT', ATT: 'ALT', ALT: 'OFF' }[P.afcs];
       setAfcs(next);
@@ -192,12 +195,15 @@ export function createTomcatPlay(ctx) {
     else if (id === 'rio:launch') { if (P.wpn === 'GUN' || P.wpn === 'SW') P.wpn = 'PH'; fireMissile(); }
     else if (id === 'nexttrk' || id === 'prevtrk' || id === 'rio:next') cycleTrack(id === 'prevtrk' ? -1 : 1);
     else if (id === 'stt' || id === 'rio:stt') { if (P.lock) { P.lock = false; say('BREAK LOCK  -  TWS', 1); } else if (P.hook && P.hook.range < 3200) { P.lock = true; say(`STT  -  TRACK ${String(P.hook.n).padStart(2, '0')} LOCKED`, 1.2); } else say('NO TRACK HOOKED IN STT RANGE', 1.2); }
+    else if (id === 'emerFwd' || id === 'emerAft') { if (P.sweep.mode !== 'EMER' && P.sweep.mode !== 'OVER') { say('EMERGENCY SWEEP HANDLE  -  RAISE THE GUARD FIRST (CLICK THE HANDLE OR 9)', 1.8); return; } sweepPress(P.sweep, A, id === 'emerFwd' ? 'fwd' : 'aft'); say(`EMERGENCY SWEEP HANDLE  ${Math.round(P.sweep.handle)}°${P.sweep.handle > 68.5 ? '  -  OVERSWEEP' : ''}`, 1.2); }
     else if (id === 'sweepAuto' || id === 'sweepFwd' || id === 'sweepAft' || id === 'emer') { const m = sweepPress(P.sweep, A, { sweepAuto: 'auto', sweepFwd: 'fwd', sweepAft: 'aft', emer: 'emer' }[id]); if (m) say(m, 2); }
     else if (id.startsWith('hud:')) { P.hudMode = id.slice(4); P.hudAuto = false; }
     else if (id === 'hsdmode') P.hsdMode = P.hsdMode === 'NAV' ? 'TID' : 'NAV';
     else if (id === 'rio:rng+' || id === 'rio:rng-') say(`TID ${(cockpit.tidRange / 1852).toFixed(1)} NM`, 0.8);
   };
   P.click = id => P.cmd(id);
+  // the stability augmentation: three channel switches; the sim has one SAS (all three on) or DIRECT
+  function setSas() { P.sas = P.sasCh.every(Boolean); if (!P.sas) afcsEngage(P.ap, A, 'OFF'); }
   function setAfcs(m) {
     const why = afcsEngage(P.ap, A, m, P.sas && D.mods().sasOk); if (why) { say(why, 1.6); return; }
     FD.gi = 0; say({ OFF: 'AUTOPILOT OFF', ATT: 'AUTOPILOT  -  ATTITUDE HOLD (STICK STEERING)', ALT: `AUTOPILOT  -  ALTITUDE HOLD ${Math.round(A.pos.y * FT / 100) * 100} FT` }[m], 1.6);
@@ -355,13 +361,48 @@ export function createTomcatPlay(ctx) {
     if (P.ejected) { c.pitch = c.roll = c.yaw = 0; updateChutes(dt); }
     env.mods = D.mods(); A.stallRisk = Math.max(D.stallRisk(0), D.stallRisk(1));
     A.fuel = Math.max(0, A.fuel - D.update(dt));
+    for (const [e, k] of startStep(P.ss, A, dt, { ext: deckPower(), eng: env.mods.eng })) startEvent(e, k);
+    if (P.dump) dumpFuel(dt);
     const events = A.step(dt, c, env);
+    startPost(P.ss, A);
     for (const e of events) handle(e);
     if (A.dead) { lose(A.dead === 'water' ? 'DITCHED IN THE SEA' : 'CRASHED'); return; }
     if (!P.ejected) { gun(dt, inp.fire || CTL.state.actions.fire); radar(dt); rwrScan(); pilotG(dt); warnings(dt); service(dt); autoHud(); }
     effects(dt);
     if (P.hudMode === 'A/A' && P.wpn === 'SW' && P.arm && count('SW') && !P.ejected && P.seat === 0) sfx.seeker(P.seek && P.seek.locked ? 2 : P.seek ? 1 : 0); else sfx.seeker(0);
   };
+  // COMMANDER: the AI wingman flies it (units/commander/wingman.js) while the commander is in another unit - as
+  // jetplay.js does for the HORNET; the CADC keeps sweeping the wings
+  const _wenv = {};
+  P.wingman = (dt, pilot, aiEnv) => {
+    if (!P.active || !P.alive || P.ejected) return;
+    sweepStep(P.sweep, A, false, false, dt, D.mods().cadcOk);
+    env.mods = D.mods(); A.stallRisk = Math.max(D.stallRisk(0), D.stallRisk(1)); A.fuel = Math.max(0, A.fuel - D.update(dt));
+    pilot.update(dt, Object.assign(_wenv, env, aiEnv));
+    if (A.dead) lose(A.dead === 'water' ? 'TOMCAT DITCHED IN THE SEA' : 'TOMCAT CRASHED');
+  };
+  // the deck crew's external power and air start cart: plugged in whenever the jet stands on the ALBATROSS
+  function deckPower() { return A.onGround && relSpeed() < 1.5 && !!ctx.onCarrier(A.pos.x, A.pos.z); }
+  function startEvent(e, k) {
+    const side = k ? 'RIGHT' : 'LEFT';
+    if (e === 'crankout') { snd.click('crank'); say(`${side} ENGINE  -  CRANK SWITCH OUT AT 50%${A.eng[1 - k].run ? '' : k ? '  -  NOW THE LEFT: CRANK L' : '  -  NOW THE RIGHT: CRANK R'}`, 2); }
+    else if (e === 'autocrank') { snd.click('crank'); say(`ENG CRANK ${k ? 'R' : 'L'}  -  ${{ CART: 'AIR START CART', XBLEED: 'CROSS-BLEED', WINDMILL: 'WINDMILL' }[P.ss.cranking[k] || 'CART'] || ''}`, 1.6); }
+    else if (e === 'autoidle') { snd.click('lever'); say(`${k ? 'R' : 'L'} THROTTLE IDLE AT 20%  -  FUEL AND IGNITION`, 1.6); }
+    else if (e === 'autodone') say('BOTH ENGINES AT IDLE  -  GENERATORS ON LINE', 2);
+    else if (e === 'noair') say('NO START AIR  -  DECK CART, THE OTHER ENGINE (CROSS-BLEED) OR 225 KNOTS (WINDMILL)', 2.5);
+  }
+  // FUEL DUMP: 1,500 lb/min from the mast at the end of the beaver tail, stops at 4,000 lb; lights in the burner plume
+  // ("dump and burn") when an afterburner is lit. Not on the deck (weight on wheels).
+  function dumpFuel(dt) {
+    if (A.onGround || A.fuel * LB <= 4000) return;
+    A.fuel = Math.max(4000 / LB, A.fuel - 1500 / 60 / LB * dt);
+    const ab = Math.max(A.eng[0].ab, A.eng[1].ab);
+    for (let i = 0; i < 2; i++) {
+      station([0, -0.1, 9.5 + i * 0.6], _p);
+      if (ab > 0.3) fx.add.spawn(_p.x, _p.y, _p.z, A.vel.x * 0.85 + rnd(-1, 1), A.vel.y * 0.85 + rnd(-1, 1), A.vel.z * 0.85 + rnd(-1, 1), rnd(0.6, 1.2), 0.5, 3, 1, rnd(.45, .7), .15, 0.9, 0, 1);
+      else fx.mix.spawn(_p.x, _p.y, _p.z, A.vel.x * 0.85, A.vel.y * 0.85, A.vel.z * 0.85, rnd(1.2, 2), 0.4, 3.5, .86, .88, .92, 0.35, 0, 0.5);
+    }
+  }
   function autoHud() {   // the HUD mode follows the phase of flight until the pilot picks one
     if (!P.hudAuto) return;
     if (A.onGround || A.cat) { if (P.hudMode !== 'A/A') P.hudMode = 'T.O.'; }
@@ -378,8 +419,13 @@ export function createTomcatPlay(ctx) {
       case 'hardland': D.hit(0.35, 'gear'); say('HARD LANDING  -  GEAR DAMAGED', 1.8); sfx.boom(0.4); break;
       case 'overstress': D.hit(0.25 + (e.g - 9.6) * 0.1, 'airframe'); say(`OVERSTRESS  ${e.g.toFixed(1)} G  -  AIRFRAME DAMAGED`, 2); break;
       case 'breakup': lose('THE AIRFRAME FAILED'); break;
-      case 'flameout': say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE FLAMED OUT${e.why === 'stall' ? ' (STALL)' : A.fuel <= 0 ? '  -  OUT OF FUEL' : ''}  -  AIRSTART: CRANK IT (I)`, 2.8); P.mcSeen.delete('L GEN'); P.mcSeen.delete('R GEN'); break;
-      case 'lightoff': snd.lightoff(); say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE LIGHT-OFF`, 1.2); break;
+      case 'flameout': say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE FLAMED OUT${e.why === 'stall' ? ' (STALL)' : A.fuel <= 0 ? '  -  OUT OF FUEL' : ''}  -  AIRSTART: ENG CRANK + THROTTLE IDLE (OR I)`, 2.8); P.mcSeen.delete('L GEN'); P.mcSeen.delete('R GEN'); break;
+      case 'lightoff': snd.lightoff();
+        if (P.ss.wet[e.k]) {   // a wet start: the pooled fuel goes up at once, TIT through the red line
+          P.ss.wet[e.k] = false; A.eng[e.k].egt = 1010; D.hit(0.12, e.k ? 'engR' : 'engL'); snd.bang(0.5);
+          say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE HOT START  -  TIT OVER LIMIT (FUEL BEFORE 15%)`, 2.5);
+        } else say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE LIGHT-OFF  -  TIT RISING`, 1.4);
+        break;
       case 'compstall': snd.bang(); P.kick = 0.5; P.shake = 1; P.stallCue = `${e.k ? 'R' : 'L'} STALL`; say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE COMPRESSOR STALL  -  THROTTLES IDLE, NOSE DOWN`, 3);
         { const n = model.nozzles[e.k]; _p.copy(n).applyQuaternion(A.q).add(A.pos); fx.flash(_p.x, _p.y, _p.z, 0.8); for (let i = 0; i < 10; i++) fx.add.spawn(_p.x, _p.y, _p.z, rnd(-2, 2), rnd(-2, 2), rnd(-2, 2), rnd(0.3, 0.6), 1.2, 0.4, 1, rnd(.5, .7), .2, 0.9, 0, 1); } break;
       case 'stallclear': P.stallCue = null; say(`${e.k ? 'RIGHT' : 'LEFT'} ENGINE RECOVERED  -  POWER UP SLOWLY`, 2); break;
@@ -416,15 +462,24 @@ export function createTomcatPlay(ctx) {
     P.shaker = A.onGround ? 0 : clamp((u - 20) / 8, 0, 1);
     if (!A.eng.some(e => e.stalled)) P.stallCue = null;
     const cz = [...D.cautions()];
-    for (const k of [0, 1]) { const e = A.eng[k], s = k ? 'R' : 'L'; if (e.n < 0.55) cz.push(s + ' GEN'); if (e.stalled) cz.push(s + ' INLET'); if (e.start > 0) cz.push('START VALVE'); }
-    if (lb < 2000) cz.push('FUEL LOW'); if (lb < TCFG.BINGO_LB) cz.push('BINGO'); if (A.canopy > 0.02 && !A.onGround) cz.push('CANOPY');
+    const ss = P.ss;
+    for (const k of [0, 1]) {
+      const e = A.eng[k], s = k ? 'R' : 'L';
+      if (!ss.gens[k]) cz.push(s + ' GEN'); if (e.stalled) cz.push(s + ' INLET'); if (e.start > 0 || ss.cranking[k]) cz.push('START VALVE');
+      if (e.oil < 15) cz.push(s + ' OIL PRESS'); if (!e.run) cz.push(s + ' FUEL PRESS');
+    }
+    if (A.eng.every(e => e.n < 0.4) && A.eas * KT < 150) cz.push('HYD PRESS');   // no pump turning: no combined / flight hydraulics
+    if (ss.emerg) cz.push('EMERG GEN'); if (!ss.bus) cz.push('TRANS/RECT');
+    if (lb < 2000) cz.push('FUEL LOW'); if (lb < TCFG.BINGO_LB) cz.push('BINGO'); if (A.canopy > 0.02) cz.push('CANOPY');
     if (A.canopy > 0.5 && A.onGround) cz.push('LADDER');
     if (A.surf.brake > 0.05) cz.push('SPD BRK'); if (A.launchBar && !A.cat) cz.push('LAUNCH BAR'); if (A.hookCmd !== Math.round(A.hook)) cz.push('HOOK');
     if (Math.abs(A.sweep - (P.sweep.cmdNow ?? A.sweep)) > 6) { P.sweepLag = (P.sweepLag || 0) + dt; if (P.sweepLag > 5) cz.push('WING SWEEP'); } else P.sweepLag = 0;
     if (P.ap.drop > 0) { P.ap.drop -= dt; cz.push('AUTO PILOT'); }
-    if (!P.sas) cz.push('PITCH STAB', 'ROLL STAB', 'YAW STAB');
-    const uniq = [...new Set(cz)];
-    if (uniq.some(c => !P.mcSeen.has(c))) { if (!P.masterCaution) snd.chime(); P.masterCaution = true; for (const c of uniq) P.mcSeen.add(c); }
+    ['PITCH STAB', 'ROLL STAB', 'YAW STAB'].forEach((c, i) => { if (!P.sasCh[i]) cz.push(c); });
+    const uniq = ss.ess ? [...new Set(cz)] : [];   // no essential bus: the caption lights are dark
+    // a new CAUTION (amber) lights the MASTER CAUTION with the chime; ADVISORIES (green) do not
+    if (uniq.some(c => !P.mcSeen.has(c) && !ADVS.includes(c))) { if (!P.masterCaution) snd.chime(); P.masterCaution = true; }
+    for (const c of uniq) P.mcSeen.add(c);
     for (const c of [...P.mcSeen]) if (!uniq.includes(c)) P.mcSeen.delete(c);
     P.cautions = uniq; void m;
   }
@@ -487,18 +542,18 @@ export function createTomcatPlay(ctx) {
     shadow.scale.x = 0.55 + 0.45 * Math.cos((A.sweep - 20) * D2R * 1.4);
     cockpit.group.visible = inCockpit;
     if (inCockpit) cockpit.update(A, P.ctl, dt, hudState(hover));
-    snd.update({ n: [A.eng[0].n, A.eng[1].n], ab: [A.eng[0].ab, A.eng[1].ab], tas: A.tas, inside: inCockpit, canopy: A.canopy, on: P.ejected ? 0 : 1, start: [A.eng[0].start > 0, A.eng[1].start > 0], stalled: [!!A.eng[0].stalled, !!A.eng[1].stalled], shaker: P.shaker, lowAlt: P.altTone, fire: D.fire[0] || D.fire[1], rwr: P.rwrLaunch ? 2 : P.rwr.some(t => t.lock) ? 1 : 0 });
+    snd.update({ n: [A.eng[0].n, A.eng[1].n], ab: [A.eng[0].ab, A.eng[1].ab], tas: A.tas, inside: inCockpit, canopy: A.canopy, on: P.ejected ? 0 : 1, start: [A.eng[0].start > 0 || !!P.ss.cranking[0], A.eng[1].start > 0 || !!P.ss.cranking[1]], cart: P.ss.ext && !A.eng.every(e => e.run), stalled: [!!A.eng[0].stalled, !!A.eng[1].stalled], shaker: P.shaker, lowAlt: P.altTone, fire: D.fire[0] || D.fire[1], rwr: P.rwrLaunch ? 2 : P.rwr.some(t => t.lock) ? 1 : 0 });
   };
-  P.renderParked = (dt, time, vol) => {   // nobody in it: the model, and its engines heard by distance
+  P.renderParked = (dt, time, vol, crewed = false) => {   // nobody in it (or COMMANDER: the AI wingman's crew): the model, and its engines heard by distance
     if (!P.active || !P.alive) return;
     model.group.visible = true; model.group.position.copy(A.pos); model.group.quaternion.copy(A.q); model.animate(A, dt, time, false); cockpit.group.visible = false;
-    for (const m of crewMeshes) m.visible = m.name === 'glareshield' || m.name === 'rioPanel' || m.name === 'seatBack' || m.name === 'headbox';
-    const gy = ctx.groundY(A.pos.x, A.pos.z); shadow.visible = true; shadow.position.set(A.pos.x, gy + 0.1, A.pos.z); shadow.rotation.y = Math.atan2(-A.forward(_f).x, -_f.z);
-    snd.update({ n: [A.eng[0].n, A.eng[1].n], ab: [0, 0], tas: 0, inside: false, canopy: 1, on: vol, start: [false, false], stalled: [false, false], shaker: 0, lowAlt: false, fire: false, rwr: 0 });
+    for (const m of crewMeshes) m.visible = crewed || m.name === 'glareshield' || m.name === 'rioPanel' || m.name === 'seatBack' || m.name === 'headbox';
+    const gy = ctx.groundY(A.pos.x, A.pos.z); shadow.visible = A.pos.y - gy < 120; shadow.position.set(A.pos.x, gy + 0.1, A.pos.z); shadow.rotation.y = Math.atan2(-A.forward(_f).x, -_f.z);
+    snd.update({ n: [A.eng[0].n, A.eng[1].n], ab: [Math.max(0, A.eng[0].ab || 0), Math.max(0, A.eng[1].ab || 0)], tas: crewed ? A.tas : 0, inside: false, canopy: crewed ? 0 : 1, on: vol, start: [false, false], stalled: [false, false], shaker: 0, lowAlt: false, fire: false, rwr: 0 });
   };
   function hudState(hover) {
     const m = D.mods();
-    st.seat = P.seat; st.power = A.eng[0].n > 0.4 || A.eng[1].n > 0.4 || A.onGround; st.flicker = m.avionics < 0.4; st.avionics = m.avionics;
+    st.seat = P.seat; st.power = P.ss.bus; st.ess = P.ss.ess; st.ss = P.ss; st.sasCh = P.sasCh; st.dump = P.dump; st.eng = A.eng; st.flicker = m.avionics < 0.4; st.avionics = m.avionics;
     st.mode = P.hudMode; st.arm = P.arm; st.wpn = P.wpn; st.count = P.wpn === 'GUN' ? A.gun * 5 : count(P.wpn); st.agl = Math.max(0, P.agl ?? 0); st.bingo = TCFG.BINGO_LB;
     st.tgt = P.tgt; st.seeker = P.hudMode === 'A/A' && P.wpn === 'SW' ? { dir: P.seek ? _w.copy(P.seek.u.p).sub(A.pos).normalize() : A.forward(new THREE.Vector3()), locked: !!(P.seek && P.seek.locked) } : null;
     st.pipper = (P.hudMode === 'A/A' && P.wpn === 'GUN') || P.hudMode === 'A/G' || P.firing ? gunPipper() : null;
@@ -514,9 +569,10 @@ export function createTomcatPlay(ctx) {
   // the crew's eyes: rigid in the airframe, plus head look, g sag, buffet, the stall bang, the cat / trap jolt
   P.cockpitCam = (cam, dt, head) => {
     const E = TEYE[P.seat], sag = clamp((A.nz - 1) * 0.012, -0.03, 0.08), sh = P.shake * 0.006;
-    _v.set(E.x + rnd(-sh, sh), E.y - sag + rnd(-sh, sh), E.z + P.kick * 0.06);
+    const lean = clamp((Math.abs(head.yaw) - 0.9) / 1.4, 0, 1);   // checking six: the head turns about the neck and the body leans out past the headbox
+    _v.set(E.x + rnd(-sh, sh) - Math.sign(head.yaw) * 0.27 * lean, E.y - sag + rnd(-sh, sh) + 0.07 * lean, E.z + P.kick * 0.06 + 0.38 * clamp((Math.abs(head.yaw) - 1.6) / 0.9, 0, 1));   // (looking aft the eyes swing round behind the neck, beside the headbox)
     cam.position.copy(_v).applyQuaternion(A.q).add(A.pos);
-    cam.quaternion.copy(A.q).multiply(_q.setFromEuler(_e.set((P.seat ? -0.3 : -0.14) + head.pitch, head.yaw, 0, 'YXZ')));
+    cam.quaternion.copy(A.q).multiply(_q.setFromEuler(_e.set((P.seat ? -0.3 : -0.14) + head.pitch, head.yaw + Math.sign(head.yaw) * 0.6 * Math.max(0, Math.abs(head.yaw) - 1.9), 0, 'YXZ')));
   };
   const chaseQ = new THREE.Quaternion(), chaseP = new THREE.Vector3();
   P.chaseCam = (cam, dt) => {
@@ -539,6 +595,7 @@ export function createTomcatPlay(ctx) {
   P.hint = () => {
     if (!P.alive) return P.ejected ? 'UNDER THE CANOPY  -  WAITING FOR RESCUE' : '';
     if (P.stallCue) return `${P.stallCue}  -  THROTTLES TO IDLE, NOSE DOWN BELOW 15 UNITS, THEN POWER UP SLOWLY`;
+    if (P.seat === 0 && (!A.eng.every(e => e.run) || P.ss.auto || P.ss.crank !== 'OFF')) { const h = startHint(); if (h) return h; }
     if (A.cat && A.cat.state === 'hold' && A.catClear === false) return 'CAT 1 HOLD  -  THE ALBATROSS IS TURNING INTO CLEAR WATER FOR THE LAUNCH';
     if (A.cat && A.cat.state === 'hold') return A.eng[0].n > 0.95 ? 'MIL POWER  -  SALUTE, STAND BY FOR THE SHOT' : 'HOOKED UP ON CAT 1  -  THROTTLES TO MIL (80%+) OR ZONE 5 AFTERBURNER';
     if (A.wire && A.wire.held > 0) return 'TRAPPED  -  THROTTLES TO IDLE, HOOK UP (H)';
@@ -547,6 +604,23 @@ export function createTomcatPlay(ctx) {
     if (P.seat === 1) return 'RIO  -  B/Q/E HOOK TRACK  ·  L STT LOCK  ·  R LAUNCH  ·  C WEAPON  ·  - / = TID RANGE  ·  A D W S SHIFT CTRL: STEER THE PILOT  ·  [ ] SEAT';
     return '';
   };
+  // what to do next in the start (or the airstart), from the switches' state: like the HUEY's checklist line
+  function startHint() {
+    const ss = P.ss, rpm = k => Math.round(A.eng[k].n * 100);
+    const k = ss.auto ? ss.auto.k : ss.crank === 'R' ? 1 : ss.crank === 'L' ? 0 : !A.eng[1].run ? 1 : 0, e = A.eng[k], s = k ? 'R' : 'L';
+    const pre = ss.auto ? 'AUTO START  -  ' : '', tit = Math.round(e.egt * 1.25);
+    if (e.run && e.n < START.GEN) return `${pre}${s} ENGINE LIGHT-OFF  -  RPM ${rpm(k)}%  TIT ${tit}°C  -  THE CRANK SWITCH DROPS OUT AT 50%`;
+    if (e.run && ss.crank !== 'OFF') return `${pre}${s} ENGINE ${rpm(k)}%  -  CRANK OUT AT 50%`;
+    if (e.run) return '';
+    if (ss.cranking[k]) {
+      if (ss.thrOff[k]) return e.n < START.IGN ? `${pre}CRANKING ${s}  -  RPM ${rpm(k)}%  -  ${s} THROTTLE TO IDLE AT 20% (CLICK ITS FINGER LIFT)` : `${pre}${s} RPM ${rpm(k)}%  -  ${s} THROTTLE TO IDLE NOW: FUEL AND IGNITION`;
+      return `${pre}${s} RPM ${rpm(k)}%  -  FUEL AND IGNITION ON  -  LIGHT-OFF AT ~24%${ss.wet[k] ? '  -  WET START!' : ''}`;
+    }
+    if (ss.crank === s) return `ENG CRANK ${s}  -  NO START AIR: ${A.onGround ? 'STOP ON THE DECK FOR THE CART' : 'CROSS-BLEED OFF THE OTHER ENGINE, OR DIVE FOR 225 KNOTS'}`;
+    if (!A.onGround) return `${s} ENGINE OUT  -  AIRSTART: ENG CRANK ${s} (CROSS-BLEED OR WINDMILL ABOVE 225 KT), ${s} THROTTLE IDLE  ·  I: AUTO`;
+    const cold = !A.eng[0].run && !A.eng[1].run;
+    return `${cold ? 'COLD JET  -  ' : ''}START THE ${k ? 'RIGHT' : 'LEFT'} ENGINE: ENG CRANK ${s} (RIGHT CONSOLE), ${s} THROTTLE OFF -> IDLE AT 20%  ·  I: AUTO START`;
+  }
   P.gfx = () => ({ grey: P.gloc > 0 ? 1 : clamp((P.blood - 0.35) / 0.65, 0, 1), red: P.red });
   P.chutes = chutes; P.FD = FD;   // (tests fly with the AI's flight director)
   return P;

@@ -15,8 +15,13 @@ import { worldMaterial, groundMaterial, geoFrom } from './gfx.js';
 import { createAmbient } from './ambient.js';
 import { buildPadDressing, buildShaftCollar, buildRWPylon } from './structures.js';
 import { structAngle, settlementsNear, nearestRoad, settlementOf } from './net.js';
+import { DAMAGE } from './damage.js';   // ngc/world-polish: buildings knocked about by the war
+import { ruin, damageOverlay } from './townkit.js';
+import { Geo } from './kit.js';
+import { rng } from './rng.js';
+import { buildAASite, setStructGround } from './structures.js';
 
-const NEAR_R = 520, FAR_MAX = 2300;
+const NEAR_R = 520, FAR_MAX = 2300, DETAIL_R = 240;
 export function createWorldLife(ctx) {
   const { scene, terrainH, fog, uTime } = ctx;
   if (/[?&]noworld/.test(location.search)) return (window.__WORLD = { update() {}, stats: { ms: 0, off: true }, zone: [], chunks: new Map(), ambient: { stats: {}, people: [], cars: [] } });   // A/B for perf
@@ -39,8 +44,8 @@ export function createWorldLife(ctx) {
       const rd = new Map(); for (const id of roads) { const R = roadById(id); rd.set(R, new Set(Array.from({ length: R.xs.length - 1 }, (_, i) => i))); }
       const discs = []; for (const [, a] of netState.buckets) for (const s of a) if (s.disc && Math.hypot(s.ax - I.x, s.az - I.z) < I.r + 30 && !discs.includes(s)) discs.push(s);
       const c = buildGeo({ items, roads: rd, discs, x0: -1e9, z0: -1e9, x1: 1e9, z1: 1e9 }, terrainH, { lat: 2.5 });
-      const e = { I, x: I.x, z: I.z, sN: mk(c.near, M.zSolid), sF: mk(c.far, M.zSolid), gN: mk(c.gnear, M.zgNear), gF: mk(c.gfar, M.zgFar), wires: wiresOf(c.wires), dyn: c.dyn, items, roads };   // SEAWORLD: roads kept for world/solid.js (bridge parapets)
-      stats.zoneTris += c.near.tris + c.gnear.tris; zone.push(e);
+      const e = { I, x: I.x, z: I.z, sN: mk(c.near, M.zSolid), sF: mk(c.far, M.zSolid), gN: mk(c.gnear, M.zgNear), gF: mk(c.gfar, M.zgFar), sD: mk(c.detail, M.zSolid), wires: wiresOf(c.wires), dyn: c.dyn, items, roads, zone: true };   // SEAWORLD: roads kept for world/solid.js (bridge parapets)
+      stats.zoneTris += c.near.tris + c.gnear.tris + c.detail.tris; zone.push(e);
     }
     stats.zoneMs = performance.now() - t0;
   }
@@ -53,8 +58,9 @@ export function createWorldLife(ctx) {
   if (worker) worker.onmessage = ({ data: d }) => {
     const c = chunks.get(key(d.ci, d.cj)); stats.pending--;
     if (!c || c.state !== 'pending') return;   // dropped while building
-    Object.assign(c, { state: 'ready', sN: mk(d.near, M.solid), sF: mk(d.far, M.solid), gN: mk(d.gnear, M.gNear), gF: mk(d.gfar, M.gFar), wires: wiresOf(d.wires), dyn: d.dyn, tris: d.near.tris + d.gnear.tris });
+    Object.assign(c, { state: 'ready', sN: mk(d.near, M.solid), sF: mk(d.far, M.solid), gN: mk(d.gnear, M.gNear), gF: mk(d.gfar, M.gFar), sD: mk(d.detail, M.solid), wires: wiresOf(d.wires), dyn: d.dyn, tris: d.near.tris + d.gnear.tris, dtris: d.detail.tris });
     stats.built++; stats.buildMs = d.ms; ambient.addChunk(c);
+    if (c.dyn.bld && c.dyn.bld.some(b => DAMAGE.cond(b.k) !== 'intact')) applyRuins(c);   // knocked down before it was last streamed out
   };
   const wantR = () => Math.min(FAR_MAX, Math.max(NEAR_R + 200, (ctx.view ? ctx.view.draw : 600) * 0.92));
   let scanT = 0;
@@ -69,16 +75,18 @@ export function createWorldLife(ctx) {
     want.sort((a, b) => a[0] - b[0]);
     for (const [, i, j, k] of want) { if (stats.pending >= 2 || !worker) break; chunks.set(k, { i, j, x: (i + 0.5) * CHUNK, z: (j + 0.5) * CHUNK, state: 'pending' }); stats.pending++; worker.postMessage({ id: reqId++, ci: i, cj: j }); }
     for (const [k, c] of chunks) if (Math.hypot(c.x - cx, c.z - cz) > R + CHUNK * 1.6) {
-      if (c.state === 'ready') { for (const p of ['sN', 'sF', 'gN', 'gF', 'wires']) dispose(c[p]); ambient.dropChunk(c); }
+      if (c.state === 'ready') { for (const p of ['sN', 'sF', 'gN', 'gF', 'sD', 'ruins', 'wires']) dispose(c[p]); ambient.dropChunk(c); }
       chunks.delete(k);
     }
   }
   function lod(cx, cz) {
     const R = wantR(); let tris = 0, n = 0;
-    const show = (c, near, far) => { if (c.sN) c.sN.visible = near; if (c.gN) c.gN.visible = near; if (c.wires) c.wires.visible = near; if (c.sF) c.sF.visible = far; if (c.gF) c.gF.visible = far; };
-    for (const c of chunks.values()) { if (c.state !== 'ready') continue; const d = Math.hypot(c.x - cx, c.z - cz), near = d < NEAR_R + CHUNK * 0.35; show(c, near, !near && d < R + CHUNK * 0.71); if (near) tris += c.tris; n++; }
-    for (const e of zone) { const d = Math.hypot(e.x - cx, e.z - cz) - e.I.r, near = d < NEAR_R; show(e, near, !near && d < R); }
-    stats.chunks = n; stats.tris = tris;
+    // ngc/world-polish: the detail layer (street furniture, cars, clutter) only close in; ruins whenever the chunk shows
+    const show = (c, near, far, det) => { if (c.sN) c.sN.visible = near; if (c.gN) c.gN.visible = near; if (c.wires) c.wires.visible = near; if (c.sF) c.sF.visible = far; if (c.gF) c.gF.visible = far; if (c.sD) c.sD.visible = det; if (c.ruins) c.ruins.visible = near || far; };
+    let dn = 0;
+    for (const c of chunks.values()) { if (c.state !== 'ready') continue; const d = Math.hypot(c.x - cx, c.z - cz), near = d < NEAR_R + CHUNK * 0.35, det = d < DETAIL_R + CHUNK * 0.6; show(c, near, !near && d < R + CHUNK * 0.71, det); if (near) tris += c.tris; if (det) { tris += c.dtris || 0; dn++; } n++; }
+    for (const e of zone) { const d = Math.hypot(e.x - cx, e.z - cz) - e.I.r, near = d < NEAR_R; show(e, near, !near && d < R, d < DETAIL_R); }
+    stats.chunks = n; stats.tris = tris; stats.detailChunks = dn;
   }
   // keep the main thread's road network a step ahead of the camera, so physics never waits on a whole cell. The
   // settlement candidates round the zone (the bulk of a cold first cell) are worked through a few per frame at start.
@@ -126,6 +134,7 @@ export function createWorldLife(ctx) {
       if (own !== s.owner) {   // ownership changed (or first frame)
         const first = s.owner < 0, was = s.owner; s.owner = own;
         if (s.collar) s.collar.userData.setSide(own);
+        if (s.aa) for (const m of s.aa) m.userData.setSide(own);   // ngc/world-polish
         if (own === 2) { s.grow = first ? 99 : 0; for (const p of s.pylons) { p.visible = true; p.rotation.z = 0; p.userData.glowMat.color.setHex(0x8ff4ff); } s.fallT = 0; }
         else if (was === 2) { s.fallT = 0.001; for (const p of s.pylons) p.userData.glowMat.color.setHex(0x1c2224); if (s.cables) s.cables.visible = false; }
       }
@@ -141,8 +150,75 @@ export function createWorldLife(ctx) {
   }
 
   const ambient = createAmbient({ ...ctx, root, zone, chunks });
+
+  // ---------------------------------------------------------------------------------- damage (ngc/world-polish)
+  // Every explosion near a building (fx.explode, wrapped like ambient.js does) counts against it (damage.js). A
+  // damaged one gets its soot, roof hole and smoke drawn over it; a destroyed one's vertices in the chunk's merged
+  // near / far meshes collapse to a point and its ruin is drawn instead (one small 'ruins' mesh per chunk).
+  const fx = ctx.fx;
+  function collapse(mesh, a, b) {
+    if (!mesh || b <= a) return;
+    const p = mesh.geometry.attributes.position, A = p.array, x = A[a * 3], y = A[a * 3 + 1], z = A[a * 3 + 2];
+    for (let i = a; i < b; i++) { A[i * 3] = x; A[i * 3 + 1] = y; A[i * 3 + 2] = z; }
+    p.needsUpdate = true;
+  }
+  function applyRuins(e) {
+    const g = new Geo(); let any = false;
+    for (const b of e.dyn.bld) {
+      const cond = DAMAGE.cond(b.k); if (cond === 'intact') continue; any = true;
+      const r = rng((b.it.seed | 0) ^ 0x5eed);
+      g.weather(b.y, 1.0, 0.3, 0.08); g.push(b.x, b.y, b.z, b.yaw);
+      if (cond === 'destroyed') { if (!b.gone) { collapse(e.sN, b.n[0], b.n[1]); collapse(e.sF, b.f[0], b.f[1]); b.gone = true; } ruin(g, r, b.it); }
+      else damageOverlay(g, r, b.it);
+      g.pop(); g.unweather();
+    }
+    dispose(e.ruins); e.ruins = null;
+    if (any) e.ruins = mk(g.build(), e.zone ? M.zSolid : M.solid);
+  }
+  function onCond(b, cond) {
+    if (!fx || !fx.burn) return;
+    const cx = b.x + Math.sin(b.yaw) * b.dz, cz = b.z + Math.cos(b.yaw) * b.dz;
+    if (cond === 'destroyed') {
+      const e = fx.burn(cx, b.y + 2, cz, 25, 1.5); e.smoulder = 150;
+      if (fx.scorch) fx.scorch.add({ x: cx, y: b.y + 0.35, z: cz, size: Math.max(b.w, b.d) * 0.8, a: 0.85, tile: 0, n: new THREE.Vector3(0, 1, 0) });
+    } else { const e = fx.burn(cx, b.y + b.H * 0.55, cz, 6, 0.7); e.smoulder = 70; }
+  }
+  const nearE = (x, z, fn) => {
+    for (const c of chunks.values()) if (c.state === 'ready' && c.dyn && Math.abs(c.x - x) < CHUNK && Math.abs(c.z - z) < CHUNK) fn(c);
+    for (const e of zone) if (Math.hypot(e.x - x, e.z - z) < e.I.r + 60) fn(e);
+  };
+  function blast(x, y, z, s) {
+    if (s < 0.75) return;
+    const R = 4 + 2.4 * s + 30;
+    nearE(x, z, e => {
+      let changed = false;
+      for (const b of e.dyn.bld || []) { if (Math.abs(b.x - x) > R || Math.abs(b.z - z) > R) continue; const c = DAMAGE.hit(b, x, y, z, s); if (c) { changed = true; onCond(b, c); } }
+      if (changed) applyRuins(e);
+    });
+  }
+  if (fx && fx.explode) { const ex0 = fx.explode.bind(fx); fx.explode = (x, y, z, s = 1, o) => { try { blast(x, y, z, s); } catch (err) { console.warn('world damage', err); } return ex0(x, y, z, s, o); }; }
+  // tests / scripted events: the building nearest (x, z) to a condition
+  function knock(x, z, cond = 'destroyed') {
+    let best = null;
+    nearE(x, z, e => { for (const b of e.dyn.bld || []) { const d = DAMAGE.dist(b, x, z); if (!best || d < best.d) best = { d, b, e }; } });
+    if (!best) return null;
+    DAMAGE.set(best.b, cond); onCond(best.b, cond); applyRuins(best.e);
+    return { k: best.b.k, t: best.b.t, x: best.b.x, z: best.b.z, d: best.d };
+  }
+
+  // ---------------------------------------------------------------------------------- AA emplacements (ngc/world-polish)
+  // war.js puts the AA guns on four slots round each pad (aaSlots: 45 degrees off the axes, 22 m out, 15 m on cave
+  // islands - repeated here). Ours dig in: an earth revetment with sandbags on top, ready-use ammunition boxes, a gap to
+  // drive in by; the machines bolt down a ring of ceramic plates. Not war targets, not solid (the gun parks inside).
+  setStructGround(terrainH);
+  for (const s of sites) {
+    const p = s.I.pad, rr = s.I.cave ? 15 : 22, slots = [];
+    for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + Math.PI / 4, x = p.x + Math.cos(a) * rr, z = p.z + Math.sin(a) * rr; slots.push([x, z, Math.atan2(p.z - z, p.x - x)]); }   // the gap faces the pad
+    const m = buildAASite(terrainH, slots); root.add(m); s.aa = [m];
+  }
   const W = {
     root, stats, zone, chunks, ambient, sites,
+    damage: { DAMAGE, knock, blast },   // ngc/world-polish
     net: { settlementsNear, netState, nearestRoad },   // for tests and tools
     traffic: { setModel: (k, def) => ambient.setModel(k, def), get models() { return ambient.models; }, get cars() { return ambient.cars; } },
     update(dt, cam, playing = true) {

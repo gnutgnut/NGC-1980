@@ -560,9 +560,9 @@ export function buildHueyCockpit() {
 
   // caution panel: 4 columns x 5 rows of captions, amber when lit
   const capLines = CAPTIONS.map(t => { const w = t.split(' '); if (w.length < 2) return [t]; const k = Math.ceil(w.length / 2); return [w.slice(0, k).join(' '), w.slice(k).join(' ')]; });
-  let cautKey = -1;
+  let cautKey = -1, lampTest = 0;
   function drawCaut(S) {
-    let key = 0; const L = S.cautions || []; for (let i = 0; i < CAPTIONS.length; i++) if (L.includes(CAPTIONS[i])) key |= 1 << i;
+    let key = 0; const L = S.cautions || []; for (let i = 0; i < CAPTIONS.length; i++) if (L.includes(CAPTIONS[i]) || (lampTest > 0 && S !== NOCAUT)) key |= 1 << i;   // TEST lights every segment
     if (key === cautKey) return; cautKey = key;
     const c = cautT.ctx; c.fillStyle = '#060606'; c.fillRect(0, 0, 480, 320);
     for (let i = 0; i < 20; i++) {
@@ -595,7 +595,7 @@ export function buildHueyCockpit() {
       if (id === 'starter') return lblOf(id, s.starter ? 'ENGAGED' : 'OFF');
       return LBL[id];
     },
-    press(id) { pt[id] = 0.18; },
+    press(id) { pt[id] = 0.18; if (id === 'mc') lampTest = 1.2; },   // the TEST / RESET switch: a lamp test, then the reset
     update(H, dt, S) {
       lastS = S; const k = Math.min(1, 7 * dt), kk = Math.min(1, 2.5 * dt), ac = S.ac, s = S.sw, c = S.ctl;
       // needles: pneumatic and self-generating ones always live, AC ones fall to zero without the inverter
@@ -622,7 +622,7 @@ export function buildHueyCockpit() {
       for (const id in pt) pt[id] -= dt;
       for (const id in push) push[id].o.position.z = push[id].z - (pt[id] > 0 ? 0.005 : 0);
       // lamps (DC powered); master caution steady amber, RPM / FIRE red
-      const pw = S.volts > 18; setLamp(mcL, pw && S.masterCaution); setLamp(rpmL, pw && S.rpmWarn); setLamp(rpmL2, pw && S.rpmWarn); setLamp(fireL, S.volts > 12 && S.fire);
+      const pw = S.volts > 18; lampTest -= dt; setLamp(mcL, pw && (S.masterCaution || lampTest > 0)); setLamp(rpmL, pw && S.rpmWarn); setLamp(rpmL2, pw && S.rpmWarn); setLamp(fireL, S.volts > 12 && S.fire);
       if (S.rwr) {   // CM: threat lamps (LOCK steady, MISSILE flashing, LASER while a LANCE charges or fires), scope, counters
         const R = S.rwr, fl = (performance.now() % 400) < 220;
         setLamp(lockL, pw && R.locked && !R.launch); setLamp(mslL, pw && R.launch && fl); setLamp(lasL, pw && R.laser);

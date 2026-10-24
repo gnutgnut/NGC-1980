@@ -95,6 +95,7 @@ export function createMotorPool(o) {
     hintExtra: V => V.type === 'm35' ? 'B TROOPS  ·  ' : '',
     onEnter: V => { V.owner = V.owner === 'civ' ? 'player' : V.owner; },
     onExit: () => {},
+    unitLost: o.unitLost,   // COMMANDER: a wrecked military vehicle is the fleet's loss
   };
   const _hurt = (V) => { const h = V.hurt; V.hurt = (a, why, at, dir, kind) => { V._hitDir = dir ? new THREE.Vector3(dir.x, dir.y, dir.z).normalize() : null; return h(a, why, at, dir, kind); }; };
   // ---------------------------------------------------------------- spawning

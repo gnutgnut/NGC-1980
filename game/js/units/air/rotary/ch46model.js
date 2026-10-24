@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { M, B, V, clamp, smooth, slab, loft, merge, cylZ, cylX, cylY, boxG, sphG, mesh, group, rodG, tubeG, bucket, rr, full, QH, shift, ringGeo, decal, canDecal, sideDecal, drawInsignia, drawText } from './modelkit.js';
 
-const D2R = Math.PI / 180;
+const D2R = Math.PI / 180, _qa = new THREE.Quaternion(), _va = new THREE.Vector3();
 export const CH46M = {
   GROUND: -1.80, R: 7.62, OMEGA: 264 * Math.PI / 30, TILT: 4.5 * D2R,
   HUB_F: [0, 2.20, -5.08], HUB_A: [0, 3.05, 5.08],
@@ -38,7 +38,7 @@ function skinMat(z0, z1, qh, s) {
 
 export function buildCH46Mesh(o = {}) {
   const g = new THREE.Group(); g.name = 'ch46';
-  const greenM = M(0x56633f), green2M = M(0x5f6c47), darkM = M(0x2c3226), blackM = M(0x141512, { shininess: 6 }), metalM = M(0x4a4d4f, { shininess: 50 });
+  const greenM = M(0x5c6a45), green2M = M(0x66744d), darkM = M(0x2c3226), blackM = M(0x141512, { shininess: 6 }), metalM = M(0x4a4d4f, { shininess: 50 });
   const bladeM = M(0x1d1f1d, { shininess: 25 }), tipM = M(0xe2bb1a), redM = M(0xa8231b), sootM = M(0x2a2622, { shininess: 4 }), tyreM = M(0x161616, { shininess: 4 }), hubM = M(0x5a5d58, { shininess: 40 });
   const glassM = new THREE.MeshPhongMaterial({ color: 0x86a5a0, specular: 0xffffff, shininess: 90, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
   const winM = M(0x1b2622, { shininess: 90, specular: 0x9fb8aa }), innerM = M(0x30362a, { side: THREE.BackSide }), seatM = M(0x9a2a1c), floorM = M(0x2a2d27);
@@ -68,7 +68,7 @@ export function buildCH46Mesh(o = {}) {
   body.add(boxG(0.36, 0.3, 0.5, 1.0, 1.08, -4.2), green2M); body.add(rodG([1.1, 1.05, -4.2], [1.45, 1.05, -4.2], 0.06), metalM);   // rescue hoist
 
   // ---- sponsons (main gear, fuel) with the main wheels, nose gear with twin wheels
-  const SP = [[-0.7, -0.55, -0.85, 0.15], [-0.2, -0.45, -1.2, 0.42], [0.6, -0.42, -1.25, 0.48], [2.6, -0.42, -1.25, 0.48], [3.4, -0.48, -1.2, 0.42], [3.95, -0.6, -1.0, 0.18]];
+  const SP = [[0.15, -0.5, -0.95, 0.2], [0.45, -0.4, -1.22, 0.5], [0.9, -0.38, -1.28, 0.56], [2.7, -0.38, -1.28, 0.56], [3.25, -0.42, -1.24, 0.5], [3.6, -0.55, -1.05, 0.2]];
   for (const s of [-1, 1]) {
     const sr = SP.map(([z, t, b, w]) => shift(full(rr(z, t, b, w, Math.min(0.2, w), Math.min(0.18, w), [t - 0.1, (t + b) / 2, b + 0.1])), s * 1.45));
     body.add(loft(sr, () => 0, 0, 0), greenM);
@@ -118,6 +118,22 @@ export function buildCH46Mesh(o = {}) {
     cb.add(boxG(0.43, 0.4, 0.29, 0, 1.12, 0), crew.vest); cb.add(sphG(0.1, 0, 1.48, -0.02), crew.skin); cb.add(new THREE.SphereGeometry(0.14, 8, 5, 0, Math.PI * 2, 0, 1.9).translate(0, 1.52, 0.01), crew.helmet);
     cb.add(rodG([-0.22, 1.3, 0], [-0.32, 0.9, 0.1], 0.09), crew.suit); cb.add(rodG([0.22, 1.3, 0], [0.4, 1.6, 0.2], 0.09), crew.suit); cb.flush(chief, 'chiefBody'); }
   chief.rotation.y = Math.PI;
+  const guns = [[1.1, -4.2, 1], [-1.1, -3.9, -1]].map(([x, z, s]) => {
+    body.add(rodG([x - s * 0.05, -0.95, z], [x - s * 0.05, 0.15, z], 0.05, 6), metalM);                     // pintle post
+    const yaw = group(g, 'doorGun', x, 0.2, z), pitch = group(yaw, 'gunPitch'), gb = bucket();
+    gb.add(boxG(0.1, 0.13, 0.75, 0, 0, -0.1), blackM); gb.add(cylZ(0.03, 0.03, 1.1, 6).translate(0, 0.02, -1.0), blackM); gb.add(cylZ(0.06, 0.06, 0.65, 8).translate(0, 0.02, -0.75), M(0x22251f));   // receiver, barrel, jacket
+    gb.add(boxG(0.16, 0.2, 0.3, s * 0.13, -0.12, 0.0), M(0x4f5636)); gb.add(boxG(0.06, 0.12, 0.08, 0, -0.04, 0.32), blackM); gb.add(boxG(0.22, 0.03, 0.03, 0, -0.02, 0.36), metalM);   // ammo can, spade grips
+    gb.flush(pitch, 'm2');
+    const fl = mesh(merge([new THREE.PlaneGeometry(0.3, 0.7).rotateX(Math.PI / 2), new THREE.PlaneGeometry(0.3, 0.7).rotateX(Math.PI / 2).rotateZ(Math.PI / 2)]).translate(0, 0.02, -1.85), B(0xffc860, { transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }), pitch, 'flash');
+    const gn = group(g, 'gunner', x - s * 0.45, -0.95, z + 0.45), nb = bucket();
+    nb.add(boxG(0.17, 0.8, 0.2, -0.1, 0.4, 0), crew.suit); nb.add(boxG(0.17, 0.8, 0.2, 0.1, 0.4, 0), crew.suit); nb.add(boxG(0.4, 0.55, 0.26, 0, 1.08, 0), crew.suit); nb.add(boxG(0.43, 0.4, 0.29, 0, 1.12, 0), crew.vest);
+    nb.add(sphG(0.1, 0, 1.48, -0.02), crew.skin); nb.add(new THREE.SphereGeometry(0.14, 8, 5, 0, Math.PI * 2, 0, 1.9).translate(0, 1.52, 0.01), crew.helmet); nb.add(boxG(0.2, 0.06, 0.05, 0, 1.5, -0.13), crew.visor);
+    nb.add(rodG([-0.22, 1.3, 0], [-0.1, 1.15, -0.4], 0.09), crew.suit); nb.add(rodG([0.22, 1.3, 0], [0.1, 1.15, -0.4], 0.09), crew.suit); nb.flush(gn, 'gunnerBody');
+    gn.rotation.y = s > 0 ? -Math.PI / 2 : Math.PI / 2;
+    return { yaw, pitch, fl, gn, s, y0: s > 0 ? -Math.PI / 2 : Math.PI / 2, cy: s > 0 ? -Math.PI / 2 : Math.PI / 2, cp: -0.35 };
+  });
+  // the ramp's hydraulic struts (re-aimed every frame between the cabin wall and the ramp)
+  const struts = [-1, 1].map(s => { const st = mesh(cylZ(0.05, 0.05, 1, 6), metalM, g, 'rampStrut'); st.userData.x = s * 0.9; return st; });
 
   // ---- the ramp: a panel hinged at the cabin floor; up it closes the sloping underside of the tail
   const [hx, hy, hz] = CH46M.RAMP_HINGE, L = CH46M.RAMP_LEN;
@@ -189,14 +205,24 @@ export function buildCH46Mesh(o = {}) {
     }
     ramp.rotation.x = -(CH46M.RAMP_UP + (CH46M.RAMP_DOWN - CH46M.RAMP_UP) * clamp(S.ramp ?? 0, 0, 1));
     chief.visible = (S.ramp ?? 0) > 0.5;
+    { const a = -ramp.rotation.x, py = CH46M.RAMP_HINGE[1] + Math.sin(a) * 1.5, pz = CH46M.RAMP_HINGE[2] + Math.cos(a) * 1.5;
+      for (const st of struts) { const ax = st.userData.x, ay = -0.15, az = 4.35, dy = py - ay, dz = pz - az, L = Math.hypot(dy, dz); st.position.set(ax, (ay + py) / 2, (az + pz) / 2); st.rotation.set(-Math.atan2(dy, dz), 0, 0); st.scale.z = L; } }
+    // door guns: rest pointing out and down; on a target, the gunner swings onto it (world aim -> local)
+    for (const G of guns) {
+      let yT = G.y0, pT = -0.35;
+      if (S.gunAim && S.gunAim.lengthSq() > 0.5) { g.getWorldQuaternion(_qa); _va.copy(S.gunAim).applyQuaternion(_qa.invert()); if (_va.x * G.s > 0.1) { yT = Math.atan2(-_va.x, -_va.z); pT = clamp(Math.asin(clamp(_va.y / _va.length(), -1, 1)), -1.0, 0.4); } }
+      const k = 1 - Math.exp(-8 * dt); G.cy += (yT - G.cy) * k; G.cp += (pT - G.cp) * k;
+      G.yaw.rotation.y = G.cy; G.pitch.rotation.x = G.cp; G.gn.rotation.y = G.y0 + (G.cy - G.y0) * 0.6;
+      G.fl.visible = !!S.gunFiring && ((time * 17 + G.s) % 1) < 0.5;
+    }
     const live = !!S.run || nr > 0.05, fl = live && (time % 1.1) < 0.1;
     for (const b of beacons) { b.material = fl ? beaconM : beaconOff; b.scale.setScalar(fl ? 1.6 : 1); }
     for (const n of navs) n.material = live ? n.userData.on : navOff;
     lensM.color.setHex(S.light ? 0xfff6d8 : 0x3a3a34);
-    const h = clamp(((S.n1 ?? 0) - 0.45) / 0.55, 0, 1); for (const e of engines) e.heat.material.color.setRGB(0.07 + 0.2 * h, 0.05 + 0.05 * h, 0.04);   // a dull heat in the pipe
+    const h = clamp(((S.n1 ?? 0) - 0.45) / 0.55, 0, 1); for (const e of engines) e.heat.material.color.setRGB(0.05 + 0.07 * h, 0.045 + 0.02 * h, 0.04);   // a sooty pipe with a faint heat
   }
   animate({});
   // the lowered ramp's lip (where the squad steps off), local
   const a = -CH46M.RAMP_DOWN, RAMP_END = V(hx, hy - Math.sin(-CH46M.RAMP_DOWN) * L, hz + Math.cos(a) * L);
-  return { group: g, animate, RAMP_END, parts: { ramp, chief, rotors: RF } };
+  return { group: g, animate, RAMP_END, GUNS: guns.map(G => G.yaw.position), parts: { ramp, chief, rotors: RF, guns } };
 }
