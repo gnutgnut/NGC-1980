@@ -2531,3 +2531,50 @@ the terrain rebuild (ngc/terrain) will change which lots take them.
   the whole fleet), marinelife 10/11 (the miss is its TEST CAR step: the car is gone since ngc/wheeledgame, fails on
   experimental too), foot 12/12, rescue 2/2. jets.json, damage.json, jetsystems, jettrap, vehicle, tomcat and armorgame
   fail the same checks on the untouched experimental tree on this heavily loaded headless machine (1-8 fps: timing).
+
+## 2026-10-24 — NGC-1980: THE COMMANDER, part 2 - every unit in the war, several of each type, one reserve (branch ngc/commander2)
+- **Every unit out is a target** (main.js `updateExt`, `war.ext`). war.js shot only at the unit you are in (PL); now every
+  other unit of the fleet that is out - a Huey parked or flown home by her crew, a Hornet / Tomcat parked on deck or on CAP
+  under the wingman, the tanks and APCs, the motor pool's jeeps and trucks - is a point target with a radius in
+  `war.ext` (rebuilt every frame, one stable object per unit so missiles and gunners can hold it). war.js `targets()`
+  (rounds, rockets, bombs, shells, blasts), `damage()` (game-level amount like the player's), the AA / defence foes and the
+  SHRIKEs' foes (aircraft in the air only), the WASPs' and the old gunships' target scans and the ground war's
+  `targetsFor` / `extSeg` (STRIDERs, RW-7s, MBTs) all see them. A hit goes into the unit's own damage model with no cockpit
+  calls (`hurtQuiet` on the jets, the armour / wheeled `hurt`, the Huey's `D.hit` through `hurtHueyAway`); a parked
+  airframe shot up enough (game level: 2.4 of hurt on the ground, 3.2 in the air) is destroyed (`JP.destroy`,
+  `TP.destroy`, `killPlayerZ`); in the air the hits fly into the sim (a Huey without her tail rotor spins in). Losses
+  are the fleet's: the feed, the board's LOSSES, the war lost when the fleet is spent.
+- **Several of each type out**, up to the reserve (N on the board, `commander.deploy(id, base, true)`):
+  - **Hornets / Tomcats**: one craft per airframe (`JETS` / `TOMCATS`; `jet`, `jet#2`... made on demand by `newJet` /
+    `newTomcat` with their own jetplay / tomcatplay, model and cockpit). craft.js: `def.craft` keeps `G.craft` = the type,
+    so every `G.craft === 'jet'` check still holds; craftjet / crafttomcat control themselves by `D.id`. main.js reads the
+    one you are in through `curJP()` / `curTC()`; `jetC` / `JP` / `tomcatC` stay the first airframe (the scenes). Cat 1 is
+    one catapult for all of them (`catBusy`). Sim messages of a jet you are not in stay off the screen (`craftSay`), the
+    Hornets share one engine voice (`jetVoice`: the nearest one you are not in). 5 / 8 on the deck still mean: the jet you
+    are in to the cat, else one out flying (take her), else one parked, else a fresh one (`deckLaunch`).
+  - **M60A3 / M113A2**: one craft per hull (`ARMS`, `m60#2`...; `newArmor` / `freeArmor`: a wreck stays where it burnt,
+    after six hulls the oldest wreck is reused).
+  - **Hueys**: the Huey's flying, cockpit, systems, damage, AI crew and weapons stay on main.js's one set of objects (H,
+    D, SY, heliAI, G's fuel / ordnance, Z's life) - "the main Huey", the one you are in or flew last. Every other Huey out
+    is a slot (`HUEYS`) with its own sim, damage model, systems, AI crew and model; switching swaps the two by content
+    (units/commander/swapstate.js: vectors copied, arrays / Sets / plain objects exchanged, methods and getters left alone,
+    so every reference to H.pos, D.hp... stays good), and each frame a slot is swapped in, run through the same parked /
+    AI-crew `updateHeli`, and swapped out (`withSlot`, `slotStep` keeps the drop, the rescue and the sound with the main
+    Huey). hueyfm.js keeps its skid friction state on H (`H.skidSlip`, `H.wasDown`) so a whole state swaps. Each slot also
+    registers a craft entry for its doors and footprint: walk up to her and Y climbs in.
+  - The board: ENTER on the type you are in with more of it out switches to the next one; `/` comes round to it last;
+    X stands down another one parked at a base; the jets' row recalls every jet on CAP; the HUD strip counts them all.
+- **Deliveries are the fleet** (`fleetTake`): 9 / 0 (an LCM-8 with an M60A3 / M113A2: a new hull) and 7-1 / 7-2 (the motor
+  pool's CH-46 / LCM-8: motorpool.js `o.pay`) take one out of the reserve; with none left, materiel buys one first (the
+  fleet's costs: M60 60, M113 30, M151 10, M35 20 - the old delivery prices). A delivery that can't go puts it back.
+- **The Huey's crew picks a free spot** (`heliHome`): the ALBATROSS has four helicopter spots now (ship-local H3 -2/32,
+  the round-down -2/49, port abeam the island -8/12, port forward -4/-6, all on the flat deck and 15 m apart for the 48 ft
+  disc), an island pad its centre and eight places round it on level ground. A spot is free with no other Huey on it or
+  bound for it (`AI.spotKey`) and nothing parked in the way (`GR.clearAt` against the parked jets, vehicles, Hueys); the
+  crew looks again every 2 s en route and goes to the next free one. A new Huey (the board, the hand-on, `spawnSpot`)
+  takes a free spot too.
+- **Game pad on the board** (board.js `C.pad`): hold BACK / VIEW half a second to open or close; D-pad or left stick
+  (repeating) select and change base, LB / RB the base, A deploy or switch, B close, X stand down, Y recall, START another.
+  While the board is open the pad is the board's (CTL suspended, no pad to the unit); buttons held when it opens act only
+  once released.
+- **Scene fix**: marinelife.mjs rides an M151A2 from the motor pool (the TEST CAR is gone).

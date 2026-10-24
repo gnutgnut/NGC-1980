@@ -29,6 +29,7 @@ import { createFleet } from './units/commander/fleet.js';
 import { createCommander } from './units/commander/board.js';
 import { createHeliAI } from './units/commander/heliai.js';
 import { createWingman, wingmanEnv } from './units/commander/wingman.js';
+import { swapState } from './units/commander/swapstate.js';   // more than one Huey out: the main Huey's objects swap state with the others
 import { createMotorPool } from './units/wheeled/motorpool.js';   // ngc/wheeledgame: the M151A2, M35A2 and 1980 civilian cars (replace the TEST CAR)
 import { createSeaUniforms, updateSeaUniforms, SEA_VS_DECL, SEA_VS, SEA_FS_DECL, SEA_FS_NORMAL, SEA_FS_FOAM, SEA_FS_WATER, SEA_FS_UNDER } from './units/naval/seasurface.js';   // SEAWORLD: the sea surface
 import { createSeaLife } from './units/naval/sealife.js';   // SEALIFE (ngc/waterfish): fish, the sea bed, the view under water
@@ -145,7 +146,7 @@ function readInput() {
     fire: kd(...FIRE_KEYS) || mouseFire,
     start: false,
   };
-  const p = G.craft === 'heli' ? readPad() : null;   // the jet reads its HOTAS through CTL; foot / vehicles read input.pad
+  const p = G.craft === 'heli' && !commander.isOpen ? readPad() : null;   // the jet reads its HOTAS through CTL; foot / vehicles read input.pad
   if (p) {
     const gx = dz(p.axes[0] || 0), gy = dz(p.axes[1] || 0);
     if (gx !== 0) inp.x = gx;
@@ -168,7 +169,7 @@ let switchHover = null;
 let mouseAimT = -1e9;
 addEventListener('mousemove', e => { mouseNdc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); mouseAimT = performance.now(); });
 function pickSwitch() {
-  const ck = G.craft === 'jet' ? JP.cockpit : G.craft === 'tomcat' ? tomcatC.cockpitObj() : G.craft === 'heli' ? cockpit : armCk() || (crafts.active && crafts.active.switches ? crafts.active.switches() : null);   // ARMOUR crew stations; ngc/wheeledgame: a craft's own switches
+  const ck = G.craft === 'jet' ? curJP().cockpit : G.craft === 'tomcat' ? curTC().cockpitObj() : G.craft === 'heli' ? cockpit : armCk() || (crafts.active && crafts.active.switches ? crafts.active.switches() : null);   // ARMOUR crew stations; ngc/wheeledgame: a craft's own switches
   if (!ck || !ck.group.visible) return null;
   switchRay.setFromCamera(document.pointerLockElement === canvas ? _ndc0 : mouseNdc, zCam);
   const hit = switchRay.intersectObjects(ck.hitBoxes, false)[0];
@@ -178,9 +179,9 @@ const _ndc0 = new THREE.Vector2(0, 0);
 addEventListener('mousedown', e => {
   if (e.button !== 0 || G.state !== 'play') return;
   const id = pickSwitch(); if (!id) return;
-  e.stopImmediatePropagation(); e.preventDefault(); if (G.craft === 'jet') JP.click(id); else if (G.craft === 'tomcat') tomcatC.click(id); else if (armCk()) crafts.active.click(id); else if (G.craft !== 'heli' && crafts.active && crafts.active.click) crafts.active.click(id); else doSwitch(id);
+  e.stopImmediatePropagation(); e.preventDefault(); if (G.craft === 'jet') curJP().click(id); else if (G.craft === 'tomcat') curTC().click(id); else if (armCk()) crafts.active.click(id); else if (G.craft !== 'heli' && crafts.active && crafts.active.click) crafts.active.click(id); else doSwitch(id);
 }, { capture: true });
-function armCk() { const a = crafts.active; return a && (a === m60C || a === m113C) && G.state === 'play' ? a.cockpitObj() : null; }   // ARMOUR: clickable crew stations (armorstations.js)
+function armCk() { const a = crafts.active; return a && ARMS[a.craft] && ARMS[a.craft].includes(a) && G.state === 'play' ? a.cockpitObj() : null; }   // (COMMANDER: any hull)   // ARMOUR: clickable crew stations (armorstations.js)
 // cockpit free look: click the view to capture the mouse (Esc releases it and the head re-centres; middle click centres)
 const head = { yaw: 0, pitch: 0 };
 let freeLook = true;   // T toggles: off releases the mouse and locks the view to the centre (the cursor then works the switches)
@@ -199,7 +200,7 @@ addEventListener('mousemove', e => {
   head.yaw = clamp(head.yaw - e.movementX * 0.0025, -2.5, 2.5); head.pitch = clamp(head.pitch - e.movementY * 0.0025, -1.1, 0.8);
 });
 addEventListener('mousedown', e => { if (e.button === 1 && document.pointerLockElement === canvas) { head.yaw = head.pitch = 0; e.preventDefault(); } });
-addEventListener('wheel', e => { if (G.craft === 'jet' && cockpitCam) JP.zoom = clamp(JP.zoom + (e.deltaY < 0 ? 0.25 : -0.25), 0, 1); else if (G.craft === 'tomcat' && cockpitCam) tomcatC.zoom(e.deltaY < 0 ? 0.25 : -0.25); }, { passive: true });
+addEventListener('wheel', e => { if (G.craft === 'jet' && cockpitCam) { const P = curJP(); P.zoom = clamp(P.zoom + (e.deltaY < 0 ? 0.25 : -0.25), 0, 1); } else if (G.craft === 'tomcat' && cockpitCam) curTC().zoom(e.deltaY < 0 ? 0.25 : -0.25); }, { passive: true });
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 const PR_MAX = params.has('res') ? +params.get('res') : Math.min(devicePixelRatio, 1.5);
 let pixRatio = PR_MAX; renderer.setPixelRatio(pixRatio);
@@ -652,9 +653,11 @@ const jetPlayCtx = {   // TOMCAT: shared by the HORNET (jetplay.js) and the TOMC
   selectedIsland: () => selIsl, drawMap: (c, k) => drawJetMap(c, k), catClear: () => { const c = war.carrier; return !!c && laneClear(c, c.yaw) > 320; },
 };
 const JP = createJetPlay({
-  ...jetPlayCtx,
+  ...jetPlayCtx, say: craftSay(() => jetC),   // COMMANDER: a jet you are not flying (parked, the wingman) keeps its cockpit calls to itself
   onLost: (why, ejected) => jetC.lost(why, ejected), onEject: () => {}, toggleView: () => { cockpitCam = !cockpitCam; if (!cockpitCam) JP.snapChase(); },
 });
+// COMMANDER: messages from a craft's own sim reach the screen only from the unit you are in (or one being launched for you)
+function craftSay(get) { return (t, s) => { const d = get(); if (!d || crafts.active === d || (!d.wing && !(d.park && d.park.on))) say(t, s); }; }
 // open water ahead of the carrier's bow along heading yaw: how far (m) before land comes up
 function laneClear(c, yaw, max = 700) {
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw), bx = c.p.x - Math.sin(c.yaw) * 66, bz = c.p.z - Math.cos(c.yaw) * 66;
@@ -670,7 +673,7 @@ function turnIntoClear() {
   war.orderCarrier(c.p.x - Math.sin(best) * 500, c.p.z - Math.cos(best) * 500); feed('ALBATROSS: TURNING INTO CLEAR WATER FOR THE LAUNCH'); return true;
 }
 // 5 on the ALBATROSS deck: climb into a Hornet on the catapult (craftjet.js); Y on deck: get out and walk
-const launchJet = () => jetC.launch();
+const launchJet = () => deckLaunch('jet');   // COMMANDER: the Hornet you are in, one out, one parked, else a fresh one
 const swapToHeli = () => getInOut();
 // the AMPCD moving map (drawn in world metres; k = pixels per metre)
 function drawJetMap(c, k) {
@@ -715,7 +718,7 @@ function command(n) {
   // out on cat 1 (or switches to the one already out); the unit you leave carries on
   const deckJet = k => G.mode === 'zarch' && (G.craft === k || (G.craft === 'heli' && heliOnDeckNow()));
   if (n === 5) { if (deckJet('jet') || G.mode !== 'zarch') launchJet(); else commander.deploy('jet', 'ship'); return; }
-  if (n === 8) { if (deckJet('tomcat') || G.mode !== 'zarch') tomcatC.launch(); else commander.deploy('tomcat', 'ship'); return; }   // TOMCAT: an F-14A to cat 1 (crafttomcat.js)
+  if (n === 8) { if (deckJet('tomcat') || G.mode !== 'zarch') deckLaunch('tomcat'); else commander.deploy('tomcat', 'ship'); return; }   // TOMCAT: an F-14A to cat 1 (crafttomcat.js)
   if (n === 7) { motorChoice(); return; }   // ngc/wheeledgame: the motor pool (then 1 M151A2 / 2 M35A2)
   if (n === 9 || n === 0) { deliverArmour(n === 9 ? 'm60' : 'm113'); return; }   // ARMOUR: by LCM-8 to a friendly beach (9 M60A3, 0 M113A2; 8 is the TOMCAT)
   if (n === 4) { say(war.sendEscort(selIsl), 2); return; }   // AIR: CAP over the selected island, else over the ALBATROSS
@@ -728,11 +731,12 @@ function command(n) {
 function spawnSpot() {
   const c = war && war.carrier;
   // the aft helicopter spot (H3): the Huey's 48 ft disc clears the island there
+  if (c && c.sinking === undefined && !params.has('homepad')) { const s = freeShipSpot(); if (s) return s; }   // COMMANDER: a free helicopter spot (H3 unless a jet or another Huey is on it)
   if (c && c.sinking === undefined && !params.has('homepad')) { const lx = -2, lz = 32, cs = Math.cos(c.yaw), sn = Math.sin(c.yaw), x = c.p.x + lx * cs + lz * sn, z = c.p.z - lx * sn + lz * cs, dy = war.deckY(x, z); return { x, z, y: dy > -1e8 ? dy : CARRIER.DECK + Math.max(0, c.p.y), yaw: c.yaw }; }   // NAVAL: deckY moves with the sea
   return { x: PAD.x, z: PAD.z, y: PAD_H, yaw: 0 };
 }
 function resetZarch(fromPad, spot = null) {   // COMMANDER: spot = a friendly island's pad (else the deck / home pad)
-  const sp = spot || spawnSpot(); heliAI.off(); Z.handedOn = false;
+  const sp = spot || spawnSpot(); heliAI.off(); Z.handedOn = false; Z.hitAcc = 0;
   // on the deck / pad: hot at flight idle, the throttle rolls on by itself (?cold: cold and dark, start it yourself)
   const cold = fromPad && params.has('cold');
   H.reset(new THREE.Vector3(sp.x, sp.y - HELI.SKID_Y, sp.z), sp.yaw, fromPad, cold ? -1 : fromPad ? 0 : 1); HI.setCollective(0); SY.reset(cold);
@@ -824,15 +828,16 @@ function callLogistics() {
 function cancelRescue() { if (helm.active) leaveHelm(); drop.cancel(); if (G.rescue) { G.rescue = null; crate.visible = false; } }
 const rescueStatus = () => G.rescue && G.rescue.drop ? drop.status() : G.rescue ? `${Math.max(0, Math.ceil(G.rescue.t))}s` : '';
 
-function killPlayerZ(why) {
-  cancelRescue();
+function killPlayerZ(why) {   // (COMMANDER: also a Huey in a slot, run in the main objects - slotStep)
+  if (!slotStep) cancelRescue();
   if (!Z.alive) return;
   Z.alive = false; Z.deadT = 2.4; Z.lastDeath = { why, pos: H.pos.toArray().map(v => +v.toFixed(1)), t: performance.now() };   // for tests and post-mortems
-  fx.explode(H.pos.x, H.pos.y, H.pos.z, 2.4, { fire: 45, debris: 16, color: 0x55613d, oil: true }); sfx.boom(1.2); sfx.engine(0);
+  fx.explode(H.pos.x, H.pos.y, H.pos.z, 2.4, { fire: 45, debris: 16, color: 0x55613d, oil: true }); sfx.boom(slotStep || G.craft !== 'heli' ? 0.5 : 1.2); if (!slotStep) sfx.engine(0);
   heliAI.off(); Z.handedOn = false;
   // COMMANDER: the fleet loses a Huey (the reserve was counted when it went out); the next one is the commander's call
-  onUnitLost('heli', why, G.craft === 'heli');
-  if (G.craft !== 'heli') { feed(`HUEY LOST  -  ${why}`, 'bad'); return; }   // the crew was flying it home, or it was parked
+  const mine = G.craft === 'heli' && !slotStep;
+  onUnitLost('heli', why, mine);
+  if (!mine) { feed(`HUEY LOST  -  ${why}`, 'bad'); return; }   // the crew was flying it home, or it was parked
   say(why, 2);
 }
 
@@ -954,7 +959,7 @@ function updateHeli(dt, inp, piloted) {
       Object.assign(ctl, heliAI.step(H, dt, heliAIenv));
       if (heliAI.phase === 'landed' && H.landed && H.c.coll < 0.05) { heliAI.off(); feed(`HUEY DOWN SAFELY${heliAI.dest ? ' AT ' + heliAI.dest : ''}`, 'good'); }
     }
-    if (drop.active || drop.flying) drop.update(dt, ctl, H);
+    if ((drop.active || drop.flying) && !slotStep) drop.update(dt, ctl, H);   // (the drop is the main Huey's)
     Object.assign(ctl, SY.controls(dt, H, 0));
   }
   H.extraMass = G.cargo * 3;    // fuel drums from the caves
@@ -978,7 +983,7 @@ function updateHeli(dt, inp, piloted) {
   G.fuel = Math.max(0, G.fuel - fuelBurnPct(H) * dt);   // the T53 fuel flow, scaled to the game tank (heli.js)
   if (piloted && G.fuel <= 0 && !H.landed) say('FUEL EXHAUSTED  -  AUTOROTATE AND SET DOWN SAFELY', 0.5);
   if (piloted) updateRescue(dt, H.landed, false);
-  if (piloted && drop.flying) sfx.engine(drop.engineLevel()); else if (piloted && helm.active) sfx.engine(0.3); else hueySound(piloted);   // they share a mixer: one at a time
+  if (piloted && drop.flying) sfx.engine(drop.engineLevel()); else if (piloted && helm.active) sfx.engine(0.3); else if (!slotStep) hueySound(piloted);   // (COMMANDER: the other Hueys out are quiet: one voice)   // they share a mixer: one at a time
   const svc = H.landed ? serviceAt(P.x, P.z) : null; Z.svc = svc;
   if (svc) service(svc, dt, piloted);
   else if (ev === 'water') killPlayerZ('DITCHED IN THE WATER');
@@ -1088,24 +1093,52 @@ const jetCmd = {
   createWingman, onUnitLost: (id, why, mine) => onUnitLost(id, why, mine), catBusy: D => catBusy(D),
   aiEnv: wingmanEnv({ terrain: (x, z) => Math.max(terrainH(x, z), 0), carrier: () => war.carrier && war.carrier.sinking === undefined ? war.carrier : null, deckAt: war.deckAt, DECK: CARRIER.DECK }),
 };
+// the craft hooks both jets get (one set for every airframe: COMMANDER makes more of each type on demand)
+const jetCraftCtx = {
+  war, G, Z, CTL, say, feed, sfx, crafts, GR, head, advise: dt => advise(dt), serviceAt, gameOver: () => gameOver(),
+  view: { get cockpit() { return cockpitCam; }, set cockpit(v) { cockpitCam = v; }, get freeLook() { return freeLook; }, locked: () => document.pointerLockElement === canvas },
+  hover: () => switchHover, camZ: () => zCam, turnIntoClear: () => turnIntoClear(),
+  heliOnDeck: () => { const s = Z.alive && H.landed && !G.heliStowed ? serviceAt(H.pos.x, H.pos.z) : null; return !!(s && s.deck); },
+  stowHeli: () => stowHeli(), unstowHeli: () => unstowHeli(), spotHeli: () => spotHeli(), heliStowed: () => G.heliStowed,
+  toHeli: msg => autoNext(msg), jetVoice: D => jetVoice(D), ...jetCmd,   // COMMANDER: after a lost jet the next unit (the Huey unless you pick); the wingman, losses, cat 1
+};
 // --- the HORNET
-const jetC = crafts.register(createJetCraft({
-  JP, war, G, Z, CTL, say, feed, sfx, crafts, GR, head, advise: dt => advise(dt), serviceAt, gameOver: () => gameOver(),
-  view: { get cockpit() { return cockpitCam; }, set cockpit(v) { cockpitCam = v; }, get freeLook() { return freeLook; }, locked: () => document.pointerLockElement === canvas },
-  hover: () => switchHover, camZ: () => zCam, turnIntoClear: () => turnIntoClear(),
-  heliOnDeck: () => { const s = Z.alive && H.landed && !G.heliStowed ? serviceAt(H.pos.x, H.pos.z) : null; return !!(s && s.deck); },
-  stowHeli: () => stowHeli(), unstowHeli: () => unstowHeli(), spotHeli: () => spotHeli(), heliStowed: () => G.heliStowed,
-  toHeli: msg => autoNext(msg), ...jetCmd,   // COMMANDER: after a lost jet the next unit (the Huey unless you pick); the wingman, losses, cat 1
-}));
+const jetC = crafts.register(createJetCraft({ JP, ...jetCraftCtx }));
 // --- the TOMCAT (crafttomcat.js): the same hooks as the HORNET, taken with 8 from the ALBATROSS deck
-const tomcatC = crafts.register(createTomcatCraft({
-  playCtx: jetPlayCtx, war, G, Z, CTL, say, feed, sfx, crafts, GR, head, advise: dt => advise(dt), gameOver: () => gameOver(),
-  view: { get cockpit() { return cockpitCam; }, set cockpit(v) { cockpitCam = v; }, get freeLook() { return freeLook; }, locked: () => document.pointerLockElement === canvas },
-  hover: () => switchHover, camZ: () => zCam, turnIntoClear: () => turnIntoClear(),
-  heliOnDeck: () => { const s = Z.alive && H.landed && !G.heliStowed ? serviceAt(H.pos.x, H.pos.z) : null; return !!(s && s.deck); },
-  stowHeli: () => stowHeli(), unstowHeli: () => unstowHeli(), spotHeli: () => spotHeli(), heliStowed: () => G.heliStowed,
-  toHeli: msg => autoNext(msg), ...jetCmd,   // COMMANDER: after a lost jet the next unit (the Huey unless you pick); the wingman, losses, cat 1
-}));
+const tomcatC = crafts.register(createTomcatCraft({ playCtx: { ...jetPlayCtx, say: craftSay(() => tomcatC) }, ...jetCraftCtx }));
+// COMMANDER: every Hornet / Tomcat airframe out is its own craft ('jet', 'jet#2', ... - G.craft stays 'jet' / 'tomcat');
+// the first of each is jetC / tomcatC (JP / tomcatC.TP: what the scenes and the old code know), more are made when the
+// commander takes another out. curJP() / curTC(): the one you are in (else the first).
+const JETS = [jetC], TOMCATS = [tomcatC];
+const jetsOf = id => id === 'jet' ? JETS : TOMCATS;
+const playOf = d => d.JP || d.TP, frameOf = d => d.JP ? d.JP.J : d.TP.A;
+function newJet() {
+  let def = null; const id = `jet#${JETS.length + 1}`;
+  const P = createJetPlay({ ...jetPlayCtx, say: craftSay(() => def), onLost: (why, ej) => def.lost(why, ej), onEject: () => {}, toggleView: () => { cockpitCam = !cockpitCam; if (!cockpitCam) P.snapChase(); } });
+  def = crafts.register(createJetCraft({ JP: P, id, ...jetCraftCtx })); JETS.push(def); return def;
+}
+function newTomcat() {
+  let def = null; const id = `tomcat#${TOMCATS.length + 1}`;
+  def = crafts.register(createTomcatCraft({ playCtx: { ...jetPlayCtx, say: craftSay(() => def) }, id, ...jetCraftCtx })); TOMCATS.push(def); return def;
+}
+// an airframe that is not out (nor the wreck you are still in): the next one taken out of the hangar
+function freeJet(id) { const L = jetsOf(id); return L.find(d => !d.present() && d !== crafts.active) || (id === 'jet' ? newJet() : newTomcat()); }
+function curJP() { const a = crafts.active; return a && a.craft === 'jet' && a.JP ? a.JP : JP; }
+function curTC() { const a = crafts.active; return a && a.craft === 'tomcat' && a.TP ? a : tomcatC; }
+// 5 / 8 on the deck (in the Huey or the jet): the jet you are in to the cat, else one out flying (take her), else one
+// parked on deck (to the cat), else a fresh one from the hangar
+function deckLaunch(id) {
+  const L = jetsOf(id), a = crafts.active;
+  if (L.includes(a)) return a.launch();
+  const d = L.find(d => d.present() && !d.park.on) || L.find(d => d.present() && d.park.on) || freeJet(id);
+  return d.launch();
+}
+// the Hornets share one engine voice (sfx.jet): only the nearest one you are not in is heard, and none over your own
+function jetVoice(D) {
+  const a = crafts.active; if (a && a.craft === 'jet') return false;
+  let best = null, bd = 1e9; for (const d of JETS) if (d !== a && d.present()) { const p = d.JP.J.pos, k = zCam.position.distanceToSquared(p); if (k < bd) { bd = k; best = d; } }
+  return best === D;
+}
 // --- ON FOOT
 const foot = crafts.register(createFootCraft({
   scene: zScene, GR, crafts, war, fx, sfx, say, keyDown: kd, groundEnv: GR, camera: () => zCam,
@@ -1137,7 +1170,7 @@ const vehCtx = {
   crewKilled: why => { say(`${why}  -  CREW KILLED`, 2.5); G.crewDownT = 3.5; feed(`CREW LOST  -  ${why}`, 'bad'); onUnitLost('marine', why, true); },
   unitLost: (def, why) => onUnitLost(rosterIdOf(def), why, false),   // COMMANDER: a vehicle destroyed (its crew's fate comes through crewKilled / bail-out)
 };
-const pool = createMotorPool({ ...vehCtx, foot, marine, world, ISLANDS, G, Z, terrainH, hover: () => switchHover, getInOut: () => getInOut(), serviceAt: (x, z) => serviceAt(x, z), selIsl: () => selIsl,
+const pool = createMotorPool({ ...vehCtx, foot, marine, world, ISLANDS, G, Z, terrainH, hover: () => switchHover, getInOut: () => getInOut(), serviceAt: (x, z) => serviceAt(x, z), selIsl: () => selIsl, pay: type => fleetTake(type),   // COMMANDER: 7's deliveries come out of the fleet's reserve
   holes: BASES.map(b => ({ x: b.x, z: b.z, r: HOLE_R + 0.6 })) });
 void createVehicleCraft;   // (vehicle.js stays the host for tracked units)
 // --- ARMOUR (wave 2, units/armor/): the M60A3 TTS and the M113A2 on their tracked-vehicle sim. armorworld.js is their
@@ -1156,6 +1189,14 @@ const AW = createArmorWorld({
 const armCtx = { ...vehCtx, hover: () => switchHover, AW, SG: createSight({ canvas }), ground: (x, z) => Math.max(terrainH(x, z), war.deckY(x, z)), isWater, bail: def => { if (crafts.active === def) getInOut(); } };
 const m60C = crafts.register(createArmorCraft(armCtx, 'm60'));
 const m113C = crafts.register(createArmorCraft(armCtx, 'm113'));
+// COMMANDER: every tank / APC out is its own craft ('m60', 'm60#2'...; G.craft stays the type); m60C / m113C are the first
+const ARMS = { m60: [m60C], m113: [m113C] }; m60C.craft = 'm60'; m113C.craft = 'm113';
+function newArmor(type) { const d = crafts.register(createArmorCraft(armCtx, type, `${type}#${ARMS[type].length + 1}`)); d.craft = type; ARMS[type].push(d); return d; }
+// one that is not out (a wreck stays where it burnt; after six hulls the oldest wreck is cleared and reused)
+function freeArmor(type) {
+  const L = ARMS[type], ok = d => d !== crafts.active && !armDelivery.busy(d);
+  return L.find(d => !d.present() && ok(d)) || (L.length < 6 ? newArmor(type) : L.find(d => groundDead(d) && ok(d)) || newArmor(type));
+}
 // ngc/interiors: the rooms of the lived-in world (built near the camera), the barracks huts, the ALBATROSS's hangar deck
 // and island; a passenger seat in the Huey's cabin or a CH-46 (the RIDE craft), the people seen in the seats
 const interiors = createInteriors({ scene: zScene, GR, war, worldSolid, sfx, say, terrainH, holeOf, ISLANDS });
@@ -1193,13 +1234,13 @@ function spotHeli() { G.heliStowed = false; const z = Z.pos.clone(), v = Z.vel.c
 function toHeli(msg) {
   { const a = crafts.active; if (a && a !== heliC && a !== foot && a.present()) a.exit(heliC); }   // COMMANDER: the unit you leave carries on (the wingman) or parks
   if (foot.exists) foot.exit();
-  JP.active && !JP.alive && JP.stow(); tomcatC.TP.active && !tomcatC.TP.alive && tomcatC.TP.stow();   // TOMCAT
+  for (const d of [...JETS, ...TOMCATS]) { const P = playOf(d); if (P.active && !P.alive) P.stow(); }   // TOMCAT; COMMANDER: every airframe
   G.heliStowed = false; G.fuel = 100; G.cargo = 0; D.reset(); G.rockets = ROCKETS_MAX; G.bombs = BOMBS_MAX; G.crewDownT = 0; cmH.reset();
   resetZarch(true); crafts.setActive('heli'); crafts.onSwitch(null, heliC);
   if (msg) say(msg, 2.5);
 }
 // title screen / new game: everyone back in the hangar, the player in the helicopter
-function stowCrafts() { JP.stow(); jetC.park.on = false; tomcatC.TP.stow(); tomcatC.park.on = false; if (foot.exists) foot.exit(); G.heliStowed = false; G.crewDownT = 0; crafts.setActive('heli'); crafts.silence(); }
+function stowCrafts() { for (const d of [...JETS, ...TOMCATS]) { playOf(d).stow(); d.park.on = false; d.wing = null; } clearHueys(); if (foot.exists) foot.exit(); G.heliStowed = false; G.crewDownT = 0; crafts.setActive('heli'); crafts.silence(); }
 // a new war: the TEST CAR waits at the home island's motor pool (else on the carrier deck)
 function placeVehicles() {
   pool.newGame();   // ngc/wheeledgame: M151s and M35s at every friendly motor pool and on the deck park
@@ -1207,29 +1248,34 @@ function placeVehicles() {
   armDelivery.clear();
   const hh = HARDS.find(h => h.I === HOME_B.isl), hp = hh && hh.at(hh.u1 - 5), ts = hp ? { x: hp[0], z: hp[1], yaw: hh.yaw } : GR.motorPool(HOME_B.isl, 4.6); if (ts) m60C.spawnAt(ts); else m60C.stow();   // (on the concrete just below the top, nose inland: past the top it stood on mud and slid)
   const as = GR.deckSpot(2) || GR.motorPool(HOME_B.isl, 3.6); if (as) m113C.spawnAt(as); else m113C.stow();
+  for (const d of [...ARMS.m60.slice(1), ...ARMS.m113.slice(1)]) d.stow();   // COMMANDER: the extra hulls of the last war
 }
-// ARMOUR: 8 / 9 - an LCM-8 from the amphibious group lands an M113A2 (30 materiel) / an M60A3 TTS (60) on the beach of the
-// selected friendly island (else the nearest one to you). The vehicle's crew drives it off and up the beach.
-const COST_ARMOUR = { m113: 30, m60: 60 };
+// ARMOUR: 9 / 0 - an LCM-8 from the amphibious group lands an M60A3 TTS / an M113A2 on the beach of the selected friendly
+// island (else the nearest one to you). The vehicle's crew drives it off and up the beach. COMMANDER: the vehicle is one
+// more out of the fleet's reserve (with none left, materiel buys one: M60 60, M113 30), a new hull beside any already out.
 function deliverArmour(kind) {
-  const def = kind === 'm60' ? m60C : m113C, cost = COST_ARMOUR[kind];
-  if (crafts.active === def) { say(`YOU ARE IN THE ${def.label}`, 1.2); return; }
-  if (armDelivery.busy(def)) { say(`THE ${def.label} IS ALREADY ON ITS WAY IN`, 1.6); return; }
-  if (G.mat < cost) { say(`AN ${def.label} NEEDS ${cost} MATERIEL`, 1.6); return; }
+  const t = fleet.type(kind);
   let I = selIsl && selIsl.owner === 1 && !selIsl.cave ? selIsl : null;
   if (!I) { let bd = 1e9; for (const J of ISLANDS) if (J.owner === 1) { const d = Math.hypot(J.pad.x - Z.pos.x, J.pad.z - Z.pos.z); if (d < bd) { bd = d; I = J; } } }
   if (!I) { say('NO FRIENDLY ISLAND TO LAND ON', 1.6); return; }
-  const tw = war.carrier ? [war.carrier.p.x, war.carrier.p.z] : null;
+  const paid = fleetTake(kind); if (paid) { say(paid, 1.8); return; }
+  const def = freeArmor(kind), tw = war.carrier ? [war.carrier.p.x, war.carrier.p.z] : null;
   let r = armDelivery.start(def, I, tw);
   if (!r.ok && I !== HOME_B.isl) { const why = r.why; r = armDelivery.start(def, HOME_B.isl, tw); if (r.ok) feed(`${why}  -  LANDING AT HOME ISLAND INSTEAD`); }   // most islands are cliffs: the home beach always takes a boat
-  if (!r.ok) { say(r.why, 2); return; }
-  G.mat -= cost; say(`LCM-8 WITH AN ${def.label} INBOUND TO ${r.run.pl.beach.name}`, 2.5); sfx.dock();
+  if (!r.ok) { fleet.give(kind); say(r.why, 2); return; }   // (back in reserve)
+  say(`LCM-8 WITH AN ${def.label} INBOUND TO ${r.run.pl.beach.name}  -  ${t.short} RESERVE ${fleet.n[kind]}`, 2.5); sfx.dock();
+}
+// COMMANDER: a delivery takes one out of the reserve; with none left, materiel buys one first ('' = done, else why not)
+function fleetTake(id) {
+  if (fleet.take(id)) return '';
+  const w = fleet.buy(id, PSTORE); if (w) return `NO ${fleet.type(id).short} IN RESERVE  -  ${w}`;
+  feed(`MATERIEL: A NEW ${fleet.type(id).label} FOR THE FLEET`, 'good'); fleet.take(id); return '';
 }
 // 7 (ngc/wheeledgame): the motor pool - then 1 = an M151A2 slung in by a CH-46 (10 materiel), 2 = an M35A2 run in by an
 // LCM-8 (20), to the selected friendly island (else the nearest friendly island, else the carrier deck)
 function deliverVehicle(type = 'm151') { return pool.deliver(type); }
 let motorPick = 0;
-function motorChoice() { motorPick = 3; say('MOTOR POOL  -  1: M151A2 BY CH-46 (10 MATERIEL)  ·  2: M35A2 BY LCM-8 (20)', 3); }
+function motorChoice() { motorPick = 3; say(`MOTOR POOL  -  1: M151A2 BY CH-46 (RESERVE ${fleet.n.m151}, ELSE 10 MATERIEL)  ·  2: M35A2 BY LCM-8 (RESERVE ${fleet.n.m35}, ELSE 20)`, 3); }
 function motorKey(code) { if (motorPick <= 0 || (code !== 'Digit1' && code !== 'Digit2')) return false; motorPick = 0; deliverVehicle(code === 'Digit2' ? 'm35' : 'm151'); return true; }
 // ================================================================ COMMANDER
 // The player commands TASK FORCE ALBATROSS: any unit can be taken out at the carrier or a friendly island from the
@@ -1239,7 +1285,7 @@ function motorKey(code) { if (motorPick <= 0 || (code !== 'Digit1' && code !== '
 // fleet; the war is lost when the fleet is spent.
 const ALIVE_HELI = () => Z.alive && G.mode === 'zarch';
 const groundDead = def => !!(def.dead || def.wrecked);
-const rosterIdOf = def => def === heliC ? 'heli' : def === jetC ? 'jet' : def === tomcatC ? 'tomcat' : def === m60C ? 'm60' : def === m113C ? 'm113' : def === foot ? 'marine' : def && def.T && def.T.mil ? def.type : def && def.id;
+const rosterIdOf = def => !def ? null : def === heliC ? 'heli' : def === foot ? 'marine' : def.craft && fleet.type(def.craft) ? def.craft : def.T && def.T.mil ? def.type : def.id;   // (COMMANDER: every airframe / hull of a type)
 // where something is, in words for the board
 function whereIs(x, z) {
   const c = war.carrier;
@@ -1264,7 +1310,117 @@ function marineSpots(b) {
   for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6, x = p.x + Math.cos(a) * (p.r + 3), z = p.z + Math.sin(a) * (p.r + 3); if (!holeOf(x, z) && terrainH(x, z) > 0.5) out.push({ x, y: terrainH(x, z), z, yaw: Math.atan2(x - p.x, z - p.z) + Math.PI }); }
   return out;
 }
-// the Huey left in the air: the crew flies to the nearest of the ALBATROSS's aft spot and the friendly pads
+// ---------------------------------------------------------------- COMMANDER: more than one Huey out
+// The Huey's flying, cockpit, systems, damage, AI crew and weapons stay on main.js's one set of objects (H, SY, D,
+// heliAI, the fuel and ordnance in G, the life in Z): that set is the Huey you are in (or the last one you flew - "the
+// main Huey"). Every other Huey out is a slot holding the same kind of objects; taking one swaps the two (swapState:
+// contents, so every reference to H.pos, D.hp... stays good), and each frame a slot is swapped in, run through the same
+// parked / AI-crew step the main Huey uses (updateHeli), and swapped out again. Each slot has its own model.
+const HUEYS = [];
+let slotStep = false, hueySerial = 2;
+const SLOT_G = ['fuel', 'rockets', 'bombs', 'cargo', 'light', 'heliColl'];
+const SLOT_Z = ['alive', 'deadT', 'handedOn', 'lastDeath', 'svc', 'refuelling', 'rearmT', 'unloaded', 'washT', 'hitAcc'];
+function swapHuey(s) {
+  swapState(H, s.H); swapState(D, s.D); swapState(SY, s.SY); swapState(heliAI, s.AI);
+  { const t = heliAI.target; heliAI.target = s.AI.target; s.AI.target = t; }   // (a function: swapState leaves those)
+  for (const k of SLOT_G) { const t = G[k]; G[k] = s.g[k]; s.g[k] = t; }
+  for (const k of SLOT_Z) { const t = Z[k]; Z[k] = s.z[k]; s.z[k] = t; }
+}
+function newHueySlot() {
+  const s = { id: hueySerial++, H: createHeliSim(), D: createDamage(), AI: createHeliAI(),
+    g: { fuel: 100, rockets: ROCKETS_MAX, bombs: BOMBS_MAX, cargo: 0, light: false, heliColl: 0 },
+    z: { alive: true, deadT: 0, handedOn: false, lastDeath: null, svc: null, refuelling: false, rearmT: 0, unloaded: 0, washT: 0, hitAcc: 0 } };
+  s.D.reset(); s.SY = createHeliSystems({ D: s.D, G: s.g, say: () => {} });
+  s.model = buildHeliMesh(); zScene.add(s.model.group);
+  s.shadow = new THREE.Mesh(shipShadow.geometry, shadowMat); zScene.add(s.shadow);
+  // a craft entry of her own for her doors and footprint: a Marine walks up and climbs in (Y) - she is swapped in as the
+  // main Huey and the host hands him to that (enter returns false: the host's own switch is already done)
+  s.def = crafts.register({ id: `heli#${s.id}`, label: 'UH-1H HUEY', kind: 'air', seats: heliC.seats, pl: {},
+    present: () => s.z.alive && G.mode === 'zarch',
+    frame: out => { out.x = s.H.pos.x; out.y = s.H.pos.y; out.z = s.H.pos.z; out.yaw = yawOfQ(s.H.q); return out; },
+    enter: (seat, from) => { if (from !== 'foot' || !s.z.alive) return false; takeSlot(s); crafts.control('heli', seat, from); return false; },
+    bounds: () => {
+      if (!s.z.alive) return null;
+      const y = yawOfQ(s.H.q), c = Math.cos(y), sn = Math.sin(y), y0 = s.H.pos.y + HELI.SKID_Y;
+      s.b ||= [{}, {}];
+      Object.assign(s.b[0], { x: s.H.pos.x + 0.3 * sn, z: s.H.pos.z + 0.3 * c, yaw: y, hl: 2.7, hw: 1.35, y0, y1: y0 + 3.2, def: s.def });
+      Object.assign(s.b[1], { x: s.H.pos.x + 6.2 * sn, z: s.H.pos.z + 6.2 * c, yaw: y, hl: 3.4, hw: 0.45, y0: y0 + 1.1, y1: y0 + 4, def: s.def });
+      return s.b;
+    } });
+  HUEYS.push(s); return s;
+}
+function removeSlot(s) { const i = HUEYS.indexOf(s); if (i >= 0) HUEYS.splice(i, 1); zScene.remove(s.model.group); zScene.remove(s.shadow); crafts.unregister(s.def); }
+function clearHueys() { for (const s of [...HUEYS]) removeSlot(s); }
+// run fn with slot s's Huey in the main objects (the main Huey's in the slot meanwhile)
+function withSlot(s, fn) {
+  const st = G.heliStowed, sl = slotStep; G.heliStowed = false; slotStep = true; swapHuey(s);
+  try { return fn(); } finally { swapHuey(s); slotStep = sl; G.heliStowed = st; }
+}
+// every frame: the other Hueys sit parked (refuelling on a pad or the deck) or are flown home by their crews
+function stepHueys(dt) {
+  for (const s of [...HUEYS]) {
+    if (s.z.alive) withSlot(s, () => updateHeli(dt, null, false));
+    if (!s.z.alive) removeSlot(s);   // lost: the wreck burns where she came down (fx), the slot goes
+  }
+}
+function renderHueys(dt, time) {
+  for (const s of HUEYS) {
+    const Hs = s.H, m = s.model; m.group.position.copy(Hs.pos); m.group.quaternion.copy(Hs.q);
+    s.lk ||= { aim: new THREE.Vector3() };
+    Hs.forward(s.lk.aim);
+    m.animate(Object.assign(s.lk, { nr: Hs.rpm, tx: Hs.tx, ty: Hs.ty, cone: 0.03 + 0.03 * Math.min(1.5, Hs.thrust / (Hs.mass * 9.81)), coll: Hs.c.coll, ped: Hs.c.ped, rockets: s.g.rockets, light: s.g.light,
+      firing: false, tailLost: s.D.hp.tail <= 0, rotorHp: s.D.hp.rotor, run: Hs.run, n1: Hs.n1 }), dt, time, false);
+    const gy = groundY(Hs.pos.x, Hs.pos.z), alt = Hs.pos.y - gy, sc = 2.4 + alt * 0.03;
+    s.shadow.position.set(Hs.pos.x, gy + 0.12, Hs.pos.z); s.shadow.scale.set(sc, 1, sc);
+  }
+}
+// you take the Huey in slot s: she becomes the main Huey; the main one (if out) takes her place in the slot - flown
+// home by her crew if she is in the air; a main Huey in the hangar stands down into reserve instead
+function takeSlot(s) {
+  const alive = ALIVE_HELI(), stowed = G.heliStowed;
+  if (crafts.active === heliC) { cancelRescue(); HI.setCollective(0); }
+  swapHuey(s);
+  G.heliStowed = false; shipMesh.visible = true; shipShadow.visible = true;
+  if (!alive) removeSlot(s);
+  else if (stowed) { removeSlot(s); fleet.give('heli'); feed('THE HUEY IN THE HANGAR STANDS DOWN  -  BACK IN RESERVE', 'info'); }
+  else if (!s.H.landed && s.AI.phase === 'off') withSlot(s, () => heliHome());
+}
+// a Huey you are not in is hit (parked, or her crew flying her): the damage model takes it; enough of it (or the
+// rotor / engine shot out on the ground) and she is destroyed - in the air the hits fly into the sim and she may crash
+function hurtHueyAway(s, amt, why) {
+  const f = () => {
+    if (!Z.alive) return;
+    D.hit(amt); Z.hitAcc = (Z.hitAcc || 0) + amt;
+    if (Z.hitAcc > 2.4 || (H.landed && (D.hp.rotor <= 0 || D.hp.engine <= 0.02))) killPlayerZ(`${why}  -  HUEY DESTROYED${H.landed ? ' ON THE GROUND' : ''}`);
+  };
+  if (s) withSlot(s, f); else f();
+}
+// ---------------------------------------------------------------- the Huey's spots: the deck's helicopter spots, the pads
+// ALBATROSS (ship-local x right, z aft): H3 (the old aft spot) first, then the round-down, port abeam the island, port forward -
+// 15 m apart (the 48 ft disc). A spot is free with no other Huey on or bound for it and nothing parked in the way.
+const HELO_SPOTS = [[-2, 32], [-2, 49], [-8, 12], [-4, -6]];
+function heliSpotFree(x, z, key) {
+  for (const s of HUEYS) { if (!s.z.alive) continue; if (Math.hypot(s.H.pos.x - x, s.H.pos.z - z) < 15) return false; if (key && s.AI.phase !== 'off' && s.AI.spotKey === key) return false; }
+  return GR.clearAt(x, z, 4.5, heliC);   // parked jets, vehicles (this Huey itself: the main craft, skipped)
+}
+function shipHeloSpot(k) {
+  const c = war && war.carrier; if (!c || c.sinking !== undefined) return null;
+  const [lx, lz] = HELO_SPOTS[k], cs = Math.cos(c.yaw), sn = Math.sin(c.yaw), x = c.p.x + lx * cs + lz * sn, z = c.p.z - lx * sn + lz * cs, dy = war.deckY(x, z);
+  return { x, z, y: dy > -1e8 ? dy : CARRIER.DECK + Math.max(0, c.p.y), yaw: c.yaw, k, key: 'ship:' + k };
+}
+function freeShipSpot(skip = -1) { for (let k = 0; k < HELO_SPOTS.length; k++) { if (k === skip) continue; const s = shipHeloSpot(k); if (s && heliSpotFree(s.x, s.z, s.key)) return s; } return null; }
+function islandHeloSpots(I) {
+  const p = I.pad, y0 = groundY(p.x, p.z), out = [{ x: p.x, z: p.z, key: `isl:${I.name}:0` }];
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4 + 0.2, R = p.r + 12, x = p.x + Math.cos(a) * R, z = p.z + Math.sin(a) * R;
+    if (holeOf(x, z) || terrainH(x, z) < 0.5) continue;
+    let lo = 1e9, hi = -1e9; for (const [ox, oz] of [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3]]) { const h = terrainH(x + ox, z + oz); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+    if (hi - lo < 1.2 && Math.abs(hi - y0) < 4) out.push({ x, z, key: `isl:${I.name}:${k + 1}` });
+  }
+  return out.map(s => ({ ...s, y: groundY(s.x, s.z), yaw: Math.atan2(s.x, s.z) }));
+}
+function freeIslandSpot(I) { const L = islandHeloSpots(I); return L.find(s => heliSpotFree(s.x, s.z, s.key)) || L[0]; }
+// the Huey left in the air: the crew flies to the nearest of the ALBATROSS and the friendly pads, to a free spot there
 function heliHome() {
   const c = war.carrier, cands = [];
   if (c && c.sinking === undefined) cands.push({ name: 'THE ALBATROSS', x: c.p.x, z: c.p.z, ship: true });
@@ -1272,67 +1428,137 @@ function heliHome() {
   if (HOME_B.isl.owner === 1) cands.push({ name: HOME_B.name, x: PAD.x, z: PAD.z, I: HOME_B.isl });
   let best = null, bd = 1e9; for (const k of cands) { const d = Math.hypot(k.x - H.pos.x, k.z - H.pos.z) * (k.ship ? 0.8 : 1); if (d < bd) { bd = d; best = k; } }   // (the deck a little preferred: fuel and the crew)
   const T = { x: H.pos.x, y: 0, z: H.pos.z, vx: 0, vz: 0, hdg: null };
+  // COMMANDER: a free spot (no other Huey on it or bound for it, no jet parked on it); looked at again every 2 s en route
+  let spot = !best ? null : best.ship ? freeShipSpot() || shipHeloSpot(0) : freeIslandSpot(best.I), nextChk = 2;
   heliAI.engage(H, () => {
     const cc = war.carrier;
-    if (best && best.ship) { if (cc && cc.sinking === undefined) { const s = spawnSpot(); return Object.assign(T, { x: s.x, y: s.y, z: s.z, vx: cc.v.x, vz: cc.v.z, hdg: -cc.yaw }); } best = null; }
-    if (best && best.I) { const p = best.I.pad; return Object.assign(T, { x: p.x, y: groundY(p.x, p.z), z: p.z, vx: 0, vz: 0, hdg: null }); }
+    if (best && best.ship && !(cc && cc.sinking === undefined)) { best = null; spot = null; }
+    if (spot && (heliAI.phase === 'transit' || heliAI.phase === 'approach') && heliAI.t > nextChk) {
+      nextChk = heliAI.t + 2;
+      const cur = best.ship ? shipHeloSpot(spot.k) : spot;
+      if (cur && !heliSpotFree(cur.x, cur.z, cur.key)) { const n = best.ship ? freeShipSpot(spot.k) : freeIslandSpot(best.I); if (n && n.key !== spot.key) { spot = n; heliAI.spotKey = n.key; } }
+    }
+    if (best && best.ship && spot) { const s = shipHeloSpot(spot.k); return Object.assign(T, { x: s.x, y: s.y, z: s.z, vx: cc.v.x, vz: cc.v.z, hdg: -cc.yaw }); }
+    if (best && best.I && spot) return Object.assign(T, { x: spot.x, y: groundY(spot.x, spot.z), z: spot.z, vx: 0, vz: 0, hdg: null });
     return Object.assign(T, { y: Math.max(terrainH(T.x, T.z), 0), vx: 0, vz: 0 });   // nowhere to go: down where it is
   });
-  heliAI.dest = best ? best.name : '';
-  feed(`HUEY: THE CREW IS FLYING HER TO ${best ? best.name : 'THE NEAREST CLEARING'}`, 'info');
+  heliAI.dest = best ? best.name : ''; heliAI.spotKey = spot ? spot.key : null;
+  feed(`HUEY: THE CREW IS FLYING HER TO ${best ? best.name : 'THE NEAREST CLEARING'}${spot && spot.k ? ` (SPOT ${spot.k + 1})` : ''}`, 'info');
 }
-// the Huey: take her where she is (from the crew, or up from the hangar), or a new one from the reserve at a base
+// the Huey: the nearest one out that you are not in (the main one where she is, up from the hangar if need be, or one
+// of the others - swapped in), or a new one from the reserve at a base
 function switchHeli() {
-  if (!ALIVE_HELI()) return 'THE HUEY IS LOST';
+  const inMain = crafts.active === heliC && Z.alive;
+  let best = null, bd = 1e9;
+  if (!inMain && ALIVE_HELI()) { best = 'main'; bd = G.heliStowed ? 1e8 : Math.hypot(H.pos.x - Z.pos.x, H.pos.z - Z.pos.z); }
+  for (const s of HUEYS) if (s.z.alive) { const d = Math.hypot(s.H.pos.x - Z.pos.x, s.H.pos.z - Z.pos.z); if (d < bd) { bd = d; best = s; } }
+  if (!best) return ALIVE_HELI() ? 'YOU ARE IN THE HUEY' : 'THE HUEY IS LOST';
+  if (best !== 'main') takeSlot(best);
   if (G.heliStowed) { spotHeli(); if (G.heliStowed) return 'NO DECK TO SPOT HER ON'; }
   return crafts.control('heli', 0, 'command') ? '' : 'CANNOT REACH THE HUEY';
 }
 function deployHeli(b) {
+  if (ALIVE_HELI() && G.mode === 'zarch') {   // COMMANDER: another Huey besides the one out: that one moves to a slot (her crew has her)
+    if (G.heliStowed) { fleet.give('heli'); feed('THE HUEY IN THE HANGAR STANDS DOWN  -  BACK IN RESERVE', 'info'); }
+    else { if (crafts.active === heliC) { cancelRescue(); HI.setCollective(0); } const s = newHueySlot(); swapHuey(s); if (!s.H.landed && s.AI.phase === 'off') withSlot(s, () => heliHome()); }
+  }
   G.heliStowed = false; G.fuel = 100; G.cargo = 0; D.reset(); G.rockets = ROCKETS_MAX; G.bombs = BOMBS_MAX; cmH.reset(); G.mode = 'zarch'; T.alive = true;
-  resetZarch(true, b.kind === 'island' ? padSpot(b.I) : null); shipMesh.visible = true;
+  resetZarch(true, b.kind === 'island' ? freeIslandSpot(b.I) : freeShipSpot() || shipHeloSpot(0)); shipMesh.visible = true;
   return crafts.control('heli', 0, 'command') ? '' : 'THE HUEY WOULD NOT TAKE A CREW';
 }
-// cat 1 is one catapult for both jets
+// cat 1 is one catapult for every jet: busy when another airframe (not D) is on it or parked on it
 function catBusy(D) {
-  const o = D === jetC ? tomcatC : jetC; if (!o.present()) return '';
-  const A = o === jetC ? JP.J : tomcatC.TP.A;
-  return A.cat || (o.park.on && o.park.cat) ? `CAT 1 IS BUSY  -  THE ${o.label} IS ON IT (SWITCH TO IT AND LAUNCH, OR STAND IT DOWN)` : '';
+  for (const o of [...JETS, ...TOMCATS]) {
+    if (o === D || !o.present()) continue;
+    const A = frameOf(o); if (A.cat || (o.park.on && o.park.cat)) return `CAT 1 IS BUSY  -  THE ${o.label} IS ON IT (SWITCH TO IT AND LAUNCH, OR STAND IT DOWN)`;
+  }
+  return '';
 }
-function groundRow(id, def, r) {
+const nearestTo = (list, at) => { let best = null, bd = 1e9; for (const o of list) { const p = at(o), d = Math.hypot(p.x - Z.pos.x, p.z - Z.pos.z); if (d < bd) { bd = d; best = o; } } return best; };
+const _ff = {};
+// COMMANDER: tanks and APCs - several of a type can be out (a hull per craft, ARMS); the board switches you to the
+// nearest, takes a fresh hull out (N for another), stands one parked at a base down
+function armorRow(type, r) {
+  const L = ARMS[type], t = fleet.type(type);
+  const outList = () => L.filter(d => d.present() && !groundDead(d));
+  const mine = () => L.find(d => crafts.active === d && !groundDead(d)) || null;
+  const nearest = () => nearestTo(outList().filter(d => d !== crafts.active), d => d.frame(_ff));
+  const parkedAtBase = () => outList().find(d => d !== crafts.active && !armDelivery.busy(d) && atBase(d));
   return {
-    id, label: def.label,
-    out: () => def.present() && !groundDead(def), active: () => crafts.active === def && !groundDead(def),
-    status: () => { const f = def.frame({}); return `${crafts.active === def ? 'YOU ARE DRIVING' : def.driver && def.driver.state === 'driving' ? 'DRIVING' : 'PARKED'} ${whereIs(f.x, f.z)}`; },
+    id: type, label: t.label, multi: true,
+    out: () => outList().length > 0, outCount: () => outList().length, active: () => !!mine(),
+    status: () => {
+      const n = outList().length, d = mine() || nearest(); if (!d) return ''; const f = d.frame({});
+      return `${n > 1 ? n + ' OUT  ·  ' : ''}${crafts.active === d ? 'YOU ARE DRIVING' : armDelivery.busy(d) ? 'COMING IN BY LCM-8' : d.driver && d.driver.state === 'driving' ? 'DRIVING' : 'PARKED'} ${whereIs(f.x, f.z)}`;
+    },
     can: () => '',
     deploy: b => {
-      const sp = b.kind === 'ship' ? deckSpotFor(def, r) : GR.motorPool(b.I, r);
-      if (!sp) return `NO ROOM FOR THE ${def.label} AT ${b.name}`;
-      def.spawnAt(sp); return crafts.control(def.id, 0, 'command') ? '' : `THE ${def.label} WOULD NOT TAKE A CREW`;
+      const d = freeArmor(type), sp = b.kind === 'ship' ? deckSpotFor(d, r) : GR.motorPool(b.I, r);
+      if (!sp) return `NO ROOM FOR AN ${t.label} AT ${b.name}`;
+      d.spawnAt(sp); return crafts.control(d.id, 0, 'command') ? '' : `THE ${d.label} WOULD NOT TAKE A CREW`;
     },
-    switchTo: () => crafts.control(def.id, 0, 'command') ? '' : `CANNOT REACH THE ${def.label}`,
-    canStandDown: () => crafts.active !== def && def.present() && !groundDead(def) && atBase(def),
-    standDown: () => { if (!atBase(def)) return `THE ${def.label} MUST BE AT A BASE TO STAND DOWN`; def.stow(); return ''; },
+    switchTo: () => { const d = nearest(); if (!d) return `NO ${t.short} OUT`; return crafts.control(d.id, 0, 'command') ? '' : `CANNOT REACH THE ${d.label}`; },
+    canStandDown: () => !!parkedAtBase(),
+    standDown: () => { const d = parkedAtBase(); if (!d) return `THE ${t.label} MUST BE PARKED AT A BASE TO STAND DOWN`; d.stow(); return ''; },
   };
 }
-function atBase(def) { const f = def.frame({}), w = whereIs(f.x, f.z); return w === 'ON THE ALBATROSS' || (w.startsWith('AT ') && ISLANDS.some(I => I.owner === 1 && `AT ${I.name}` === w)); }
-function jetRow(id, def, A, P) {
+function atBasePos(x, z) { const w = whereIs(x, z); return w === 'ON THE ALBATROSS' || (w.startsWith('AT ') && ISLANDS.some(I => I.owner === 1 && `AT ${I.name}` === w)); }
+function atBase(def) { const f = def.frame({}); return atBasePos(f.x, f.z); }
+// COMMANDER: the Hornets and the Tomcats - several airframes of a type can be out (JETS / TOMCATS)
+function jetRow(id) {
+  const L = jetsOf(id), short = fleet.type(id).short;
+  const outList = () => L.filter(d => d.present());
+  const mine = () => L.find(d => crafts.active === d) || null;
+  const nearest = () => nearestTo(outList().filter(d => d !== crafts.active), d => frameOf(d).pos);
+  const stat = d => { const A = frameOf(d), s = d.status(); return s === 'PARKED ON DECK' || s === 'FLYING' ? `${s === 'FLYING' ? 'FLYING' : 'PARKED'} ${whereIs(A.pos.x, A.pos.z)}` : `${s}  ·  ${Math.round(A.pos.y * 3.28)} FT  ·  FUEL ${Math.round(A.fuel * 2.2)} LB`; };
   return {
-    id, label: def.label === 'HORNET' ? 'F/A-18A HORNET' : 'F-14A TOMCAT',
-    out: () => def.present(), active: () => crafts.active === def && P.alive && !P.ejected,
-    status: () => { const s = def.status(); return s === 'PARKED ON DECK' || s === 'FLYING' ? `${s === 'FLYING' ? 'FLYING' : 'PARKED'} ${whereIs(A.pos.x, A.pos.z)}` : `${s}  ·  ${Math.round(A.pos.y * 3.28)} FT  ·  FUEL ${Math.round(A.fuel * 2.2)} LB`; },
-    can: () => catBusy(def),
-    deploy: () => def.launch({ command: true }) ? '' : `THE ${def.label} COULD NOT BE SPOTTED ON CAT 1`,
-    switchTo: () => crafts.control(def.id, 0, 'command') ? '' : `CANNOT REACH THE ${def.label}`,
-    recall: () => def.wing ? (def.recall(), '') : `THE ${def.label} IS NOT ON CAP`,
-    canStandDown: () => crafts.active !== def && def.park.on,
-    standDown: () => { if (!def.park.on) return 'ONLY A JET PARKED ON THE DECK STANDS DOWN'; P.stow(); def.park.on = false; return ''; },
+    id, label: id === 'jet' ? 'F/A-18A HORNET' : 'F-14A TOMCAT', multi: true,
+    out: () => outList().length > 0, outCount: () => outList().length,
+    active: () => { const d = mine(); return !!d && playOf(d).alive && !playOf(d).ejected; },
+    status: () => { const n = outList().length, me = mine(), d = me || nearest(); if (!d) return ''; const cap = outList().filter(o => o !== d && o.wing && /CAP/.test(o.status())).length; return `${n > 1 ? n + ' OUT  ·  ' : ''}${stat(d)}${cap ? `  ·  ${cap} MORE ON CAP` : ''}`; },
+    can: () => catBusy(null),
+    deploy: () => { const d = freeJet(id); return d.launch({ command: true }) ? '' : `THE ${d.label} COULD NOT BE SPOTTED ON CAT 1`; },
+    switchTo: () => { const d = nearest(); if (!d) return `NO ${short} OUT`; return crafts.control(d.id, 0, 'command') ? '' : `CANNOT REACH THE ${d.label}`; },
+    recall: () => { const W = outList().filter(d => d.wing); if (!W.length) return `NO ${short} ON CAP`; for (const d of W) d.recall(); return ''; },
+    canStandDown: () => outList().some(d => d !== crafts.active && d.park.on),
+    standDown: () => { const d = outList().find(d => d !== crafts.active && d.park.on); if (!d) return 'ONLY A JET PARKED ON THE DECK STANDS DOWN'; playOf(d).stow(); d.park.on = false; return ''; },
+  };
+}
+// COMMANDER: the Hueys - the main one (H) and the others out (HUEYS)
+function hueyStatus(Hs, AI, stowed, mine) {
+  return stowed ? 'IN THE HANGAR ON THE ALBATROSS' : mine ? `${Hs.landed ? 'ON THE SKIDS' : 'FLYING'} ${whereIs(Hs.pos.x, Hs.pos.z)}` : AI.phase !== 'off' && AI.phase !== 'landed' ? `CREW FLYING HER TO ${AI.dest}` : Hs.landed ? `PARKED ${whereIs(Hs.pos.x, Hs.pos.z)}` : `HOVERING ${whereIs(Hs.pos.x, Hs.pos.z)}`;
+}
+// one parked at a base that you are not in: 'main' (the main Huey) or a slot
+function parkedHuey() {
+  if (ALIVE_HELI() && crafts.active !== heliC && (G.heliStowed || (H.landed && (heliAI.phase === 'off' || heliAI.phase === 'landed') && atBasePos(H.pos.x, H.pos.z)))) return 'main';
+  return HUEYS.find(s => s.z.alive && s.H.landed && (s.AI.phase === 'off' || s.AI.phase === 'landed') && atBasePos(s.H.pos.x, s.H.pos.z)) || null;
+}
+function hueyRow() {
+  const slots = () => HUEYS.filter(s => s.z.alive);
+  return {
+    id: 'heli', label: 'UH-1H HUEY', multi: true,
+    out: () => ALIVE_HELI() || slots().length > 0, outCount: () => (ALIVE_HELI() ? 1 : 0) + slots().length,
+    active: () => crafts.active === heliC && Z.alive,
+    status: () => {
+      const n = (ALIVE_HELI() ? 1 : 0) + slots().length, pre = n > 1 ? `${n} OUT  ·  ` : '', mine = crafts.active === heliC && Z.alive;
+      if (mine || (ALIVE_HELI() && !slots().length)) return pre + hueyStatus(H, heliAI, G.heliStowed, mine);
+      const s = nearestTo(slots(), s => s.H.pos); return s ? pre + hueyStatus(s.H, s.AI, false, false) : ALIVE_HELI() ? pre + hueyStatus(H, heliAI, G.heliStowed, false) : '';
+    },
+    can: () => '', deploy: b => deployHeli(b), switchTo: () => switchHeli(),
+    canStandDown: () => !!parkedHuey(),
+    standDown: () => {
+      const p = parkedHuey(); if (!p) return 'NO HUEY PARKED AT A BASE';
+      if (p === 'main') { Z.alive = false; Z.handedOn = true; heliAI.off(); G.heliStowed = false; shipMesh.visible = false; shipShadow.visible = false; }   // (back in reserve: the next one out is a fresh main Huey)
+      else removeSlot(p);
+      return '';
+    },
   };
 }
 // the WHEELED motor pool (units/wheeled/motorpool.js): several of a type can be out (every friendly island stocks
 // them); the board switches you to the nearest one, takes a new one out with the pool's spawner, stands one down
 function wheeledRow(type, r) {
   const outList = () => pool.list.filter(V => V.type === type && V.exists && !V.wrecked && V.owner !== 'civ');
-  const nearest = (x, z) => { let best = null, bd = 1e9; for (const V of outList()) { const d = Math.hypot(V.sim.pos[0] - x, V.sim.pos[2] - z); if (d < bd) { bd = d; best = V; } } return best; };
+  const nearest = (x, z) => { let best = null, bd = 1e9; for (const V of outList()) { if (V === crafts.active) continue; const d = Math.hypot(V.sim.pos[0] - x, V.sim.pos[2] - z); if (d < bd) { bd = d; best = V; } } return best; };
   const mine = () => crafts.active && crafts.active.type === type && pool.list.includes(crafts.active) ? crafts.active : null;
   const parkedAtBase = () => outList().find(V => V !== crafts.active && atBase(V));
   return {
@@ -1350,13 +1576,11 @@ function wheeledRow(type, r) {
   };
 }
 const roster = [
-  { id: 'heli', label: 'UH-1H HUEY', out: ALIVE_HELI, active: () => crafts.active === heliC && Z.alive,
-    status: () => G.heliStowed ? 'IN THE HANGAR ON THE ALBATROSS' : crafts.active === heliC ? `${H.landed ? 'ON THE SKIDS' : 'FLYING'} ${whereIs(H.pos.x, H.pos.z)}` : heliAI.phase !== 'off' && heliAI.phase !== 'landed' ? `CREW FLYING HER TO ${heliAI.dest}` : H.landed ? `PARKED ${whereIs(H.pos.x, H.pos.z)}` : `HOVERING ${whereIs(H.pos.x, H.pos.z)}`,
-    can: () => '', deploy: b => deployHeli(b), switchTo: () => switchHeli() },
-  jetRow('jet', jetC, JP.J, JP),
-  jetRow('tomcat', tomcatC, tomcatC.TP.A, tomcatC.TP),
-  groundRow('m60', m60C, 4.8),
-  groundRow('m113', m113C, 3.6),
+  hueyRow(),
+  jetRow('jet'),
+  jetRow('tomcat'),
+  armorRow('m60', 4.8),
+  armorRow('m113', 3.6),
   wheeledRow('m151', 2.4),
   wheeledRow('m35', 3.6),
   { id: 'marine', label: 'MARINE RIFLEMAN', out: () => crafts.active === foot && foot.exists && foot.alive, active: () => crafts.active === foot && foot.alive,
@@ -1368,9 +1592,39 @@ const roster = [
     },
     switchTo: () => '' },
 ];
+// ---------------------------------------------------------------- COMMANDER: the war sees every unit that is out
+// war.js used to shoot only at the unit you are in (PL). Every other unit of the fleet that is out - a Huey parked on a
+// pad or flown home by her crew, a jet parked on deck or on CAP under the wingman, a tank, an APC, a jeep or a truck -
+// is a target in war.ext (a point with a radius, like the war's own aircraft): its rounds, blasts, flak, missiles,
+// WASPs, SHRIKEs and the ground war's STRIDERs can hit it, and its own damage model takes the hit (a parked airframe
+// shot up enough is destroyed: game-level). A loss is the fleet's loss (the feed, the board's LOSSES, the reserve).
+const EXT = new Map(), _xp = new THREE.Vector3(), _xf = {};
+let extFrame = 0;
+function updateExt() {
+  const L = war.ext; L.length = 0; extFrame++;
+  if (G.mode === 'zarch' && G.state === 'play' && !G.over) {
+    const a = crafts.active;
+    const add = (key, pos, vel, r, air, name, hurt) => {
+      let t = EXT.get(key); if (!t) { t = { ext: true, fleet: true, side: 1, type: 'fleet', hp: 1, p: new THREE.Vector3(), v: new THREE.Vector3(), acc: 0 }; EXT.set(key, t); }
+      t.r = r; t.air = air; t.ground = !air; t.name = name; t.hurt = G.extImmune ? () => {} : hurt; t.dead = false; t.seen = extFrame;   // (G.extImmune: tests that need the units out alive)
+      t.p.copy(pos); if (vel) t.v.copy(vel); else t.v.set(0, 0, 0); L.push(t);
+    };
+    if (a !== heliC && Z.alive && !G.heliStowed) add(heliC, H.pos, H.vel, HELI.HIT_R, !H.landed, 'UH-1H HUEY', (amt, why) => hurtHueyAway(null, amt, why));
+    for (const s of HUEYS) if (s.z.alive) add(s, s.H.pos, s.H.vel, HELI.HIT_R, !s.H.landed, 'UH-1H HUEY', (amt, why) => hurtHueyAway(s, amt, why));
+    for (const d of [...JETS, ...TOMCATS]) if (d !== a && d.present()) { const A = frameOf(d); add(d, A.pos, A.vel, d.craft === 'jet' ? 4.5 : 5.5, !A.onGround, d.label, (amt, why) => hurtJetAway(d, amt, why)); }
+    for (const d of [...ARMS.m60, ...ARMS.m113]) if (d !== a && d.present() && !d.dead) { const f = d.frame(_xf); add(d, _xp.set(f.x, f.y + 1.4, f.z), null, d.pl.hitR || 3, false, d.label, (amt, why, at, dir) => d.hurt(amt, why, at, dir)); }
+    for (const V of pool.list) if (V !== a && V.exists && !V.wrecked && V.owner !== 'civ' && (V.type === 'm151' || V.type === 'm35')) add(V, _xp.set(V.sim.pos[0], V.sim.pos[1] + 0.6, V.sim.pos[2]), null, V.type === 'm35' ? 3 : 2.2, false, V.label, (amt, why, at, dir) => V.hurt(amt, why, at, dir));
+  }
+  for (const [k, t] of EXT) if (t.seen !== extFrame) { t.dead = true; EXT.delete(k); }   // gone (or you are in it): missiles and gunners let go
+}
+// a jet you are not flying is hit: its damage model (no cockpit calls); a parked one shot up enough is destroyed
+function hurtJetAway(d, amt, why) {
+  const t = EXT.get(d); d.hurtQuiet(amt, why);
+  if (t && d.present()) { t.acc += amt; if (t.acc > (frameOf(d).onGround ? 2.4 : 3.2)) d.destroy(`${d.label} DESTROYED  -  ${why}`); }
+}
 const rosterOut = id => { const r = roster.find(r => r.id === id); return !!(r && r.out()); };
 function checkSpent() { if (!G.over && G.state === 'play' && fleet.spent(rosterOut)) { feed('THE FLEET IS SPENT', 'bad'); gameOver(); } }
-const nextLabel = () => ALIVE_HELI() || fleet.has('heli') ? 'THE HUEY' : (roster.find(r => r.out() && !r.active()) || { label: 'NOTHING' }).label;
+const nextLabel = () => ALIVE_HELI() || HUEYS.some(s => s.z.alive) || fleet.has('heli') ? 'THE HUEY' : (roster.find(r => r.out() && !r.active()) || { label: 'NOTHING' }).label;
 // a unit is lost: the fleet counts it; the one you were in opens the board on the next unit
 function onUnitLost(id, why, mine) {
   const t = fleet.type(id); if (!t) return;
@@ -1386,7 +1640,7 @@ function autoNext(msg) {
   if (commander.holdAuto()) return;
   commander.lossMode = false; commander.close(); clearHandOn();
   if (roster.some(r => r.active())) return;   // still in a working unit (an armour crewman down, not the tank)
-  if (ALIVE_HELI() && crafts.active !== heliC) { const w = switchHeli(); if (!w) { say(msg ? msg.replace(/HELICOPTER/, 'HUEY') : 'IN THE HUEY', 2.5); return; } }
+  if ((ALIVE_HELI() && crafts.active !== heliC) || HUEYS.some(s => s.z.alive)) { const w = switchHeli(); if (!w) { say(msg ? msg.replace(/HELICOPTER/, 'HUEY') : 'IN THE HUEY', 2.5); return; } }   // (COMMANDER: any Huey out)
   if (!Z.alive && fleet.take('heli')) { toHeli(msg || (war.carrier && war.carrier.sinking === undefined ? 'NEW CREW  -  A NEW HUEY ON THE ALBATROSS' : 'NEW CREW  -  A NEW HUEY ON THE HOME PAD')); return; }
   const r = roster.find(r => r.out() && !r.active()); if (r && !r.switchTo()) { say(`${r.label}  -  ${r.status()}`, 2.5); return; }
   checkSpent(); if (G.over) return;
@@ -1394,7 +1648,7 @@ function autoNext(msg) {
 }
 function clearHandOn() {   // the commander picked a unit: no automatic hand-on later
   G.crewDownT = 0; G.jetDownT = 0; G.tomcatDownT = 0; Z.handedOn = true;
-  if (JP.active && !JP.alive) JP.stow(); if (tomcatC.TP.active && !tomcatC.TP.alive) tomcatC.TP.stow();
+  for (const d of [...JETS, ...TOMCATS]) { const P = playOf(d); if (P.active && !P.alive) P.stow(); }
 }
 const commander = createCommander({
   fleet, say, feed, sfx, hud: $('hud'), roster, bases: commandBases, store: PSTORE,
@@ -1414,8 +1668,9 @@ function commandKey(code) {   // \ the board, / the next unit out (main's keydow
 }
 // the per-frame entry for the surface: the active craft flies / drives / walks, the parked ones idle (craft.js)
 function updateZarch(dt, inp) {
-  inp.pad = G.craft === 'heli' || isJet() ? null : G.craft === 'foot' ? readGamepad() : readPad(); inp.keyboardOnly = keyboardOnly;   // on foot: a game controller only, never the HOTAS
+  inp.pad = G.craft === 'heli' || isJet() || commander.isOpen ? null : G.craft === 'foot' ? readGamepad() : readPad(); inp.keyboardOnly = keyboardOnly;   // on foot: a game controller only, never the HOTAS
   crafts.update(dt, inp);
+  stepHueys(dt);   // COMMANDER: the other Hueys out (parked, or their crews flying them home)
   armDelivery.update(dt);   // ARMOUR: landing craft under way
   if (G.crewDownT > 0) { G.crewDownT -= dt; if (G.crewDownT <= 0 && !G.over) autoNext(war.carrier && war.carrier.sinking === undefined ? 'NEW CREW  -  IN THE HELICOPTER ON THE ALBATROSS' : 'NEW CREW  -  ON THE HOME PAD'); }   // COMMANDER: the next unit
 }
@@ -1785,8 +2040,8 @@ function liftConsole() {
 function abandonHeli() {
   // COMMANDER: a written-off unit is the fleet's loss; the way back is the Huey (recovered to the deck, or a new one
   // from the reserve), else another unit that is out, else the command board
-  if (G.craft === 'jet') { jetC.writeOff(); fleet.lose('jet', 'WRITTEN OFF'); feed('HORNET WRITTEN OFF', 'bad'); backToHuey('BACK ON THE ALBATROSS  -  IN THE HELICOPTER'); return; }
-  if (G.craft === 'tomcat') { tomcatC.writeOff(); fleet.lose('tomcat', 'WRITTEN OFF'); feed('TOMCAT WRITTEN OFF', 'bad'); backToHuey('BACK ON THE ALBATROSS  -  IN THE HELICOPTER'); return; }   // TOMCAT
+  if (G.craft === 'jet') { crafts.active.writeOff(); fleet.lose('jet', 'WRITTEN OFF'); feed('HORNET WRITTEN OFF', 'bad'); backToHuey('BACK ON THE ALBATROSS  -  IN THE HELICOPTER'); return; }
+  if (G.craft === 'tomcat') { crafts.active.writeOff(); fleet.lose('tomcat', 'WRITTEN OFF'); feed('TOMCAT WRITTEN OFF', 'bad'); backToHuey('BACK ON THE ALBATROSS  -  IN THE HELICOPTER'); return; }   // TOMCAT
   if (G.craft !== 'heli') { if (crafts.active === foot && foot.alive && foot.fromReserve) { fleet.give('marine'); foot.fromReserve = false; } backToHuey('PICKED UP  -  BACK IN THE HELICOPTER ON THE ALBATROSS'); return; }
   cancelRescue();
   if (G.mode !== 'zarch' ? !T.alive : !Z.alive) return;
@@ -1801,7 +2056,8 @@ function abandonHeli() {
   respawnHome(); G.rockets = ROCKETS_MAX; G.bombs = BOMBS_MAX;
   say(war.carrier && war.carrier.sinking === undefined ? 'CREW RECOVERED  -  NEW HELICOPTER ON THE ALBATROSS' : 'CREW RECOVERED  -  NEW HELICOPTER ON THE HOME PAD', 2.5);
 }
-function backToHuey(msg) {   // COMMANDER: the Huey as she is recovered to the deck (free), or a new one from the reserve
+function backToHuey(msg) {   // COMMANDER: the Huey as she is recovered to the deck (free), another Huey out, or a new one from the reserve
+  if (!ALIVE_HELI() && HUEYS.some(s => s.z.alive)) { clearHandOn(); if (!switchHeli()) return; }
   if (ALIVE_HELI() || fleet.take('heli')) { toHeli(msg); return; }
   clearHandOn(); const r = roster.find(r => r.out() && !r.active()); if (r && !r.switchTo()) return;
   checkSpent(); if (!G.over) commander.open('NO HUEY LEFT  -  PICK YOUR NEXT UNIT');
@@ -1984,14 +2240,14 @@ function updateTags() {
 function updateHud() {
   updateTags();
   {   // in the cockpit the instruments carry fuel / rpm / speed, so the bottom text block steps aside and the map moves up
-    const ck = cockpit.group.visible || JP.cockpit.group.visible || tomcatC.TP.cockpit.group.visible; setStyle('bot', 'display', ck || bigMap ? 'none' : 'block');
+    const ck = cockpit.group.visible || curJP().cockpit.group.visible || curTC().TP.cockpit.group.visible; setStyle('bot', 'display', ck || bigMap ? 'none' : 'block');
     for (const id of ['tl', 'hint', 'feed', 'war']) setStyle(id, 'display', bigMap ? 'none' : 'block');   // the command map has its own read-outs
     setStyle('radar', 'bottom', ck && !bigMap ? 'auto' : ''); setStyle('radar', 'top', ck && !bigMap ? '64px' : ''); setStyle('feed', 'top', ck ? '236px' : '');
   }
-  crossEl.style.display = document.pointerLockElement === canvas && (cockpit.group.visible || JP.cockpit.group.visible || tomcatC.TP.cockpit.group.visible || armCk()) || (G.craft === 'foot' && !foot.marine && foot.alive && foot.firstPerson() && G.state === 'play') || (G.state === 'play' && crafts.active && crafts.active.switches && crafts.active.firstPerson()) ? 'block' : 'none';   // ngc/wheeledgame: a dot to work the cab's switches / lay the gun
+  crossEl.style.display = document.pointerLockElement === canvas && (cockpit.group.visible || curJP().cockpit.group.visible || curTC().TP.cockpit.group.visible || armCk()) || (G.craft === 'foot' && !foot.marine && foot.alive && foot.firstPerson() && G.state === 'play') || (G.state === 'play' && crafts.active && crafts.active.switches && crafts.active.firstPerson()) ? 'block' : 'none';   // ngc/wheeledgame: a dot to work the cab's switches / lay the gun
   const ch = G.craft !== 'heli' && crafts.active ? crafts.active.hud() : null;   // FOUNDATION: any other craft's read-outs
   {   // g effects in the jet cockpit: grey tunnel closing in, black at G-LOC, red-out under negative g
-    const gf = JP.cockpit.group.visible || (G.craft === 'jet' && JP.gloc > 0) ? JP.gfx() : tomcatC.TP.cockpit.group.visible || (G.craft === 'tomcat' && tomcatC.glocNow()) ? tomcatC.gfx() : { grey: 0, red: 0 };
+    const jp = curJP(), tc = curTC(), gf = jp.cockpit.group.visible || (G.craft === 'jet' && jp.gloc > 0) ? jp.gfx() : tc.TP.cockpit.group.visible || (G.craft === 'tomcat' && tc.glocNow()) ? tc.gfx() : { grey: 0, red: 0 };
     const k = (gf.grey * 100) | 0, r = (gf.red * 100) | 0, key = k * 1000 + r;
     if (gfxEl._k !== key) { gfxEl._k = key; gfxEl.style.display = key ? 'block' : 'none'; gfxEl.style.background = `radial-gradient(circle at 50% 45%, rgba(${r ? 120 : 0},0,0,${gf.red * 0.55}) ${Math.max(0, 62 - gf.grey * 70)}%, rgba(${r ? 90 : 0},0,0,${Math.min(1, 0.15 + gf.grey * 1.1 + gf.red * 0.4)}) ${Math.max(8, 95 - gf.grey * 80)}%)`; gfxEl.style.backdropFilter = gf.grey > 0.2 ? `grayscale(${Math.min(1, gf.grey * 1.4)})` : ''; }
   }
@@ -2004,9 +2260,9 @@ function updateHud() {
   setText('modeTag', `FUEL STORES ${Math.round(G.res)}/${RES_MAX}   MATERIEL ${Math.floor(G.mat)}${G.cargo > 0.5 ? '   CARGO ' + Math.round(G.cargo) : ''}`);
   setText('weap', ch ? ch.weap || '' : `ROCKETS ${G.rockets}   BOMBS ${G.bombs}   FLARES ${cmH.flare}   CHAFF ${cmH.chaff}`);
   {   // CM: the radar warning cue in the chase / outside views (the cockpits have their own scopes and lamps)
-    const air = G.state === 'play' && G.mode === 'zarch' && (G.craft === 'heli' || (G.craft === 'jet' && JP.alive && !JP.ejected)), inside = cockpit.group.visible || JP.cockpit.group.visible;
-    const f = G.craft === 'jet' ? JP.J.forward(_cmQ) : H.forward();
-    rwrCue.update(air && !inside && !bigMap, Math.atan2(f.x, -f.z), performance.now() / 1000, G.craft === 'jet' ? JP.cm : cmH);
+    const jp = curJP(), air = G.state === 'play' && G.mode === 'zarch' && (G.craft === 'heli' || (G.craft === 'jet' && jp.alive && !jp.ejected)), inside = cockpit.group.visible || jp.cockpit.group.visible;
+    const f = G.craft === 'jet' ? jp.J.forward(_cmQ) : H.forward();
+    rwrCue.update(air && !inside && !bigMap, Math.atan2(f.x, -f.z), performance.now() / 1000, G.craft === 'jet' ? jp.cm : cmH);
   }
   {   // the war at a glance
     const n = [0, 0, 0]; for (const I of ISLANDS) n[I.owner]++;
@@ -2079,6 +2335,7 @@ function updateCamsAndMeshes(dt, time) {
     caveToWorld(T.x, T.y, P); T.zOff *= Math.exp(-5 * dt); P.z = T.base.z + T.zOff;
   }
   heliModel.animate(heliLook(), dt, time, cockpit.group.visible);
+  renderHueys(dt, time);   // COMMANDER: the other Hueys out
   if (Z.alive && G.state === 'play' && (D.fire || D.hp.engine < 0.5) && Math.random() < (D.fire ? 0.9 : 0.35)) {
     const p = _wv0.set(0, 1.3, 1.4).applyQuaternion(shipMesh.quaternion).add(shipMesh.position);
     if (D.fire) fx.add.spawn(p.x, p.y, p.z, rnd(-1, 1), rnd(2, 4), rnd(-1, 1), rnd(0.3, 0.6), 1, 0.3, 1, rnd(.4, .6), .1, 0.9, -1.5, 1);
@@ -2137,7 +2394,7 @@ function updateCamsAndMeshes(dt, time) {
     zCam.quaternion.slerpQuaternions(camA.quaternion, camS.quaternion, smooth(0, 0.6, e));
   }
   const other = G.craft !== 'heli' && !!crafts.active && G.state !== 'title', otherFP = other && crafts.active.firstPerson();   // FOUNDATION
-  const jetCk = jet && cockpitCam && (G.craft === 'tomcat' ? tomcatC.firstPerson() : JP.alive && !JP.ejected);
+  const jetCk = jet && cockpitCam && (G.craft === 'tomcat' ? curTC().firstPerson() : curJP().alive && !curJP().ejected);
   const heliCk = cockpitCam && !inCave && Z.alive && G.craft === 'heli' && !drop.camActive, firstP = otherFP || heliCk || drop.cockpitView;
   const fov = lerp(firstP ? (otherFP && crafts.active.fov ? crafts.active.fov(ckFov) : ckFov) : 62, SIDE_FOV, e); if (Math.abs(zCam.fov - fov) > 0.01) { zCam.fov = fov; zCam.updateProjectionMatrix(); }
   zScene.fog.color.copy(HORIZON).multiplyScalar(1 - 0.85 * e); zScene.fog.near = lerp(view.draw * 0.5, DRAW * 0.8, e); zScene.fog.far = lerp(view.draw, DRAW, e);
@@ -2215,6 +2472,7 @@ function frame(now) {
   // earlier) timestamp gave dt = 0 and the flight models divide by their step (NaN everywhere, seen in headless runs)
   const rdt = (now - last) / 1000, dt = Math.min(Math.max(rdt, 1e-3), 0.1); last = now;
   fpsAcc += rdt; fpsN++; if (fpsAcc > 1) { $('dbg').textContent = `${Math.round(fpsN / fpsAcc)} fps  ·  res ${Math.round(pixRatio * 100)}%`; fpsAcc = 0; fpsN = 0; }
+  commander.pad(dt, G.state === 'play' && G.mode === 'zarch' ? readGamepad() : null); CTL.suspend = commander.isOpen && G.state === 'play';   // COMMANDER: the board on a game pad (hold BACK); while it is open the pad is the board's
   CTL.poll(dt);
   const inp = readInput();
   if (inp.start && !padWasStart) { sfx.init(); if (G.state === 'paused') menuPick(); else pressStart(); }
@@ -2223,6 +2481,7 @@ function frame(now) {
   if (G.msgT > 0) { G.msgT -= dt; if (G.msgT <= 0 && G.state !== 'paused') say(''); }
   if (G.state === 'play') {
     if (G.mode === 'zarch') updateZarch(dt, inp); else updateThrust(dt, inp);
+    updateExt();   // COMMANDER: every unit of the fleet that is out is a target too (war.ext)
     war.update(dt, PL, params.has('peace'));
     if (G.mode === 'zarch') { crafts.afterWar(); seats.afterWar(dt); }   // FOUNDATION: decks moved - the soldier, vehicles, parked jets catch up (ngc/interiors: the troops in their seats)
     fogT -= dt; if (fogT <= 0) { fogT = 0.25; fog.update(war.visionSources(PL)); war.setVisibility(fog); updateFogImg(); }
@@ -2251,4 +2510,4 @@ function frame(now) {
 const PROF = { sim: 0, prep: 0, render: 0 };
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ, JETS, TOMCATS, ARMS, HUEYS, EXT, withSlot, swapHuey, heliSpotFree, shipHeloSpot, freeShipSpot, deliverArmour, newHueySlot, hurtHueyAway, checkSpent, get keyboardOnly() { return keyboardOnly; }, set keyboardOnly(v) { keyboardOnly = v; } }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }

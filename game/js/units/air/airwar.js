@@ -42,6 +42,7 @@ export function createAirWar(W, ctx, H) {
       },
       foes: function* (s) {
         for (const u of W.units) if (u.side !== s && u.p && !u.dims && !u.dead && !u.dying && !u.gone) yield u;
+        if (s === 2 && W.ext) for (const t of W.ext) if (!t.dead && t.air) yield t;   // COMMANDER: our jets / Hueys in the air that the player is not flying
         const pl = AW.pl;
         if (s === 2 && pl && pl.alive && !pl.inCave) { const P = AW.playerFoe || (AW.playerFoe = { player: true, air: true, type: 'PLAYER', r: 3 }); P.p = pl.pos; P.v = pl.vel; yield P; }
       },

@@ -157,12 +157,12 @@ export function createMotorPool(o) {
   // ---------------------------------------------------------------- deliveries (key 7 / 9): the delivery module flies / ships it in
   function deliver(type) {
     const T = TYPES[type], cost = T.cost;
-    if (G.mat < cost) { say(`AN ${T.label} NEEDS ${cost} MATERIEL`, 1.6); return null; }
+    if (!o.pay && G.mat < cost) { say(`AN ${T.label} NEEDS ${cost} MATERIEL`, 1.6); return null; }
     let I = o.selIsl && o.selIsl() && o.selIsl().owner === 1 ? o.selIsl() : null;
     if (!I) { const Z = o.Z; let bd = 1e9; for (const J of ISLANDS) if (J.owner === 1 && J.pad) { const d = Math.hypot(J.pad.x - Z.pos.x, J.pad.z - Z.pos.z); if (d < bd) { bd = d; I = J; } } }
     const sp = (I && GR.motorPool(I, type === 'm35' ? 3.6 : 2.4)) || null;
     if (!sp) { say('NOWHERE TO PUT A VEHICLE', 1.6); return null; }
-    G.mat -= cost;
+    if (o.pay) { const w = o.pay(type); if (w) { say(w, 1.8); return null; } } else G.mat -= cost;   // COMMANDER: o.pay - the fleet's reserve (else materiel buys one)
     if (delivery && I) return delivery.order(type, I, sp);   // a CH-46 slings the jeep in, an LCM-8 lands the truck (delivery.js)
     const V = spawn(type, sp, { home: I || 'deck' });
     feed(`MOTOR POOL: ${T.label} AT ${sp.name}`, 'good'); say(`${T.label} WAITING AT ${sp.name}`, 2.2); sfx.dock?.();

@@ -60,11 +60,12 @@ export function createCommander(h) {
   function nearestBaseKey() { let best = null; for (const b of C.bases) if (!best || b.d < best.d) best = b; return best ? best.key : null; }
 
   // ---------------------------------------------------------------- what each row offers at the selected base
-  function rowOf(r, fresh = false) {   // fresh: another of a type that can have several out (r.multi: the motor pool)
+  function rowOf(r, fresh = false) {   // fresh: another of a type that can have several out (r.multi: every type but the Marine)
     const t = fleet.type(r.id), n = Math.max(0, fleet.n[r.id] || 0), b = base(), out = r.out(), act = r.active(), another = fresh && r.multi;
     const o = { r, t, n, out, act, status: out ? r.status() : '', action: 'none', label: '', why: '' };
-    if (act && !another) { o.action = 'here'; o.label = 'YOU ARE HERE'; return o; }
-    if (out && !another) { o.action = 'switch'; o.label = 'SWITCH TO IT'; return o; }
+    const others = act && r.multi && r.outCount && r.outCount() > 1;   // you are in one and more of the type are out: ENTER takes you to the next
+    if (act && !another && !others) { o.action = 'here'; o.label = 'YOU ARE HERE'; return o; }
+    if (out && !another) { o.action = 'switch'; o.label = others ? 'SWITCH TO THE NEXT ONE' : 'SWITCH TO IT'; return o; }
     const why = !b ? 'NO BASE' : !t.at.includes(b.kind) ? (b.kind === 'island' ? 'CARRIER ONLY' : 'ISLANDS ONLY') : r.can(b);
     if (why) { o.why = why; o.label = why; return o; }
     if (n > 0) { o.action = 'deploy'; o.label = `DEPLOY AT ${b.name}`; return o; }
@@ -101,7 +102,7 @@ export function createCommander(h) {
   };
   C.recall = (i = C.sel) => { const r = h.roster[i]; if (!r || !r.recall) { say('NOTHING TO RECALL', 1.2); return; } const w = r.recall(); say(w || `${r.label}  -  RECALLED TO THE ALBATROSS`, 1.8); };
   C.standDown = (i = C.sel) => {
-    const r = h.roster[i]; if (!r || !r.standDown || !r.out() || r.active()) { say('NOTHING TO STAND DOWN', 1.2); return; }
+    const r = h.roster[i]; if (!r || !r.standDown || !r.out() || (r.active() && !(r.multi && r.canStandDown && r.canStandDown()))) { say('NOTHING TO STAND DOWN', 1.2); return; }   // (multi: another of the type you are in, parked at a base)
     const w = r.standDown(); if (w) { say(w, 1.8); return; }
     fleet.give(r.id); feed(`COMMAND: ${r.label} STOOD DOWN  -  BACK IN RESERVE`, 'info'); sfx?.ui?.('select');
   };
@@ -109,7 +110,8 @@ export function createCommander(h) {
   C.next = () => {
     const R = h.roster, k = Math.max(0, R.findIndex(r => r.active()));
     for (let j = 1; j <= R.length; j++) {
-      const r = R[(k + j) % R.length]; if (r.active() || !r.out()) continue;
+      const r = R[(k + j) % R.length], same = j === R.length;   // (last: another of the type you are in)
+      if (!r.out() || (r.active() && !(same && r.multi && r.outCount && r.outCount() > 1))) continue;
       const tok = h.leaving?.(); const w = r.switchTo(); if (w) { say(w, 1.6); continue; }
       h.left?.(tok);
       say(`${r.label}  -  ${r.status()}`, 1.6); sfx?.ui?.('select'); done(); return true;
@@ -152,6 +154,35 @@ export function createCommander(h) {
     return !['KeyM', 'KeyP', 'KeyK', 'KeyJ'].includes(c);   // the map, pause, keyboard-only and the controls panel still work
   };
 
+  // ---------------------------------------------------------------- gamepad (a standard-mapping pad)
+  // Hold BACK / VIEW (button 8) half a second: open / close the board. On the board: D-pad or left stick up / down select
+  // (held: repeats), left / right or LB / RB the base, A deploy or switch, B close, X stand down, Y recall a jet, START
+  // another of the type (N). The host stops the pad reaching the unit you are in while the board is open.
+  const GP = { prev: [], hold: 0, fired: false, rep: {}, open: false };
+  const PAD_KEYS = { 12: 'ArrowUp', 13: 'ArrowDown', 14: 'ArrowLeft', 15: 'ArrowRight', 4: 'ArrowLeft', 5: 'ArrowRight', 0: 'Enter', 1: 'Escape', 2: 'KeyX', 3: 'KeyR', 9: 'KeyN' };
+  const REPEAT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+  C.pad = (dt, gp) => {
+    if (!gp) { GP.prev = []; GP.hold = 0; GP.fired = false; GP.rep = {}; return false; }
+    const down = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
+    if (down(8)) { GP.hold += dt; if (GP.hold >= 0.5 && !GP.fired) { GP.fired = true; C.toggle(); sfx?.ui?.('select'); } } else { GP.hold = 0; GP.fired = false; }
+    if (C.isOpen) {
+      // the left stick as a D-pad
+      const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0, held = { ArrowUp: ay < -0.6, ArrowDown: ay > 0.6, ArrowLeft: ax < -0.6, ArrowRight: ax > 0.6 };
+      for (const [i, code] of Object.entries(PAD_KEYS)) if (down(+i)) held[code] = true;
+      if (!GP.open) { GP.rep = {}; for (const code in held) if (held[code]) GP.rep[code] = { on: true, t: 1e9 }; }   // just opened: what was held already (the trigger, the stick) acts only once let go
+      for (const code of new Set(Object.values(PAD_KEYS))) {
+        const r = GP.rep[code] ??= { on: false, t: 0 };
+        if (held[code] && !r.on) { r.on = true; r.t = 0.4; C.key({ code }); }
+        else if (held[code] && REPEAT.has(code)) { r.t -= dt; if (r.t <= 0) { r.t = 0.15; C.key({ code }); } }
+        else if (!held[code]) r.on = false;
+        if (!C.isOpen) break;   // B closed it
+      }
+    } else GP.rep = {};
+    GP.open = C.isOpen;
+    GP.prev = Array.from(gp.buttons, x => !!x && x.pressed);
+    return C.isOpen;
+  };
+
   // ---------------------------------------------------------------- drawing
   el.addEventListener('mousedown', e => e.stopPropagation(), true);
   el.addEventListener('click', e => {
@@ -170,10 +201,10 @@ export function createCommander(h) {
     C.rows.forEach((o, i) => {
       const cls = ['row', i === C.sel ? 'sel' : '', o.action === 'none' ? 'off' : '', o.act ? 'here' : ''].join(' ');
       const more = o.r.multi && (o.out || o.act) ? `  ·  N: ANOTHER AT ${esc(b ? b.name : '')}` : '';
-      const st = o.act ? `<i>YOU ARE HERE</i>  ·  ${esc(o.status)}${more}` : o.out ? `<i>OUT</i>  ·  ${esc(o.status)}  ·  ENTER: SWITCH TO IT${o.r.recall && /CAP/.test(o.status) ? '  ·  R: RECALL' : ''}${o.r.standDown && o.r.canStandDown && o.r.canStandDown() ? '  ·  X: STAND DOWN' : ''}${more}` : `${o.action === 'none' ? '' : 'ENTER: '}${esc(o.label)}`;
+      const st = o.act ? `<i>YOU ARE HERE</i>  ·  ${esc(o.status)}${o.action === 'switch' ? '  ·  ENTER: THE NEXT ONE' : ''}${o.r.recall && /CAP/.test(o.status) ? '  ·  R: RECALL' : ''}${o.r.canStandDown && o.r.canStandDown() ? '  ·  X: STAND DOWN' : ''}${more}` : o.out ? `<i>OUT</i>  ·  ${esc(o.status)}  ·  ENTER: SWITCH TO IT${o.r.recall && /CAP/.test(o.status) ? '  ·  R: RECALL' : ''}${o.r.standDown && o.r.canStandDown && o.r.canStandDown() ? '  ·  X: STAND DOWN' : ''}${more}` : `${o.action === 'none' ? '' : 'ENTER: '}${esc(o.label)}`;
       html += `<div class="${cls}" data-i="${i}"><span class="k">${i + 1}</span><span class="nm">${esc(o.t.short)}<small>${esc(o.r.label || o.t.label)}  ·  ${esc(o.t.note)}</small></span><span class="ct">${o.n}<small>IN RESERVE</small></span><span class="st">${st}</span></div>`;
     });
-    html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER VEHICLE  ·  / NEXT UNIT  ·  \\ CLOSE<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
+    html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER OF THE TYPE  ·  / NEXT UNIT  ·  \\ CLOSE<br>PAD: HOLD BACK TO OPEN / CLOSE  ·  D-PAD SELECT / BASE  ·  A DEPLOY OR SWITCH  ·  B CLOSE  ·  X STAND DOWN  ·  Y RECALL  ·  START ANOTHER<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
     if (force || html !== C.lastHtml) { C.lastHtml = html; el.innerHTML = html; }
   }
   // per frame: the HUD fleet strip; the open board refreshes ~4x a second (statuses move)

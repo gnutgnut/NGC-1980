@@ -375,8 +375,8 @@ export function createHueySim(GRAV = 9.81) {
   }
 
   // ------------------------------------------------------------------------------------- skids
-  const slip = U.SKIDS.map(() => [0, 0]);
-  let wasDown = false, tStep = 0;   // tStep: time into this frame step
+  const slip = U.SKIDS.map(() => [0, 0]); H.skidSlip = slip; H.wasDown = false;   // (on H, not in the closure: COMMANDER swaps whole Huey states, units/commander/swapstate.js)
+  let tStep = 0;   // tStep: time into this frame step
   // the ground under (x, z) now: a deck that climbs or sinks (the SKY CARRIER) has moved on since groundY was sampled
   function groundAt(env, x, z) {
     const g = env.groundY(x, z); if (!tStep || !env.surfVel) return g;
@@ -386,7 +386,7 @@ export function createHueySim(GRAV = 9.81) {
   function settleSkids(env) {   // after a reset on the ground: stand level on the skids at the highest ground below them
     H.settle = false;
     let g = -1e9; for (const [x, y] of U.SKIDS) { H.worldPoint([x, y, U.SKID_Z], _p); g = Math.max(g, env.groundY(_p.x, _p.z)); }
-    H.pos.y = g + U.SKID_Z - 0.035; surfaceVel(env, H.pos.x, H.pos.z, H.vel); H.landed = true; wasDown = true;
+    H.pos.y = g + U.SKID_Z - 0.035; surfaceVel(env, H.pos.x, H.pos.z, H.vel); H.landed = true; H.wasDown = true;
     for (const s of slip) s[0] = s[1] = 0;
   }
   const _fwd = new THREE.Vector3(), _lat = new THREE.Vector3(), _em = new THREE.Vector3(), _emb = new THREE.Vector3();
@@ -421,12 +421,12 @@ export function createHueySim(GRAV = 9.81) {
     }
     H.agl = Math.max(0, gmin); H.contacts = n; H._nsum = nsum;
     const up = H.up(_t).y, tilt = Math.acos(clamp(up, -1, 1));
-    if (n && !wasDown && first) {   // touchdown
+    if (n && !H.wasDown && first) {   // touchdown
       if (first.vy < -8 * tol || first.hs > 14 * tol || tilt > 0.7) { ev('crash'); H.dead = 'crash'; return; }
       ev(first.vy < -4.5 * tol || first.hs > 9 * tol || tilt > 0.42 ? 'hardland' : 'land', { vy: first.vy, hs: first.hs });   // skids: a ~15 kt run-on is fine (INFERRED)
     }
     if (n && tilt > 0.75) { ev('crash'); H.dead = 'crash'; return; }   // rolled over
-    wasDown = n > 0;
+    H.wasDown = n > 0;
     const W = m * GRAV;
     H.landed = n >= 2 && nsum > 0.08 * W && H.vel.distanceTo(surfaceVel(env, H.pos.x, H.pos.z, _sv)) < 2.5;
     // the tail stinger and the nose: a scrape on lift-off, a strike if it is mishandled

@@ -257,6 +257,7 @@ export function createRotary(ctx) {
         if (!u.target) {
           let best = null, bd = 160;
           for (const o of W.units) if (o.side !== u.side && o.side !== 0 && !o.dead && !o.dying && (o.type === 'drone' || o.type === 'escort' || o.type === 'squad' || o.type === 'transport') && o.p.distanceTo(u.p) < bd) { best = o; bd = o.p.distanceTo(u.p); }
+          if (u.side === 2 && W.ext) for (const o of W.ext) if (!o.dead && o.p.distanceTo(u.p) < bd) { best = o; bd = o.p.distanceTo(u.p); }   // COMMANDER: the fleet's units out (parked, AI-flown)
           if (best) u.target = best; else if (u.raid) u.target = u.raid.dead || u.raid.gone || u.raid.side === u.side ? (u.raid = null) : u.raid;
         }
         // swarm slots: the WASPs on the same target share a ring

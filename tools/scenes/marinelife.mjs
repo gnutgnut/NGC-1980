@@ -1,5 +1,5 @@
 // THE 1980 MARINE, the rest of his life (ngc/foot2): search the ammunition crate on the ALBATROSS deck (F), rearm on
-// the carrier deck, ride the TEST CAR and get out again with the same kit and wounds, then bleed out from an untreated
+// the carrier deck, ride an M151A2 jeep (the TEST CAR is gone since ngc/wheeledgame) and get out again with the same kit and wounds, then bleed out from an untreated
 // femoral wound: the life ends (COMMANDER: one Marine lost to the fleet), his body stays on the deck with his kit, a new crew starts in the Huey and
 // the next Marine out is a fresh one.
 //   CHROME_PATH=/home/jayjay/.cache/chs/chrome.sh node snap.mjs scenes/marinelife.mjs
@@ -24,11 +24,11 @@ export default async function (h) {
   await h.key('tap', 'KeyF'); await h.wait(300);
   await h.eval("({ msg: document.getElementById('msg').textContent, inGun: __G.marine.R.cur.mag.rounds })");
   await h.expect("/ALBATROSS/.test(document.getElementById('msg').textContent) && __G.marine.R.cur.mag.rounds >= 18", 'F on the carrier deck: rearmed (the magazine in the rifle refilled)');
-  // 3. a wound, then into the TEST CAR and out again: same man, same kit, same wound
+  // 3. a wound, then into an M151A2 from the motor pool and out again: same man, same kit, same wound
   await h.eval(`(() => { const M = __G.marine.M; M.hit({ round: 'M193', velocity: 800, part: 'armL', zone: 'forearm', dir: [1, 0, 0] }); window.__hp = Math.round(M.regions.armL.hp); window.__mags = __G.marine.inv.slots.belt.slots.ammoL.grids.flat().length; return __hp; })()`);
-  await h.eval(`(() => { const car = __G.carC; car.spawnAt({ x: __G.PAD.x + 14, y: __G.PAD.h, z: __G.PAD.z + 14, yaw: 0 }); const d = __G.crafts.toWorld(car, [-1.6, 0, -0.1]); return __G.foot.spawnAt({ x: d.x, y: d.y + 0.3, z: d.z, yaw: Math.PI / 2 }); })()`);
+  await h.eval(`(() => { const car = __G.carC, d = __G.crafts.toWorld(car, car.seats[0].exit); window.__car = car; return __G.foot.spawnAt({ x: d.x, y: __G.groundY(d.x, d.z), z: d.z, yaw: d.yaw + Math.PI / 2 }); })()`);
   await h.wait(500); await h.key('tap', 'KeyY'); await h.wait(500);
-  await h.expect("__G.G.craft === 'boxcar'", 'into the TEST CAR');
+  await h.expect("__G.crafts.active === __car && __G.crafts.active.type === 'm151'", 'into the M151A2 (the driver\'s door)');
   await h.key('tap', 'KeyY'); await h.wait(600);
   await h.expect("__G.G.craft === 'foot' && Math.round(__G.marine.M.regions.armL.hp) === __hp && __G.marine.inv.slots.belt.slots.ammoL.grids.flat().length === __mags", 'out of the car: the same Marine (wound and kit kept)');
   // 4. an untreated femoral bleed: he bleeds out -> the life ends

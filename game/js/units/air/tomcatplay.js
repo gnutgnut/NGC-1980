@@ -101,13 +101,14 @@ export function createTomcatPlay(ctx) {
     P.silence(); model.group.visible = false; shadow.visible = false; cockpit.group.visible = false;
     if (!P.ejected) { say(why, 2.5); ctx.onLost(why, false); }
   }
-  P.hurt = (amount, why) => {
+  P.hurt = (amount, why, quiet) => {   // COMMANDER: quiet - hit while nobody is in the cockpit (parked, the wingman flying)
     if (!P.alive || P.ejected) return;
-    const part = D.hit(amount * 0.8), name = TPARTS.find(p => p.id === part).name; sfx.hit?.() ?? sfx.boom(0.3); P.kick = 0.6;
+    const part = D.hit(amount * 0.8), name = TPARTS.find(p => p.id === part).name; if (quiet) { if (D.hp.airframe <= 0) lose('DESTROYED'); return; } sfx.hit?.() ?? sfx.boom(0.3); P.kick = 0.6;
     say(D.fire[0] && part === 'engL' ? 'LEFT ENGINE FIRE  -  PUSH THE L FIRE LIGHT' : D.fire[1] && part === 'engR' ? 'RIGHT ENGINE FIRE  -  PUSH THE R FIRE LIGHT' : `${why}  -  ${name} HIT`, 2);
     if (D.hp.airframe <= 0) lose('THE TOMCAT BROKE UP');
   };
   // ejection: the canopy goes, then the RIO, then the pilot 0.4 s later (the F-14's command sequence); both chutes
+  P.destroy = why => lose(why);   // COMMANDER: a game-level kill (a parked jet shot to pieces on the deck)
   function eject() {
     if (P.ejected || !P.alive) return;
     const up = A.up(_u);

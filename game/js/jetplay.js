@@ -74,12 +74,13 @@ export function createJetPlay(ctx) {
     model.group.visible = false; shadow.visible = false; cockpit.group.visible = false;
     if (!P.ejected) { say(why, 2.5); ctx.onLost(why, false); }
   }
-  P.hurt = (amount, why) => {
+  P.hurt = (amount, why, quiet) => {   // COMMANDER: quiet - hit while nobody is in the cockpit (parked, the wingman flying)
     if (!P.alive || P.ejected) return;
-    const part = D.hit(amount * 0.8), name = JPARTS.find(p => p.id === part).name; sfx.hit?.() ?? sfx.boom(0.3);
+    const part = D.hit(amount * 0.8), name = JPARTS.find(p => p.id === part).name; if (quiet) { if (D.hp.airframe <= 0) lose('DESTROYED'); return; } sfx.hit?.() ?? sfx.boom(0.3);
     say(D.fire[0] && part === 'engL' ? 'LEFT ENGINE FIRE  -  PUSH THE L FIRE LIGHT' : D.fire[1] && part === 'engR' ? 'RIGHT ENGINE FIRE  -  PUSH THE R FIRE LIGHT' : `${why}  -  ${name} HIT`, 2);
     if (D.hp.airframe <= 0) lose('BROKE UP IN THE AIR');
   };
+  P.destroy = why => lose(why);   // COMMANDER: a game-level kill (a parked jet shot to pieces on the deck)
   function eject() {
     if (P.ejected || !P.alive) return;
     const up = J.up(_u); P.ejected = { pos: J.worldPoint([0, 1.3, -4.3]), vel: J.vel.clone().addScaledVector(up, 26), t: 0, landed: -1 };

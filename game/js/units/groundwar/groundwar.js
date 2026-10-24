@@ -62,6 +62,11 @@ export function createGroundWar(ctx) {
         const agl = u.p.y - Math.max(terrainH(u.p.x, u.p.z), 0); if (agl > 120) continue;
         out.push({ id: idOf(u), side: 1, kind: agl < 5 ? 'vehicle' : 'air', x: u.p.x, y: agl < 5 ? u.p.y - agl : u.p.y - 1.5, z: u.p.z, vx: u.v.x, vz: u.v.z, h: 4, alive: true, firing: 99, cover: 0, ref: u });
       }
+      for (const u of W.ext || []) {   // COMMANDER: the fleet's units out that the player is not in (a parked Huey, a tank, a jeep...)
+        if (u.dead || Math.hypot(u.p.x - I.x, u.p.z - I.z) > I.r + 220) continue;
+        const gy = Math.max(terrainH(u.p.x, u.p.z), 0), agl = u.p.y - gy; if (agl > 120 || (agl < 4 && terrainH(u.p.x, u.p.z) < 0)) continue;   // (not on a ship's deck out at sea)
+        out.push({ id: idOf(u), side: 1, kind: agl < 5 ? 'vehicle' : 'air', x: u.p.x, y: agl < 5 ? gy : u.p.y - 1.5, z: u.p.z, vx: u.v.x, vz: u.v.z, h: 3, alive: true, firing: 99, cover: 0, ref: u });
+      }
     } else {
       for (const s of I.structs) if (s.kind === 'aa' && s.side === 2) out.push({ id: idOf(s), side: 2, kind: 'aa', x: s.x, y: s.y, z: s.z, h: 3, alive: !s.dead && !s.building, firing: 99, cover: 0, ref: s });
     }
@@ -87,6 +92,11 @@ export function createGroundWar(ctx) {
       if (Math.abs(u.p.x - mx) > 90 || Math.abs(u.p.z - mz) > 90) continue;
       const [k, d] = segPoint(ax, ay, az, bx, by, bz, u.p.x, u.p.y, u.p.z);
       if (d < (u.r || 4) * 0.6 && (!best || k < best.t)) best = { t: k, apply: () => W.damage(u, H.air, 2) };
+    }
+    for (const u of W.ext || []) {   // COMMANDER: the fleet's units out (the same hurt as the player in that unit)
+      if (u.dead || Math.abs(u.p.x - mx) > 90 || Math.abs(u.p.z - mz) > 90) continue;
+      const [k, d] = segPoint(ax, ay, az, bx, by, bz, u.p.x, u.p.y, u.p.z);
+      if (d < u.r && (!best || k < best.t)) best = { t: k, apply: (x, y, z) => { _at.set(x, y, z); _dir.set(p.vx, p.vy, p.vz); u.hurt(u.air ? H.heli : H.war, p.ammo === 'coil120' ? 'COILGUN' : p.ammo.startsWith('mbt') ? 'TANK FIRE' : 'STRIDER FIRE', _at, _dir); } };
     }
     return best;
   }

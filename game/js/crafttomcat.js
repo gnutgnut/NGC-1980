@@ -20,7 +20,7 @@ export function createTomcatCraft(ctx) {
   const park = { x: 0, y: 0, z: 0, yaw: 0, plat: null, loc: null, carried: null, on: false };
   const H0 = TOMCAT_AF.REST_H;   // CG height over the deck on the wheels
   const D = {
-    id: 'tomcat', label: 'TOMCAT', kind: 'air', TP, park, jetLike: true,
+    id: ctx.id || 'tomcat', craft: 'tomcat', label: 'TOMCAT', kind: 'air', TP, park, jetLike: true,   // COMMANDER: ctx.id - one craft per airframe
     // the boarding ladder and steps are on the left side under the cockpits
     seats: [
       { id: 'pilot', label: 'PILOT', role: 'driver', door: [-1.3, -1.3, -5.4], exit: [-2.2, -H0, -5.4], reach: 2.6 },
@@ -42,22 +42,22 @@ export function createTomcatCraft(ctx) {
       const stowed = ctx.heliOnDeck() && !ctx.heliStowed(); if (stowed) ctx.stowHeli();
       if (!TP.launch()) { if (stowed) ctx.unstowHeli(); return false; }
       park.on = false; D.wing = null;
-      if (!crafts.control('tomcat', 0, 'command')) return false;
+      if (!crafts.control(D.id, 0, 'command')) return false;
       TP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return true;
     }
-    if (G.craft === 'tomcat') { if (TP.stoppedOnDeck() || A.cat) { TP.respot(); ctx.turnIntoClear(); } else say('TRAP ON THE ALBATROSS FIRST: GEAR, FLAPS DN, HOOK DOWN', 2); return; }
-    if (D.present() && !park.on) { crafts.control('tomcat', 0, 'command'); return; }   // COMMANDER: out with the wingman - take her where she is
+    if (crafts.active === D) { if (TP.stoppedOnDeck() || A.cat) { TP.respot(); ctx.turnIntoClear(); } else say('TRAP ON THE ALBATROSS FIRST: GEAR, FLAPS DN, HOOK DOWN', 2); return; }
+    if (D.present() && !park.on) { crafts.control(D.id, 0, 'command'); return; }   // COMMANDER: out with the wingman - take her where she is
     if (G.craft !== 'heli') { say(D.present() && park.on ? 'WALK TO THE PARKED TOMCAT AND CLIMB IN (Y AT THE LADDER, LEFT SIDE)' : 'LAND THE HELICOPTER ON THE ALBATROSS TO TAKE A TOMCAT', 1.8); return; }
     if (!ctx.heliOnDeck()) { say('LAND ON THE ALBATROSS TO TAKE A TOMCAT', 1.8); return; }
     if (ctx.catFouled && ctx.catFouled()) { say('CAT 1 IS FOULED  -  A PARKED JET IS ON IT', 1.8); return; }
     if (D.present() && park.on) {   // one already parked on deck: that one goes to the cat
       ctx.stowHeli(); park.on = false; if (!TP.launch()) { ctx.unstowHeli(); return; }
-      crafts.setActive('tomcat'); TP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return;
+      crafts.setActive(D.id); TP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return;
     }
     if (G.tomcats <= 0) { if (G.mat < COST_TOMCAT) { say(`NO TOMCATS LEFT  -  A NEW ONE COSTS ${COST_TOMCAT} MATERIEL`, 2); return; } G.mat -= COST_TOMCAT; G.tomcats++; feed('NEW TOMCAT DELIVERED TO THE ALBATROSS', 'good'); }
     G.tomcats--; ctx.stowHeli();
     if (!TP.launch()) { ctx.unstowHeli(); G.tomcats++; return; }
-    park.on = false; crafts.setActive('tomcat'); TP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear();
+    park.on = false; crafts.setActive(D.id); TP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear();
   };
   // ---------------------------------------------------------------- in and out
   D.enter = (seat, from) => {
@@ -176,5 +176,8 @@ export function createTomcatCraft(ctx) {
     },
   };
   D.hurt = (amount, why) => TP.hurt(amount, why);
+  // COMMANDER: the war's fire on her while you are elsewhere (craftjet.js has the same)
+  D.hurtQuiet = (amount, why) => TP.hurt(amount, why, true);
+  D.destroy = why => TP.destroy(why);
   return D;
 }

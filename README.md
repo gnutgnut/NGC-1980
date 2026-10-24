@@ -118,13 +118,18 @@ running while it is open): every unit type of the fleet - UH-1H Huey, F/A-18A Ho
 M151A2 jeep, M35A2 truck, a Marine rifleman - with how many are in reserve and the one that is out (where it is, what
 it is doing). Pick the base with LEFT / RIGHT (the ALBATROSS, or any friendly island: jets only from the carrier's cat 1),
 ENTER (or 1-8) takes a unit out there and puts you in it, or switches you to the one already out; with none left in
-reserve the board buys one for materiel. **/** jumps straight to the next unit that is out. On the board, R recalls a
-jet on CAP, X stands a parked unit down into reserve, N takes another jeep or truck out (several can be out). **5** / **8** work from any unit (no need to land the Huey).
+reserve the board buys one for materiel. **/** jumps straight to the next unit that is out. On the board, R recalls the
+jets on CAP, X stands a parked unit down into reserve, N takes another of the type out: several Hueys, Hornets, Tomcats,
+tanks, APCs, jeeps and trucks can be out at once, up to what the reserve (and materiel) allows; ENTER on the type you are
+in takes you to the next one of it. **5** / **8** work from any unit (no need to land the Huey). On a game pad, hold
+BACK / VIEW to open the board: D-pad (or the stick) to pick the unit and the base, A deploy or switch, B close, X stand
+down, Y recall, START another. Deliveries (7, 9, 0) are units out of the same reserve (with none left, materiel buys one).
 
 The unit you leave carries on: a Huey in the air is flown home by her crew (to the nearest friendly pad or the
-ALBATROSS's aft spot, matching the deck's motion); a Hornet or Tomcat in the air goes to the escorts' AI pilot (CAP
+ALBATROSS, onto a free helicopter spot - not one another Huey or a parked jet has - matching the deck's motion); a Hornet or Tomcat in the air goes to the escorts' AI pilot (CAP
 over the carrier, home at bingo or on recall, the pattern, the glideslope, a trap); vehicles park; a Marine you leave
-goes back to his platoon. Lives are the fleet: the HUD strip under the score shows each type's reserve (+1 = out in
+goes back to his platoon. Every unit out is in the war: parked, flown by her crew or the wingman, it can be shot at,
+bombed and lost like the one you are in. Lives are the fleet: the HUD strip under the score shows each type's reserve (+1 = out in
 the war). A lost unit is a loss to the fleet; when the unit you are in is lost the board opens and, unless you pick,
 hands you on to the Huey. The war is lost when the fleet is spent - nothing in reserve and nothing left out there.
 
@@ -209,9 +214,9 @@ Compressor stall (a bang, the RPM rolls back, TIT climbs, L / R INLET on the cau
 | B | M35: six Marines board / dismount at a pad |
 | gamepad / HOTAS | vehicles: left stick or stick X / pedals steer, RT or the throttle lever = gas, LT or toe brakes = brake, A handbrake; gunner: right stick aims, RT fires |
 | racing wheel | rim steers, gas / brake / clutch pedals (found from their rest positions; override: `localStorage.tz_wheel_axes = "0,1,2,3"`, `!` inverts), paddles shift up / down, buttons 0 horn, 1 engine, 2 view, 3 handbrake, 6 / 7 seat; C = clutch on the keys (manual gearbox) |
-| 7, then 1 / 2 | motor pool: an M151A2 by CH-46 sling (10 materiel) / an M35A2 by LCM-8 to the beach (20), to the selected friendly island |
+| 7, then 1 / 2 | motor pool: an M151A2 by CH-46 sling / an M35A2 by LCM-8 to the beach, to the selected friendly island: out of the fleet's reserve (none left: materiel buys one, 10 / 20) |
 | U | at an ALBATROSS deck-edge lift console (or on the lift): send it down to the hangar door / back up |
-| 0 / 9 | an LCM-8 lands an M113A2 (30 materiel) / an M60A3 TTS (60) on the selected friendly island's landing hard (else the home island's) |
+| 0 / 9 | an LCM-8 lands an M113A2 / an M60A3 TTS on the selected friendly island's landing hard (else the home island's): one more out of the fleet's reserve, a new hull (none left: materiel buys one, 30 / 60) |
 
 ### Armour (M60A3 TTS, M113A2)
 

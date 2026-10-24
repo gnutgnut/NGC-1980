@@ -34,7 +34,7 @@ const PROD_KIND = { fuel: 'fuel', factory: 'factory', radar: 'radar', fortress: 
 export function createWar(ctx) {
   const { scene, fx, sfx, terrainH, isWater, nav } = ctx;
   const W = {
-    islands: ctx.ISLANDS, units: [], proj: [], E: { fuel: 0, mat: 0, bship: 0 }, P: ctx.G, time: 0, over: null,
+    islands: ctx.ISLANDS, units: [], proj: [], ext: [], E: { fuel: 0, mat: 0, bship: 0 }, P: ctx.G, time: 0, over: null,
     carrier: null, enemyCarrier: null, battleship: null, thinkT: 0, raidT: 120, econT: 0, deckCache: null,
   };
   const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _skyAim = new THREE.Vector3();
@@ -481,6 +481,7 @@ export function createWar(ctx) {
       if (!u.target) {
         let best = null, bd = 160;
         for (const o of W.units) if (o.side === 1 && !o.dead && !o.dying && (o.type === 'drone' || o.type === 'escort' || o.type === 'squad') && o.p.distanceTo(u.p) < bd) { best = o; bd = o.p.distanceTo(u.p); }
+        for (const o of W.ext) if (!o.dead && o.p.distanceTo(u.p) < bd) { best = o; bd = o.p.distanceTo(u.p); }   // COMMANDER: the fleet's units out
         if (best) u.target = best; else if (u.raid) u.target = u.raid.dead || u.raid.gone || u.raid.side !== 1 ? (u.raid = null) : u.raid;
       }
     }
@@ -539,6 +540,7 @@ export function createWar(ctx) {
   function* targets(side) {
     for (const u of W.units) if (u.side !== side && !u.dead && !u.dying && !u.gone && !u.noHit) yield u;   // (GROUND WAR: squad proxies are hit man by man, through GW)
     for (const I of W.islands) for (const s of I.structs) if (!s.dead && s.side !== side && s.side !== 0) yield s;
+    for (const t of W.ext) if (t.side !== side && !t.dead) yield t;   // COMMANDER: the fleet's units out that the player is not in (W.ext, kept by main.js)
   }
   function hitTest(x, y, z, side, rad = 0) {
     for (const t of targets(side)) {
@@ -557,6 +559,7 @@ export function createWar(ctx) {
     return null;
   }
   function damage(t, dmg, side) {
+    if (t.ext) { if (side !== t.side && !t.dead) t.hurt(dmg <= 1.5 ? 0.2 : Math.min(0.6, 0.06 * dmg), dmg >= 12 ? 'BLAST' : dmg >= 9 ? 'MISSILE' : 'HIT'); return; }   // COMMANDER: a fleet unit you are not in (parked, AI-flown)
     if (t.player) { if (side === 2) ctx.hurtPlayer(Math.min(0.6, 0.06 * dmg), dmg >= 9 ? 'MISSILE' : 'HIT'); return; }   // AIR: the player as an air target
     if (t.ship) {   // a ship's gun mount
       t.hp -= dmg; if (t.hp <= 0 && !t.dead) { t.dead = true; t.mesh.getWorldPosition(_w); fx.explode(_w.x, _w.y + 1, _w.z, 1.4, { debris: 5 }); t.mesh.visible = false; t.rebuild = 45; boomAt(_w.x, _w.y, _w.z, 0.5); if (t.ship.side === 2) { ctx.addScore(300); feed(`${t.ship.type === 'carrier' ? 'KRAKEN' : t.ship.type === 'freighter' ? 'CONTAINER SHIP' : 'LEVIATHAN'} GUN DESTROYED`, 'good'); } }
@@ -657,6 +660,7 @@ export function createWar(ctx) {
     const list = [];
     for (const u of W.units) if (u.side !== side && !u.dead && !u.dying && u.p && !u.dims && !u.ground) list.push(u);   // (GROUND WAR: AA guns don't engage squads on the ground)
     if (side === 2 && pl.alive && !pl.inCave) list.push({ p: pl.pos, v: pl.vel, player: true, vis: pl.detect ?? 1 });
+    if (side === 2) for (const t of W.ext) if (!t.dead && t.air) list.push(t);   // COMMANDER: our aircraft in the air that the player is not flying
     const sc = W.carrier; if (side === 2 && sc && sc.sky && sc.sky.up && sc.p.y > 8 && sc.sinking === undefined) list.push({ p: _skyAim.set(sc.p.x, sc.p.y + 4, sc.p.z), v: sc.v });
     return list;
   }

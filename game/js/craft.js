@@ -69,12 +69,12 @@ export function createCraftHost({ G, Z, say = NOOP }) {
     const prev = host.active;
     if (def.enter(seat, from) === false) return false;
     if (prev && prev !== def) prev.exit(def);
-    host.active = def; host.seat = seat; G.craft = id;
+    host.active = def; host.seat = seat; G.craft = def.craft || id;   // COMMANDER: def.craft = the type of a multi-instance craft (a second HORNET 'jet#2' is still G.craft 'jet')
     host.onSwitch(prev, def);
     return true;
   };
   // set the active craft without calling enter/exit (new game, respawn: the caller already placed everything)
-  host.setActive = (id, seat = 0) => { const def = byId.get(id); host.active = def; host.seat = seat; G.craft = id; };
+  host.setActive = (id, seat = 0) => { const def = byId.get(id); host.active = def; host.seat = seat; G.craft = (def && def.craft) || id; };
 
   // ------------------------------------------------------------------ seats and doors
   const _f = { x: 0, y: 0, z: 0, yaw: 0 };

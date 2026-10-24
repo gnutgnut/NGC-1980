@@ -15,7 +15,7 @@ export function createJetCraft(ctx) {
   const yawOf = () => { J.forward(_f); return Math.atan2(-_f.x, -_f.z); };
   const park = { x: 0, y: 0, z: 0, yaw: 0, plat: null, loc: null, carried: null, on: false };
   const D = {
-    id: 'jet', label: 'HORNET', kind: 'air', JP, park,
+    id: ctx.id || 'jet', craft: 'jet', label: 'HORNET', kind: 'air', JP, park,   // COMMANDER: ctx.id - one craft per airframe ('jet', 'jet#2'...)
     seats: [{ id: 'pilot', label: 'PILOT', role: 'driver', door: [-1.7, -0.9, -3.2], exit: [-2.3, -1.92, -3.4], reach: 2.4 }],
   };
   // ---------------------------------------------------------------- presence and frames
@@ -34,21 +34,21 @@ export function createJetCraft(ctx) {
       const stowed = ctx.heliOnDeck() && !ctx.heliStowed(); if (stowed) ctx.stowHeli();
       if (!JP.launch()) { if (stowed) ctx.unstowHeli(); return false; }
       park.on = false; D.wing = null;
-      if (!crafts.control('jet', 0, 'command')) return false;
+      if (!crafts.control(D.id, 0, 'command')) return false;
       JP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return true;
     }
-    if (G.craft === 'jet') { if (JP.stoppedOnDeck() || J.cat) { JP.respot(); ctx.turnIntoClear(); } else say('TRAP ON THE ALBATROSS FIRST: GEAR, FLAPS FULL, HOOK DOWN', 2); return; }
-    if (D.present() && !park.on) { crafts.control('jet', 0, 'command'); return; }   // COMMANDER: she is out with the wingman - take her where she is
+    if (crafts.active === D) { if (JP.stoppedOnDeck() || J.cat) { JP.respot(); ctx.turnIntoClear(); } else say('TRAP ON THE ALBATROSS FIRST: GEAR, FLAPS FULL, HOOK DOWN', 2); return; }
+    if (D.present() && !park.on) { crafts.control(D.id, 0, 'command'); return; }   // COMMANDER: she is out with the wingman - take her where she is
     if (G.craft !== 'heli') { say(D.present() && park.on ? 'WALK TO THE PARKED HORNET AND GET IN (Y)' : 'LAND THE HELICOPTER ON THE ALBATROSS TO TAKE A JET', 1.8); return; }
     if (!ctx.heliOnDeck()) { say('LAND ON THE ALBATROSS TO TAKE A JET', 1.8); return; }
     if (D.present() && park.on) {   // a Hornet is already parked on deck: that one goes to the cat
       ctx.stowHeli(); park.on = false; if (!JP.launch()) { ctx.unstowHeli(); return; }
-      crafts.setActive('jet'); JP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return;
+      crafts.setActive(D.id); JP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear(); return;
     }
     if (G.jets <= 0) { if (G.mat < COST.jet) { say(`NO HORNETS LEFT  -  A NEW ONE COSTS ${COST.jet} MATERIEL`, 2); return; } G.mat -= COST.jet; G.jets++; feed('NEW HORNET DELIVERED TO THE ALBATROSS', 'good'); }
     G.jets--; ctx.stowHeli();
     if (!JP.launch()) { ctx.unstowHeli(); G.jets++; return; }
-    park.on = false; crafts.setActive('jet'); JP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear();
+    park.on = false; crafts.setActive(D.id); JP.snapChase(); head.yaw = head.pitch = 0; ctx.turnIntoClear();
   };
   // ---------------------------------------------------------------- in and out
   D.enter = (seat, from) => {
@@ -147,7 +147,7 @@ export function createJetCraft(ctx) {
   D.render = (dt, time, fp) => {
     if (!JP.active) return;
     JP.render(dt, time, crafts.active === D && fp, crafts.active === D ? ctx.hover() : null);
-    if (crafts.active !== D) { const cam = ctx.camZ(), d = cam ? cam.position.distanceTo(J.pos) : 0; sfx.jet?.((J.eng[0].n + J.eng[1].n) / 2, 0, 0, false, Math.max(0, 1 - d / 150) * (J.eng[0].n > 0.05 ? 1 : 0)); }
+    if (crafts.active !== D && (!ctx.jetVoice || ctx.jetVoice(D))) { const cam = ctx.camZ(), d = cam ? cam.position.distanceTo(J.pos) : 0; sfx.jet?.((J.eng[0].n + J.eng[1].n) / 2, 0, 0, false, Math.max(0, 1 - d / 150) * (J.eng[0].n > 0.05 ? 1 : 0)); }
   };
   D.silence = () => { sfx.jet?.(0, 0, 0, false, false); sfx.seeker?.(0); sfx.jetGun?.(false); };
   D.hud = () => {
@@ -165,5 +165,8 @@ export function createJetCraft(ctx) {
     },
   };
   D.hurt = (amount, why) => JP.hurt(amount, why);
+  // COMMANDER: the war's fire on her while you are elsewhere (parked, or the wingman flying): no cockpit calls; destroy = a game-level kill
+  D.hurtQuiet = (amount, why) => JP.hurt(amount, why, true);
+  D.destroy = why => JP.destroy(why);
   return D;
 }

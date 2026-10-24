@@ -140,5 +140,29 @@ function run(H, AI, env, secs, ctlBase = { throttle: 1, gov: 'AUTO', fuel: true 
     check('wingman HORNET: low and dirty off the bow -> climbs, cleans up', st0 === 'climb' && !A.dead && A.gearCmd === 0 && A.pos.y > 150, `${st0} -> ${P.state}, y ${A.pos.y.toFixed(0)}, gear ${A.gearCmd}, min ${minY.toFixed(0)} m`);
   }
 }
+// ------------------------------------------------------------------ more than one Huey: swapping whole states (swapstate.js)
+// main.js keeps one set of Huey objects (the sim, the AI crew) and swaps the state of every other Huey out through them
+// each frame. A Huey that is swapped in, stepped and swapped out every frame must fly exactly as one that never was.
+{
+  const { swapState } = await import('../game/js/units/commander/swapstate.js');
+  const pad = { x: 120, y: 0, z: -160 }, ground = () => 0, env = { groundY: ground, water: false, ground };
+  const mk = () => { const H = huey(V(0, 40, 0), V(4, 0, -18), 0.3), AI = createHeliAI(); AI.engage(H, () => ({ x: pad.x, y: pad.y, z: pad.z, vx: 0, vz: 0, hdg: null })); return { H, AI }; };
+  const ref = mk();   // never swapped
+  const main = mk(), other = mk();   // "main": the game's one set; "slot": a Huey parked on the ground, swapped through main every step
+  other.H.reset(V(-300, 1.9, 40), 1, true, 1); other.AI.off();
+  const swapAll = () => { swapState(main.H, other.H); swapState(main.AI, other.AI); const t = main.AI.target; main.AI.target = other.AI.target; other.AI.target = t; };
+  const step = (S, ctlBase = { throttle: 1, gov: 'AUTO', fuel: true }) => { const c = S.AI.step(S.H, DT, { ground }) || { cx: 0, cy: 0, pedal: 0, coll: 0 }; S.H.step(DT, { ...ctlBase, ...c }, env); };
+  let maxD = 0, slotY0 = other.H.pos.y;
+  for (let t = 0; t < 40; t += DT) {
+    step(ref);
+    swapAll(); step(main); swapAll();   // the slot (parked) runs through the main objects...
+    step(main);                          // ...then the main Huey flies on in them
+    maxD = Math.max(maxD, ref.H.pos.distanceTo(main.H.pos));
+  }
+  check('huey swap: a Huey stepped through swapped-in objects flies identically', maxD < 1e-6, maxD.toExponential(1) + ' m', '< 1e-6');
+  check('huey swap: the AI phase / target went with her', main.AI.phase === ref.AI.phase && Math.abs(main.AI.err - ref.AI.err) < 1e-6, `${main.AI.phase} / ${ref.AI.phase}`);
+  check('huey swap: the parked one stayed parked (its own skid state)', other.H.landed && Math.abs(other.H.pos.y - slotY0) < 0.1 && other.H.pos.distanceTo(V(-300, other.H.pos.y, 40)) < 0.05, `y ${other.H.pos.y.toFixed(2)}, drift ${other.H.pos.distanceTo(V(-300, other.H.pos.y, 40)).toFixed(3)} m`);
+  const keep = main.H.pos; swapAll(); check('huey swap: references stay valid (contents swapped, not objects)', main.H.pos === keep && main.H.pos.distanceTo(V(-300, main.H.pos.y, 40)) < 0.05, 'H.pos is the same Vector3');
+}
 console.log(`\n${n - fails}/${n} pass`);
 process.exit(fails ? 1 : 0);
