@@ -32,6 +32,7 @@ import { createWingman, wingmanEnv } from './units/commander/wingman.js';
 import { createMotorPool } from './units/wheeled/motorpool.js';   // ngc/wheeledgame: the M151A2, M35A2 and 1980 civilian cars (replace the TEST CAR)
 import { createSeaUniforms, updateSeaUniforms, SEA_VS_DECL, SEA_VS, SEA_FS_DECL, SEA_FS_NORMAL, SEA_FS_FOAM, SEA_FS_WATER, SEA_FS_UNDER } from './units/naval/seasurface.js';   // SEAWORLD: the sea surface
 import { createSeaLife } from './units/naval/sealife.js';   // SEALIFE (ngc/waterfish): fish, the sea bed, the view under water
+import { createWeather } from './weather/index.js'; import { WX_GLSL, WXU, WXF } from './weather/fogshader.js';   // WEATHER: the weather, one fog for everything, LOD crossfades
 import { createWorldSolid } from './world/solid.js';   // SEAWORLD: buildings as colliders, piers and bridges as floors
 import { createInteriors } from './interiors/interiors.js';   // ngc/interiors: enterable buildings, doors / hatches, the ALBATROSS inside
 import { createSeats } from './interiors/seats.js';           // ngc/interiors: passenger seats in the Huey / CH-46, the people in the seats
@@ -422,6 +423,7 @@ const terrainUni = {
   uHMN: { value: HW[0].tex }, uHMF: { value: HW[1].tex }, uHMNo: { value: new THREE.Vector3(-1e6, -1e6, 4) }, uHMFo: { value: new THREE.Vector3(-1e6, -1e6, 16) },
   uFogN: { value: DRAW * 0.5 }, uFogF: { value: DRAW * 0.97 }, uNear: { value: new THREE.Vector3(0, 0, 0) },
   ...createSeaUniforms(),   // SEAWORLD: the live sea's waves, whitecaps, ships for the hull foam
+  wxF: WXU,   // WEATHER: the fog, sky colour, wetness, rain (weather/fogshader.js)
 };
 const terrainVS = `
     varying vec3 vW; varying float vRaw; uniform sampler2D uHM, uHMN, uHMF; uniform vec3 uHMNo, uHMFo;
@@ -464,6 +466,7 @@ const terrainFS = `
     uniform sampler2D uSurf; uniform vec3 uFine; uniform vec3 uSandC[${ISLANDS.length}], uRockC[${ISLANDS.length}];
     ${FOG_GLSL}
     ${SEA_FS_DECL}
+    ${WX_GLSL}
     void main(){
       #ifdef FAR
       if(max(abs(vW.x-uNear.x),abs(vW.z-uNear.y))<uNear.z) discard;   // the fine grid covers this
@@ -524,7 +527,7 @@ const terrainFS = `
         if(d<${(PAD_R + 2.5).toFixed(1)}){ vec3 pc=vec3(.5,.52,.58)*l; if(d<${PAD_R.toFixed(1)}){float r=d/${PAD_R.toFixed(1)}; pc=mix(vec3(.15,.16,.2),uPadCol[pi],step(.5,fract(r*4.)))*l;} c=pc; } }
       c=fogOfWar(c,vW.xz,uTime);
       float fd=length((viewMatrix*vec4(vW,1.)).xyz);
-      gl_FragColor=vec4(mix(c,uFog,smoothstep(uFogN,uFogF,fd)),1.);
+      gl_FragColor=vec4(uSeaK.x>.5||wxF[0].w>.5?mix(c,uFog,smoothstep(uFogN,uFogF,fd)):wxFog(c,vW),1.);   // WEATHER: the world's fog (weather/fogshader.js); under water / the cave view: the old one
     }`;
 const terrain = new THREE.Mesh(terrainGeo, new THREE.ShaderMaterial({ uniforms: terrainUni, vertexShader: terrainVS, fragmentShader: terrainFS }));
 terrain.frustumCulled = false; zScene.add(terrain);
@@ -1187,6 +1190,8 @@ const sealife = createSeaLife({
     if (G.craft === 'foot' && foot.exists) { const f = foot.frame(_slF); if (f.y < 0.3 && isWater(f.x, f.z)) S.point(f.x, f.y + 0.6, f.z, 4.5, 0.65, 0, 0, 2.5); }   // a man in the water
   },
 });
+// WEATHER (weather/): the weather and the one fog that hides every level-of-detail switch and everything not loaded yet
+const weather = createWeather({ scene: zScene, sky, sun, war, fx, sfx, feed, terrainUni, view, HW, BOUND, terrainH, groundY, isWater, world, interiors: () => interiors, params });
 // --- ground vehicles (ngc/wheeledgame): the WHEELED M151A2s, M35A2s and civilian cars, through units/wheeled/motorpool.js
 const vehCtx = {
   scene: zScene, GR, crafts, war, fx, sfx, say, feed, keyDown: kd, CTL, hwOn: () => !keyboardOnly, camZ: () => zCam,
@@ -2200,7 +2205,8 @@ function updateCamsAndMeshes(dt, time) {
   const jetCk = jet && cockpitCam && (G.craft === 'tomcat' ? tomcatC.firstPerson() : JP.alive && !JP.ejected);
   const heliCk = cockpitCam && !inCave && Z.alive && G.craft === 'heli' && !drop.camActive, firstP = otherFP || heliCk || drop.cockpitView;
   const fov = lerp(firstP ? (otherFP && crafts.active.fov ? crafts.active.fov(ckFov) : ckFov) : 62, SIDE_FOV, e); if (Math.abs(zCam.fov - fov) > 0.01) { zCam.fov = fov; zCam.updateProjectionMatrix(); }
-  zScene.fog.color.copy(HORIZON).multiplyScalar(1 - 0.85 * e); zScene.fog.near = lerp(view.draw * 0.5, DRAW * 0.8, e); zScene.fog.far = lerp(view.draw, DRAW, e);
+  weather.update(G.state === 'paused' ? 0 : dt, zCam, { draw: view.draw, cave: e });   // WEATHER: the sky, the fog (draw distance, weather, what is loaded), rain, lightning
+  if (e > 0) { WXF[3] = 1; zScene.fog.color.copy(HORIZON).multiplyScalar(1 - 0.85 * e); zScene.fog.near = lerp(view.draw * 0.5, DRAW * 0.8, e); zScene.fog.far = lerp(view.draw, DRAW, e); }   // the cave view: the old dark fog
   terrainUni.uFogN.value = view.draw * 0.5; terrainUni.uFogF.value = view.draw * 0.97;
   if (Math.abs(zCam.far - (view.draw + 15)) > 2) { zCam.far = view.draw + 15; zCam.updateProjectionMatrix(); }
   sky.scale.setScalar(view.draw / DRAW);
@@ -2311,4 +2317,4 @@ function frame(now) {
 const PROF = { sim: 0, prep: 0, render: 0 };
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, weather, fleet, commander, roster, heliAI, autoNext, killPlayerZ }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }

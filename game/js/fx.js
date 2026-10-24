@@ -26,11 +26,12 @@ const puffTex = canvasTex(128, (x, s) => {   // lumpy smoke puff: a few overlapp
 // ------------------------------------------------------------------------------------------- particles
 const PVS = `
 attribute float aSize; attribute vec4 aCol; varying vec4 vCol; varying float vFog;
-uniform float uScale, uFogNear, uFogFar;
+uniform float uScale, uFogNear, uFogFar, uFogK;
+float wxCurve(float d){ float t=clamp((d-uFogNear)/max(uFogFar-uFogNear,1.),0.,1.); return uFogK>.01?(1.-exp(-uFogK*t))/(1.-exp(-uFogK)):t; }   // WEATHER: the world's fog curve (weather/fogshader.js), radial
 void main(){
   vCol=aCol; vec4 mv=modelViewMatrix*vec4(position,1.); gl_Position=projectionMatrix*mv;
   float z=-mv.z, near=smoothstep(aSize*.6,aSize*.6+5.,z);   // fade out puffs about to swallow the camera
-  vCol.a*=near; gl_PointSize=near<.01?0.:min(aSize*uScale/max(z,.1),500.); vFog=smoothstep(uFogNear,uFogFar,z);
+  vCol.a*=near; gl_PointSize=near<.01?0.:min(aSize*uScale/max(z,.1),500.); vFog=wxCurve(length(mv.xyz));
 }`;
 const PFS_ADD = `uniform sampler2D map; varying vec4 vCol; varying float vFog;
 void main(){ float a=texture2D(map,gl_PointCoord).a*vCol.a*(1.-vFog); if(a<.003) discard; gl_FragColor=vec4(vCol.rgb*a,1.); }`;
@@ -48,7 +49,7 @@ class Pool {
     g.setAttribute('position', new THREE.BufferAttribute(this.p, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('aCol', new THREE.BufferAttribute(this.col, 4).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
-    this.uni = { map: { value: tex }, uScale: { value: 600 }, uFogNear: { value: 125 }, uFogFar: { value: 250 }, uFogCol: { value: new THREE.Color() } };
+    this.uni = { map: { value: tex }, uScale: { value: 600 }, uFogNear: { value: 125 }, uFogFar: { value: 250 }, uFogK: { value: 0 }, uFogCol: { value: new THREE.Color() } };
     this.obj = new THREE.Points(g, new THREE.ShaderMaterial({
       uniforms: this.uni, vertexShader: PVS, fragmentShader: additive ? PFS_ADD : PFS_MIX, transparent: true, depthWrite: false,
       blending: additive ? THREE.CustomBlending : THREE.NormalBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -109,9 +110,10 @@ const decalAtlas = canvasTex(256, (x, s) => {
     x.fillStyle = g; x.fillRect(h, h, h, h);
   }
 });
-const DVS = `attribute vec4 aD; varying vec2 vUv; varying float vA; varying float vFog; uniform float uFogNear, uFogFar;
+const DVS = `attribute vec4 aD; varying vec2 vUv; varying float vA; varying float vFog; uniform float uFogNear, uFogFar, uFogK;
+float wxCurve(float d){ float t=clamp((d-uFogNear)/max(uFogFar-uFogNear,1.),0.,1.); return uFogK>.01?(1.-exp(-uFogK*t))/(1.-exp(-uFogK)):t; }
 void main(){ vA=aD.z; float tx=mod(aD.w,2.), ty=floor(aD.w/2.); vUv=vec2((uv.x+tx)*.5,(uv.y+1.-ty)*.5);   // tile 0,1 top row of the canvas
-  vec4 mv=modelViewMatrix*instanceMatrix*vec4(position,1.); gl_Position=projectionMatrix*mv; vFog=smoothstep(uFogNear,uFogFar,-mv.z); }`;
+  vec4 mv=modelViewMatrix*instanceMatrix*vec4(position,1.); gl_Position=projectionMatrix*mv; vFog=wxCurve(length(mv.xyz)); }`;
 const DFS = `uniform sampler2D map; uniform vec3 uTint; varying vec2 vUv; varying float vA; varying float vFog;
 void main(){ vec4 c=texture2D(map,vUv); float a=c.a*vA*(1.-vFog); if(a<.004) discard; gl_FragColor=vec4(c.rgb*uTint,a); }`;
 class Decals {
@@ -119,7 +121,7 @@ class Decals {
     this.max = max; this.n = 0; this.next = 0; this.items = [];
     const geo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     this.ad = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4); this.ad.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aD', this.ad);
-    this.uni = { map: { value: decalAtlas }, uTint: { value: new THREE.Color(1, 1, 1) }, uFogNear: { value: 125 }, uFogFar: { value: 250 } };
+    this.uni = { map: { value: decalAtlas }, uTint: { value: new THREE.Color(1, 1, 1) }, uFogNear: { value: 125 }, uFogFar: { value: 250 }, uFogK: { value: 0 } };
     this.mesh = new THREE.InstancedMesh(geo, new THREE.ShaderMaterial({ uniforms: this.uni, vertexShader: DVS, fragmentShader: DFS, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), max);
     this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.renderOrder = renderOrder; scene.add(this.mesh);
     this.m = new THREE.Matrix4(); this.q = new THREE.Quaternion(); this.s = new THREE.Vector3(); this.pv = new THREE.Vector3(); this.up = new THREE.Vector3(0, 1, 0); this.nrm = new THREE.Vector3(); this.qy = new THREE.Quaternion();
@@ -195,8 +197,8 @@ export function createFx(scene, { groundY, isWater, normalAt }) {
     emitters: [], wind: new THREE.Vector2(1.2, 0.5), shake: 0, groundY, isWater, time: 0, ear: new THREE.Vector3(),
     setView(cam, heightPx, fog) {
       const sc = heightPx / (2 * Math.tan(cam.fov * Math.PI / 360));
-      for (const p of [fx.add, fx.mix]) { p.uni.uScale.value = sc; p.uni.uFogNear.value = fog.near; p.uni.uFogFar.value = fog.far; p.uni.uFogCol.value.copy(fog.color); }
-      for (const d of [fx.scorch, fx.water]) { d.uni.uFogNear.value = fog.near; d.uni.uFogFar.value = fog.far; }
+      for (const p of [fx.add, fx.mix]) { p.uni.uScale.value = sc; p.uni.uFogNear.value = fog.near; p.uni.uFogFar.value = fog.far; p.uni.uFogK.value = fog.k || 0; p.uni.uFogCol.value.copy(fog.color).convertLinearToSRGB(); }   // WEATHER: fog.k = the curve; colour in display space (the shader writes it raw)
+      for (const d of [fx.scorch, fx.water]) { d.uni.uFogNear.value = fog.near; d.uni.uFogFar.value = fog.far; d.uni.uFogK.value = fog.k || 0; }
     },
     // ---- recipes
     flash(x, y, z, s) { fx.add.spawn(x, y, z, 0, 0, 0, 0.16, 5 * s, 10 * s, 1, .85, .55, 1); },
@@ -262,7 +264,7 @@ export function createFx(scene, { groundY, isWater, normalAt }) {
     trail(x, y, z, k = 1) { fx.mix.spawn(x, y, z, rnd(-.3, .3), rnd(0.2, 0.8), rnd(-.3, .3), rnd(1.5, 3) * k, 0.6, 2.6 * k, .3, .3, .3, 0.5, -0.3, 1, 0.6); },
     update(dt) {
       fx.time += dt;
-      fx.wind.set(1.4 * Math.cos(fx.time * 0.013) + 0.6, 1.4 * Math.sin(fx.time * 0.011));
+      if (!fx.windHold) fx.wind.set(1.4 * Math.cos(fx.time * 0.013) + 0.6, 1.4 * Math.sin(fx.time * 0.011));   // WEATHER: weather/index.js sets fx.wind from the weather (windHold)
       for (let i = fx.emitters.length - 1; i >= 0; i--) {
         const e = fx.emitters[i];
         if (e.follow) { e.x = e.follow.x + (e.ox || 0); e.y = e.follow.y + (e.oy || 0); e.z = e.follow.z + (e.oz || 0); if (e.follow.gone) e.follow = null; }
