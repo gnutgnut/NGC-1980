@@ -18,8 +18,13 @@ export default async function (h) {
   await h.waitFor('window.__G', 10000);
   await h.key('tap', 'Enter'); await h.wait(1500);
   await h.eval(`(__G.G.bench = true, __G.ISLANDS.filter(I => I.structs.some(s => s.kind === 'aa')).map(I => I.name + ': ' + I.structs.filter(s => s.kind === 'aa').map(s => s.def && s.def.type).join('/')))`);
-  await h.expect(`__G.ISLANDS.every(I => I.structs.filter(s => s.kind === 'aa').every(s => s.def && (I.owner === 1 ? s.def.type === 'shilka' : ['talon', 'lance'].includes(s.def.type))))`);
+  await h.expect(`__G.ISLANDS.every(I => I.structs.filter(s => s.kind === 'aa').every(s => s.def && (I.owner === 1 ? ['shilka', 'zu23'].includes(s.def.type) : ['talon', 'lance'].includes(s.def.type))))`);
   await h.expect(`__G.war.carrier.guns.map(g => g.def.type).sort().join() === 'ciws,ciws,sparrow,sparrow'`);
+  // defence polish: every island gun sits in its revetment the way it drove in - nose to the pad, the turret on the slot
+  await h.eval(`(window.__seat = __G.ISLANDS.flatMap(I => I.structs.filter(s => s.kind === 'aa' && !s.dead).map(s => { const T = __G.THREE, m = s.mesh, f = new T.Vector3(0, 0, -1).applyQuaternion(m.quaternion), p = I.pad;
+    const tp = m.userData.yaw.getWorldPosition(new T.Vector3()), l = Math.hypot(p.x - s.x, p.z - s.z);
+    return { t: s.def.type, face: +((f.x * (p.x - s.x) + f.z * (p.z - s.z)) / Math.hypot(f.x, f.z) / l).toFixed(3), off: +Math.hypot(tp.x - s.x, tp.z - s.z).toFixed(2) }; })), __seat.slice(0, 8))`);
+  await h.expect(`__seat.length > 10 && __seat.every(q => q.face > 0.97 && q.off < 1.2)`);
   await h.eval(OVERRIDE);
   // the ALBATROSS's fit: a close-in gun and a missile box at each end
   await h.eval(`(window.__cg = __G.war.carrier.guns[0].mesh.getWorldPosition(new __G.THREE.Vector3()), window.__cg2 = __G.war.carrier.guns[1].mesh.getWorldPosition(new __G.THREE.Vector3()), 1)`);
@@ -29,15 +34,15 @@ export default async function (h) {
   await h.wait(1200); await h.shot('albatross-bow-mounts');
   await h.eval(look('__cg', 9, 2.3, 0.15, 1.6)); await h.wait(600); await h.shot('albatross-ciws');
   await h.eval(look('__cg2', 11, -2.4, 0.18, 1.6)); await h.wait(600); await h.shot('albatross-sparrow');
-  for (const [isl, type, dist, brg, el] of [['HOME ISLAND', 'shilka', 14, 0.7, 0.25], ['ANVIL', 'talon', 20, 0.6, 0.22], ['IRONHOLD', 'lance', 14, 0.5, 0.18], ['IRONHOLD', 'talon', 20, -0.6, 0.25]]) {
-    await h.eval(`(() => { window.__s = __G.ISLANDS.find(I => I.name === '${isl}').structs.find(s => s.def && s.def.type === '${type}'); return 1; })()`);
+  for (const [isl, type, dist, brg, el] of [['HOME ISLAND', 'shilka|zu23', 14, 0.7, 0.25], ['ANVIL', 'talon', 20, 0.6, 0.22], ['IRONHOLD', 'lance', 14, 0.5, 0.18], ['IRONHOLD', 'talon', 20, -0.6, 0.25]]) {
+    await h.eval(`(() => { window.__s = __G.ISLANDS.find(I => I.name === '${isl}').structs.find(s => s.def && /^(${type})$/.test(s.def.type)); return 1; })()`);
     await h.eval(park('__s.x', '__s.z', 40, 25));
     await h.eval(look('__s', dist, brg, el, 1.6));
-    await h.wait(1500); await h.shot(`${type}-${isl.split(' ')[0].toLowerCase()}`);
+    await h.wait(1500); await h.shot(`${type.replace('|', '-')}-${isl.split(' ')[0].toLowerCase()}`);
   }
   // command 2 builds an M163 on our island
   await h.eval(`(() => { __G.G.mat = 200; const I = __G.ISLANDS.find(I => I.name === 'PELICAN'); __G.selIsl = I; __G.command(2); const s = I.structs.filter(s => s.kind === 'aa').pop(); window.__v = s; s.building = 0.01; return s.def.type; })()`);
-  await h.expect(`__v.def.type === 'vads'`);
+  await h.expect(`['vads', 'vadst'].includes(__v.def.type)`);
   await h.eval(park('__v.x', '__v.z', 40, 25));
   await h.eval(look('__v', 12, 0.8, 0.22, 1.4));
   await h.wait(1500); await h.shot('vads-pelican');

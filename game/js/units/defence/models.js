@@ -2,7 +2,7 @@
 // Local frame: +y up, front along -z, origin on the ground (or the deck) under the turret ring.
 //
 // Every builder returns a THREE.Group whose userData is the contract with brain.js / war.js:
-//   type     DEF key ('vads' | 'shilka' | 'ciws' | 'sparrow' | 'talon' | 'lance')
+//   type     DEF key ('vads' | 'vadst' | 'shilka' | 'zu23' | 'ciws' | 'sparrow' | 'talon' | 'lance' | 'talonm' | 'lancem')
 //   yaw      Group turning about y (traverse);  pitch: Group turning about x (elevation, + = up), child of yaw
 //   spin     [Group] barrel clusters, spun about their local z
 //   radar    Group spun about y while searching (null if none); dish: Group tilted to the target while tracking
@@ -10,8 +10,12 @@
 //   lamp     the tell lamp (MeshBasic, its own material); flashes: [Mesh] muzzle flash stars (hidden)
 //   team     the team-colour material (war.js recolours by identity);  glow: emissive material (LANCE seams, lens)
 //   lens     LANCE emitter tip in the pitch frame;  vents: radiator points in the yaw frame
+//   eject    where spent cases / links leave the gun (pitch frame);  sens: the LANCE's sweeping sensor head
+//   slotZ    hull z of the turret ring: brain.js seat() puts that point on the AA slot
+//   crewSpots [{ role: 'gunner' | 'hatch' | 'spotter' | 'loader' | 'tick', kit, parent, p | home / ammo / gun / deck }]
 import * as THREE from 'three';
-import { paint, lam, basic, box, cyl, prism, prismZ, sphere, group, star, bake } from './kit.js';
+import { paint, lam, basic, box, cyl, prism, prismZ, sphere, group, star, bake, BAKED } from './kit.js';
+import { makeCrew, makeTick, HIP } from './crew.js';
 
 const TEAM = { 0: 0xc8c8bc, 1: 0x33bbff, 2: 0xff3322 };
 const teamMat = side => lam(TEAM[side], { emissive: side === 1 ? 0x0a2a44 : side === 2 ? 0x440a06 : 0x222222 });
@@ -78,14 +82,13 @@ function tracks(p, { xc, w, n, r, zA, zB, sprZ, sprY, sprR, idlZ, idlY, idlR, ma
     run(fz, fy + fr + 0.05, rz, ry + rr + 0.05, 1);                                      // top run
   }
 }
-// a seated crewman (open turret / hatch): torso, arms on the controls, head in a helmet
-function crewman(p, x, y, z, kit, helm, { soviet = false } = {}) {
-  const g = group(p, x, y, z);
-  box(g, kit, 0.44, 0.55, 0.3, 0, 0.28, 0); box(g, kit, 0.12, 0.4, 0.12, -0.25, 0.3, -0.12, 0.6); box(g, kit, 0.12, 0.4, 0.12, 0.25, 0.3, -0.12, 0.6);
-  box(g, P.skin, 0.2, 0.22, 0.2, 0, 0.68, 0);
-  if (soviet) { sphere(g, helm, 0.15, 0, 0.78, 0.01, 8, 5, Math.PI * 2, Math.PI / 2); box(g, helm, 0.34, 0.06, 0.3, 0, 0.75, 0.02); }   // padded tanker's helmet
-  else { sphere(g, helm, 0.17, 0, 0.76, 0, 9, 5, Math.PI * 2, Math.PI / 2); cyl(g, helm, 0.19, 0.19, 0.03, 0, 0.76, 0, 'y', 9); }   // M1 steel pot with its brim
-  return g;
+// (crews are animated figures from crew.js, placed per instance from ud.crewSpots - see buildDefence below)
+// ready-use ammunition: a small stack of boxes on the ground (the loaders fetch from here), yellow-banded lids
+function readyAmmo(p, x, z, ry, m) {
+  const s = group(p, x, 0, z); s.rotation.y = ry;
+  for (let k = 0; k < 5; k++) { const u = (k % 3 - 1) * 0.47, v = 0.125 + Math.floor(k / 3) * 0.25; box(s, m, 0.44, 0.25, 0.22, u, v, 0, 0, (k * 0.37 % 0.2) - 0.1); box(s, P.yellow, 0.45, 0.04, 0.23, u, v + 0.065, 0, 0, (k * 0.37 % 0.2) - 0.1); }
+  box(s, P.canvas, 1.5, 0.05, 0.6, 0, 0.02, 0.05);                                                        // a tarp under them
+  return s;
 }
 function finish(g, ud, opts) { g.userData = ud; bake(g, { seed: SEED++, ...opts }); return g; }
 
@@ -124,7 +127,7 @@ export function buildVADS(side = 1) {
   prismZ(yaw, P.od, [[-0.95, 0.18], [0.95, 0.18], [0.92, 0.62], [-0.92, 0.62]], 0.6, 0.55);         // rear armour of the tub
   for (const sd of [-1, 1]) box(yaw, P.od, 0.05, 0.42, 1.2, sd * 0.93, 0.4, 0.05);
   box(yaw, P.steel, 0.5, 0.06, 0.4, 0.15, 0.48, 0.3);                                                  // the gunner's seat pan
-  crewman(yaw, 0.15, 0.48, 0.32, P.od, P.helmet);
+  // (the gunner is an animated crew figure: crewSpots below)
   box(yaw, P.odDark, 0.5, 0.5, 0.4, 0.15, 0.95, -0.1);                                                 // sight head
   box(yaw, P.glass, 0.4, 0.3, 0.03, 0.15, 1.08, -0.3, -0.2);
   const pitch = group(yaw, -0.32, 0.75, -0.2); pitch.userData.part = true;
@@ -137,7 +140,13 @@ export function buildVADS(side = 1) {
   cyl(radar, P.od, 0.24, 0.27, 0.42, 0, 0, 0, 'z', 10); sphere(radar, P.odDark, 0.24, 0, 0, -0.21, 10, 6, Math.PI * 2, Math.PI / 2).rotation.x = -Math.PI / 2;
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), lampMat(0xffaa22)); lamp.position.set(0.15, 1.28, 0.05); yaw.add(lamp);
   const fl = flash(pitch, -0.08, 0.02, -1.85, 0.7);
-  return finish(g, { type: 'vads', yaw, pitch, spin: [barrels], radar: null, dish: null, muzzles: [V(-0.08, 0.02, -1.85)], lamp, flashes: [fl], team, h: 2.7 });
+  readyAmmo(g, 1.45, 3.35, 0.3, P.od);                                                                    // ready-use boxes on the ground behind
+  return finish(g, { type: 'vads', yaw, pitch, spin: [barrels], radar: null, dish: null, muzzles: [V(-0.08, 0.02, -1.85)], eject: V(0.22, -0.15, 0.35), lamp, flashes: [fl], team, h: 2.7, slotZ: 0.45,
+    crewSpots: [
+      { role: 'gunner', kit: 'us', parent: 'yaw', p: [0.15, 0.51, 0.34] },
+      { role: 'hatch', kit: 'us', parent: 'hull', p: [-0.55, 1.83, -1.2], low: true },
+      { role: 'loader', kit: 'us', parent: 'root', home: [2.05, 1.2], ammo: [1.45, 2.95], gun: [1.55, 0.6] },
+    ] });
 }
 
 // =========================================================================== ZSU-23-4 SHILKA (player: Soviet contingent)
@@ -160,7 +169,7 @@ export function buildShilka(side = 1) {
   prism(yaw, P.sovGreen, [[-1.45, 0.05], [-1.7, 0.45], [-1.2, 0.85], [1.65, 0.85], [1.7, 0.05]], 2.9);
   for (const sd of [-1, 1]) box(yaw, P.sovDark, 0.12, 0.45, 2.2, sd * 1.5, 0.5, 0.3);                              // side panniers
   box(yaw, P.sovDark, 1.6, 0.15, 0.8, 0, 0.92, 0.6); cyl(yaw, P.sovGreen, 0.3, 0.3, 0.1, -0.6, 0.92, 0.1, 'y', 10); cyl(yaw, P.sovGreen, 0.3, 0.3, 0.1, 0.6, 0.92, 0.1, 'y', 10);   // commander's / gunner's hatches
-  crewman(yaw, -0.6, 0.62, 0.1, P.sovDark, P.helmet, { soviet: true });
+  // (the commander in his hatch is an animated crew figure: crewSpots below)
   for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) box(yaw, P.black, 0.12, 0.09, 0.08, sd * 0.6 + (i - 1) * 0.16, 1.02, -0.25);   // periscopes
   box(yaw, P.black, 0.7, 0.2, 0.12, 0.55, 0.95, -0.55);                                                              // optical sight box
   for (const sd of [-1, 1]) star(yaw, P.red, 0.24, sd * 1.565, 0.5, -0.6, sd * Math.PI / 2);
@@ -184,7 +193,14 @@ export function buildShilka(side = 1) {
   cyl(dish, P.steel, 0.025, 0.025, 0.5, 0, 0, -0.05, 'z', 4); cyl(dish, P.sovDark, 0.08, 0.08, 0.12, 0, 0, -0.32, 'z', 6);   // feed horn
   for (const sd of [-1, 1]) box(dish, P.steel, 0.03, 0.03, 0.5, sd * 0.32, 0, -0.1, 0, sd * 0.5);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), lampMat(0xffaa22)); lamp.position.set(-0.9, 1.0, 0.9); yaw.add(lamp);
-  return finish(g, { type: 'shilka', yaw, pitch, spin: [], radar, dish, muzzles, lamp, flashes, team, h: 3.1 });
+  for (const sd of [-1, 1]) readyAmmo(g, sd * 2.45, 1.7, sd * 0.2 + 1.57, P.sovDark);
+  return finish(g, { type: 'shilka', yaw, pitch, spin: [], radar, dish, muzzles, eject: V(0, -0.32, 0.25), lamp, flashes, team, h: 3.1, slotZ: -0.5,
+    crewSpots: [
+      { role: 'hatch', kit: 'tank', parent: 'yaw', p: [-0.6, 0.92, 0.1] },
+      { role: 'hatch', kit: 'tank', parent: 'hull', p: [-0.55, 1.42, -2.0], low: true },
+      { role: 'loader', kit: 'tank', parent: 'root', home: [2.5, -1.6], ammo: [2.45, 1.3], gun: [1.9, -0.9] },
+      { role: 'loader', kit: 'tank', parent: 'root', home: [-2.5, 0.2], ammo: [-2.45, 1.3], gun: [-1.9, -0.9] },
+    ] });
 }
 
 // =========================================================================== ALBATROSS close-in gun (white dome)
@@ -330,7 +346,10 @@ export function buildTalon(side = 2, opts = {}) {
     box(pitch, P.rwDark, 0.7, 0.06, 2.4, px, py + 0.26, -0.6); box(pitch, P.rwDark, 0.7, 0.06, 2.4, px, py - 0.26, -0.6);
   }
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 4), lampMat(0xff2a1a)); lamp.position.set(0, 1.86, -0.6); yaw.add(lamp);
-  return finish(g, { type: 'talon', yaw, pitch, spin: [], radar, dish, muzzles, cells, lamp, flashes, team, h: 3.9 });
+  // RUNAWAY reload: a rack of spare missile canisters on the rear deck, worked by the TICK service machine (crew.js)
+  if (!opts.mount) { const rk = group(body, -0.7, 1.7, 3.95); box(rk, P.rwDark, 0.7, 0.08, 0.5, 0, 0.04, 0); for (let k = 0; k < 3; k++) cyl(rk, P.rwGreen, 0.1, 0.1, 0.9, -0.22 + k * 0.22, 0.2, 0, 'z', 8); box(rk, P.ceramic, 0.12, 0.3, 0.5, 0.36, 0.2, 0); }
+  return finish(g, { type: 'talon', yaw, pitch, spin: [], radar, dish, muzzles, cells, eject: V(1.25, -0.6, 0.4), lamp, flashes, team, h: 3.9, slotZ: opts.mount ? 0 : 2.3,
+    crewSpots: opts.mount ? [] : [{ role: 'tick', kit: 'tick', parent: 'root', home: [2.0, 0, 3.7], deck: [0.85, 1.7, 4.0] }] });
 }
 
 // =========================================================================== RW-5 LANCE laser turret (RUNAWAY)
@@ -374,7 +393,7 @@ export function buildLance(side = 2) {
   // RW-5 stencil glyph on the left flank (machine marks, not letters)
   for (const [dy, dz, h, d] of [[0.1, -0.25, 0.25, 0.05], [0.1, -0.12, 0.05, 0.22], [0.0, 0.05, 0.25, 0.05], [0.18, 0.18, 0.05, 0.18], [0.0, 0.3, 0.12, 0.05]]) box(yaw, P.stencil, 0.02, h, d, -0.76, 0.95 + dy, dz);
   // sensor head on the left: angular, three lenses and a status point
-  const sens = group(yaw, -0.95, 1.05, -0.75);
+  const sens = group(yaw, -0.95, 1.05, -0.75); sens.userData.part = true;   // sweeps while searching (brain.js)
   prismZ(sens, P.composite, [[-0.28, -0.3], [0.2, -0.32], [0.3, 0.1], [0.05, 0.35], [-0.3, 0.25]], 0.75, 0);
   box(sens, P.ceramic, 0.6, 0.08, 0.8, 0, 0.36, 0.02);
   for (const [x, y, r] of [[-0.05, 0.08, 0.13], [0.12, -0.15, 0.08], [-0.17, -0.17, 0.06]]) cyl(sens, P.lensDark, r, r, 0.06, x, y, -0.39, 'z', 10);
@@ -395,9 +414,213 @@ export function buildLance(side = 2) {
   box(pitch, P.composite, 0.1, 0.18, 2.6, 0.24, 0.17, -1.6);                                                                                          // conduit along the tube
   const lens = new THREE.Mesh(new THREE.CircleGeometry(0.27, 16), glow); lens.rotation.y = Math.PI; lens.position.set(0, 0, -3.95); pitch.add(lens);
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), lampMat(0x6fe8ff)); lamp.position.set(-0.85, 1.48, -0.7); yaw.add(lamp);
-  return finish(g, { type: 'lance', yaw, pitch, spin: [], radar: null, dish: null, muzzles: [V(0, 0, -4.0)], lens: V(0, 0, -4.0), vents, lamp, flashes: [], team, glow, finM, h: 4.0 }, { mudH: 0.6 });
+  return finish(g, { type: 'lance', yaw, pitch, spin: [], radar: null, dish: null, sens, muzzles: [V(0, 0, -4.0)], lens: V(0, 0, -4.0), vents, lamp, flashes: [], team, glow, finM, h: 4.0 }, { mudH: 0.6 });
 }
 
-export const BUILD = { vads: buildVADS, shilka: buildShilka, ciws: buildCIWS, sparrow: buildSparrow, talon: buildTalon, lance: buildLance,
+// =========================================================================== M167 VADS, towed (player, command 2)
+// The towed Vulcan of the US light divisions and the Marines in 1980: the M163's gun, range-only radar and open gunner's
+// mount on a two-wheel M42 carriage. Emplaced it sits on three levelling jacks with the wheels raised clear and the
+// drawbar folded up; the gunner rides the mount, the loader and the squad leader (spotter) work round it. About 4.9 m
+// long with the drawbar, 2 m wide. Olive drab, white star on the beam.
+export function buildM167(side = 1) {
+  const g = new THREE.Group(), team = teamMat(side), base = group(g); base.userData.part = true;
+  box(base, P.od, 0.5, 0.32, 3.3, 0, 0.45, 0.2);                                                         // the carriage's box beam
+  box(base, P.odDark, 1.7, 0.22, 0.42, 0, 0.47, 0.9);                                                     // axle beam
+  for (const sd of [-1, 1]) {
+    cyl(base, P.rubber, 0.42, 0.42, 0.26, sd * 1.0, 0.74, 0.9, 'x', 14); cyl(base, P.od, 0.25, 0.25, 0.28, sd * 1.0, 0.74, 0.9, 'x', 10); cyl(base, P.steel, 0.08, 0.08, 0.3, sd * 1.0, 0.74, 0.9, 'x', 6);   // wheel, raised clear
+    for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2; box(base, P.rubber, 0.27, 0.04, 0.09, sd * 1.0, 0.74 + Math.sin(a) * 0.42, 0.9 + Math.cos(a) * 0.42, a); }   // tread
+    box(base, P.od, 0.3, 0.05, 0.95, sd * 1.0, 1.2, 0.9); box(base, P.od, 0.3, 0.3, 0.05, sd * 1.0, 1.06, 0.43, 0.4);   // mudguard
+    strut(base, P.od, [sd * 0.25, 0.42, -0.35], [sd * 1.5, 0.22, -0.7], 0.14, 0.14);                        // outrigger
+    cyl(base, P.steel, 0.05, 0.05, 0.32, sd * 1.5, 0.18, -0.7, 'y', 6); cyl(base, P.odDark, 0.2, 0.2, 0.05, sd * 1.5, 0.025, -0.7, 'y', 8);   // jack and pad
+    box(base, P.red, 0.08, 0.06, 0.03, sd * 0.18, 0.5, 1.87);                                               // tail lights
+  }
+  cyl(base, P.steel, 0.06, 0.06, 0.45, 0, 0.22, 1.72, 'y', 6); cyl(base, P.odDark, 0.22, 0.22, 0.05, 0, 0.025, 1.72, 'y', 8);   // rear jack
+  cyl(base, P.steel, 0.06, 0.06, 0.45, 0, 0.22, -1.32, 'y', 6); cyl(base, P.odDark, 0.22, 0.22, 0.05, 0, 0.025, -1.32, 'y', 8); // front jack
+  strut(base, P.od, [0, 0.52, -1.42], [0, 1.2, -2.05], 0.12, 0.12); cyl(base, P.steel, 0.11, 0.11, 0.05, 0, 1.25, -2.1, 'x', 10);   // drawbar folded up, lunette
+  box(base, P.odDark, 0.4, 0.3, 0.3, 0, 0.75, 1.45); box(base, P.stencil, 0.3, 0.05, 0.01, 0, 0.8, 1.6);    // tool box with its stencil
+  star(base, P.stencil, 0.15, 0.252, 0.45, -0.6, Math.PI / 2); star(base, P.stencil, 0.15, -0.252, 0.45, -0.6, -Math.PI / 2);
+  // the mount: turntable, drive box under the seat, the seat, the sight head with its hand grips
+  const yaw = group(g, 0, 0.62, 0); yaw.userData.part = true;
+  cyl(yaw, P.od, 0.78, 0.84, 0.16, 0, 0.08, 0, 'y', 14);
+  box(yaw, P.odDark, 0.95, 0.5, 0.75, 0.25, 0.41, 0.4);
+  box(yaw, P.steel, 0.46, 0.06, 0.42, 0.25, 0.69, 0.42); box(yaw, P.od, 0.46, 0.5, 0.06, 0.25, 0.97, 0.66, -0.15);   // seat pan and back
+  cyl(yaw, P.od, 0.05, 0.05, 0.6, 0.25, 0.85, -0.12, 'y', 6);
+  box(yaw, P.odDark, 0.44, 0.42, 0.34, 0.25, 1.2, -0.15); box(yaw, P.glass, 0.34, 0.24, 0.03, 0.25, 1.28, -0.33, -0.2);   // sight head
+  for (const sd of [-1, 1]) box(yaw, P.black, 0.07, 0.07, 0.26, 0.25 + sd * 0.22, 0.95, -0.28);           // hand grips
+  { const pnl = box(yaw, team, 0.5, 0.02, 0.4, 0.25, 0.665, 0.0); pnl.userData.keep = true; }
+  for (const sd of [-1, 1]) box(yaw, P.od, 0.05, 0.28, 0.6, -0.45 + sd * 0.28, 0.3, -0.05);               // gun cradle cheeks
+  const pitch = group(yaw, -0.45, 0.72, -0.08); pitch.userData.part = true;
+  cyl(pitch, P.od, 0.16, 0.16, 0.7, 0, 0, 0, 'x', 10);
+  box(pitch, P.odDark, 0.42, 0.4, 0.9, 0, -0.04, 0.22);                                                   // feeder / receiver
+  cyl(pitch, P.odDark, 0.3, 0.3, 0.52, -0.02, -0.18, 0.7, 'x', 12); cyl(pitch, P.steel, 0.31, 0.31, 0.04, -0.28, -0.18, 0.7, 'x', 12);   // the linkless drum
+  const sp = group(pitch, 0, 0.02, -0.25); const barrels = rotary(sp, 1.55, 0.034, 0.09, { clamps: 2, housing: 0.2 });
+  box(pitch, P.od, 0.85, 0.1, 0.1, 0.5, 0.05, -0.1);                                                      // radar arm across to the right
+  const radar = group(pitch, 1.0, 0.12, -0.12); radar.userData.part = true;
+  cyl(radar, P.od, 0.22, 0.25, 0.4, 0, 0, 0, 'z', 10); sphere(radar, P.odDark, 0.22, 0, 0, -0.2, 10, 6, Math.PI * 2, Math.PI / 2).rotation.x = -Math.PI / 2;
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), lampMat(0xffaa22)); lamp.position.set(0.25, 1.45, -0.05); yaw.add(lamp);
+  const fl = flash(pitch, 0, 0.02, -1.85, 0.7);
+  readyAmmo(g, 2.05, 3.0, 0.15, P.od);
+  return finish(g, { type: 'vadst', yaw, pitch, spin: [barrels], radar: null, dish: null, muzzles: [V(0, 0.02, -1.85)], eject: V(0.25, -0.2, 0.3), lamp, flashes: [fl], team, h: 2.0, slotZ: 0,
+    crewSpots: [
+      { role: 'gunner', kit: 'us', parent: 'yaw', p: [0.25, 0.72, 0.44] },
+      { role: 'spotter', kit: 'us', parent: 'root', home: [-2.1, -0.4] },
+      { role: 'loader', kit: 'us', parent: 'root', home: [1.85, 1.3], ammo: [2.0, 2.6], gun: [0.95, 0.75] },
+    ] });
+}
+
+// =========================================================================== ZU-23-2 (player: the Soviet contingent)
+// The Soviet towed twin 23 mm: two guns side by side in a light cradle on a rotating mount, emplaced on its three-point
+// base with the wheels swung up off the ground. Two men ride it (the gunner on the left behind the optical sight, the
+// second on the right at the traverse wheel); two more swap the 50-round box magazines. Trunnions about 1.1 m up,
+// barrels ~2 m. Soviet green.
+export function buildZU23(side = 1) {
+  const g = new THREE.Group(), team = teamMat(side), base = group(g); base.userData.part = true;
+  box(base, P.sovGreen, 0.95, 0.22, 0.95, 0, 0.32, 0);                                                   // the base's centre box
+  for (const [px, pz] of [[0, -1.55], [-1.2, 1.0], [1.2, 1.0]]) {                                         // three arms down to jack pads
+    strut(base, P.sovGreen, [px * 0.25, 0.32, pz * 0.25], [px, 0.16, pz], 0.16, 0.12);
+    cyl(base, P.steel, 0.05, 0.05, 0.25, px, 0.13, pz, 'y', 6); cyl(base, P.sovDark, 0.2, 0.2, 0.05, px, 0.025, pz, 'y', 8);
+  }
+  for (const sd of [-1, 1]) {   // the wheels, swung up on their arms at the sides
+    const w = group(base, sd * 0.95, 0.62, 0.3); w.rotation.z = sd * 0.95;
+    cyl(w, P.rubber, 0.37, 0.37, 0.2, 0, 0, 0, 'x', 14); cyl(w, P.sovGreen, 0.22, 0.22, 0.22, 0, 0, 0, 'x', 10); cyl(w, P.steel, 0.07, 0.07, 0.24, 0, 0, 0, 'x', 6);
+    strut(base, P.sovDark, [sd * 0.45, 0.35, 0.3], [sd * 0.95, 0.62, 0.3], 0.1, 0.1);
+  }
+  box(base, P.sovDark, 0.5, 0.25, 0.3, 0, 0.3, 0.75);                                                     // tool / spare-barrel box at the back
+  // the rotating mount: turntable, cradle cheeks, two seats with footrests, hand wheels, the sight on the left
+  const yaw = group(g, 0, 0.43, 0); yaw.userData.part = true;
+  cyl(yaw, P.sovGreen, 0.62, 0.66, 0.12, 0, 0.06, 0, 'y', 14);
+  for (const sd of [-1, 1]) box(yaw, P.sovGreen, 0.08, 0.66, 0.62, sd * 0.4, 0.45, -0.05);
+  for (const sd of [-1, 1]) {
+    box(yaw, P.sovDark, 0.4, 0.06, 0.36, sd * 0.55, 0.6, 0.55); box(yaw, P.sovGreen, 0.4, 0.3, 0.05, sd * 0.55, 0.78, 0.74, -0.15);   // seat and back
+    strut(yaw, P.sovGreen, [sd * 0.3, 0.15, 0.3], [sd * 0.55, 0.57, 0.55], 0.06, 0.06);                  // seat post
+    box(yaw, P.steel, 0.3, 0.04, 0.16, sd * 0.55, 0.14, 0.05);                                            // footrest / pedal
+    cyl(yaw, P.steel, 0.14, 0.14, 0.03, sd * 0.47, 0.78, 0.22, 'x', 12); cyl(yaw, P.black, 0.02, 0.02, 0.12, sd * 0.55, 0.78 + 0.1, 0.22, 'x', 4);   // hand wheel + crank
+  }
+  box(yaw, P.sovDark, 0.2, 0.36, 0.3, -0.55, 1.08, 0.12); box(yaw, P.black, 0.08, 0.08, 0.14, -0.55, 1.1, 0.3); box(yaw, P.glass, 0.16, 0.12, 0.02, -0.55, 1.18, -0.04);   // the sight: body, eyepiece, objective
+  { const pnl = box(yaw, team, 0.5, 0.02, 0.3, 0, 0.13, 0.45); pnl.userData.keep = true; }
+  // the cradle: trunnion, the two guns with their cooling-ribbed barrels and flash hiders, box magazines outboard
+  const pitch = group(yaw, 0, 0.62, -0.08); pitch.userData.part = true;
+  cyl(pitch, P.sovGreen, 0.09, 0.09, 0.84, 0, 0, 0, 'x', 10);
+  box(pitch, P.sovGreen, 0.62, 0.22, 1.0, 0, -0.04, 0.12);
+  const muzzles = [], flashes = [];
+  for (const sd of [-1, 1]) {
+    const x = sd * 0.19;
+    box(pitch, P.sovDark, 0.15, 0.24, 1.05, x, 0.1, 0.18);                                                // receiver
+    cyl(pitch, P.gun, 0.042, 0.042, 0.42, x, 0.1, -0.52, 'z', 8);                                         // barrel jacket
+    cyl(pitch, P.gun, 0.03, 0.034, 1.62, x, 0.1, -1.5, 'z', 6);                                           // barrel
+    for (let k = 0; k < 3; k++) cyl(pitch, P.steel, 0.045, 0.045, 0.04, x, 0.1, -0.85 - k * 0.42, 'z', 6);   // clamps
+    cyl(pitch, P.black, 0.05, 0.045, 0.22, x, 0.1, -2.38, 'z', 7);                                        // flash hider
+    cyl(pitch, P.steel, 0.035, 0.035, 0.55, x, -0.06, -0.45, 'z', 6);                                    // recoil spring tube
+    box(pitch, P.sovGreen, 0.16, 0.3, 0.44, sd * 0.4, 0.2, 0.18); box(pitch, P.sovDark, 0.17, 0.04, 0.45, sd * 0.4, 0.36, 0.18);   // 50-round box magazine
+    muzzles.push(V(x, 0.1, -2.5)); flashes.push(flash(pitch, x, 0.1, -2.52, 0.55));
+  }
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), lampMat(0xffaa22)); lamp.position.set(-0.55, 1.32, 0.15); yaw.add(lamp);
+  for (const sd of [-1, 1]) readyAmmo(g, sd * 1.9, 2.55, sd * 0.25, P.sovGreen);
+  return finish(g, { type: 'zu23', yaw, pitch, spin: [], radar: null, dish: null, muzzles, eject: V(0, -0.2, 0.35), lamp, flashes, team, h: 1.8, slotZ: 0,
+    crewSpots: [
+      { role: 'gunner', kit: 'sov', parent: 'yaw', p: [-0.55, 0.63, 0.6] },
+      { role: 'gunner', kit: 'sov', parent: 'yaw', p: [0.55, 0.63, 0.6], second: true },
+      { role: 'loader', kit: 'sov', parent: 'root', home: [-2.35, 0.7], ammo: [-1.9, 2.15], gun: [-0.95, 0.45] },
+      { role: 'loader', kit: 'sov', parent: 'root', home: [2.35, 0.7], ammo: [1.9, 2.15], gun: [0.95, 0.45] },
+    ] });
+}
+
+// =========================================================================== lo-detail stand-ins (LOD far level)
+// a few boxes per unit in the same weathered vertex colours: body / turret / gun, plus the team panel. 3-4 draw calls.
+const LO_SPEC = {
+  vads: { b: [[2.7, 0.75, 4.8, 0, 1.45, 0, 'od'], [2.75, 0.75, 4.6, 0, 0.62, 0, 'track']], y: [0, 1.83, 0.45], yb: [[1.9, 0.62, 1.3, 0, 0.31, 0.05, 'od'], [0.5, 0.5, 0.4, 0.15, 0.95, -0.1, 'odDark']], p: [-0.32, 0.75, -0.2], pb: [[0.5, 0.45, 0.9, -0.08, -0.05, 0.25, 'odDark'], [0.24, 0.24, 1.6, -0.08, 0.02, -1.05, 'gun'], [0.5, 0.5, 0.42, 0.85, 0.12, -0.15, 'od']] },
+  vadst: { b: [[0.5, 0.32, 3.3, 0, 0.45, 0.2, 'od'], [2.25, 0.84, 0.3, 0, 0.74, 0.9, 'rubber'], [3.0, 0.14, 0.18, 0, 0.3, -0.55, 'od']], y: [0, 0.62, 0], yb: [[1.6, 0.16, 1.6, 0, 0.08, 0, 'od'], [0.95, 0.5, 0.75, 0.25, 0.41, 0.4, 'odDark'], [0.44, 0.42, 0.34, 0.25, 1.2, -0.15, 'odDark']], p: [-0.45, 0.72, -0.08], pb: [[0.42, 0.4, 0.9, 0, -0.04, 0.22, 'odDark'], [0.22, 0.22, 1.6, 0, 0.02, -1.05, 'gun'], [0.5, 0.5, 0.4, 1.0, 0.12, -0.12, 'od']] },
+  shilka: { b: [[3.0, 0.62, 6.4, 0, 1.1, 0, 'sovGreen'], [3.0, 0.75, 5.6, 0, 0.5, 0, 'track']], y: [0, 1.42, -0.5], yb: [[3.3, 0.8, 2.9, 0, 0.45, 0, 'sovGreen'], [0.22, 0.7, 0.22, 0, 1.2, 1.25, 'sovDark'], [1.4, 1.3, 0.25, 0, 1.7, 1.0, 'sovGreen']], p: [0, 0.55, -1.3], pb: [[1.6, 0.6, 0.6, 0, 0, 0.15, 'sovDark'], [1.35, 0.4, 2.4, 0, 0.03, -1.2, 'gun']] },
+  zu23: { b: [[2.4, 0.2, 2.6, 0, 0.22, -0.25, 'sovGreen'], [2.1, 0.7, 0.3, 0, 0.62, 0.3, 'rubber']], y: [0, 0.43, 0], yb: [[1.3, 0.12, 1.3, 0, 0.06, 0, 'sovGreen'], [1.5, 0.35, 0.4, 0, 0.7, 0.6, 'sovDark'], [0.9, 0.66, 0.62, 0, 0.45, -0.05, 'sovGreen']], p: [0, 0.62, -0.08], pb: [[0.95, 0.4, 1.05, 0, 0.1, 0.15, 'sovGreen'], [0.5, 0.1, 2.1, 0, 0.1, -1.45, 'gun']] },
+  ciws: { b: [[1.8, 0.35, 1.8, 0, 0.17, 0, 'deckGrey']], y: [0, 0.35, 0], yb: [[1.5, 1.6, 1.5, 0, 0.8, 0, 'haze']], p: [0, 1.45, 0], pb: [[1.0, 1.4, 1.0, 0, 0.75, 0.15, 'white'], [0.85, 0.85, 1.25, 0, -0.18, 0.55, 'haze'], [0.3, 0.3, 1.6, 0, -0.18, -1.0, 'gun']] },
+  sparrow: { b: [[1.6, 0.5, 1.6, 0, 0.25, 0, 'deckGrey']], y: [0, 0.5, 0], yb: [[1.7, 1.0, 1.0, 0, 0.6, 0.1, 'haze']], p: [0, 1.25, 0.1], pb: [[1.3, 0.7, 3.6, 0, 0.12, 0.3, 'haze']] },
+  talon: { b: [[2.55, 1.8, 2.15, 0, 2.1, -3.65, 'rwGreen'], [2.45, 1.5, 2.6, 0, 2.0, -1.0, 'rwGreen'], [2.45, 0.5, 4.0, 0, 1.45, 2.2, 'rwGreen'], [2.6, 1.2, 7.0, 0, 0.6, -0.2, 'rubber']], y: [0, 1.7, 2.3], yb: [[1.5, 1.4, 2.2, 0, 1.0, 0.2, 'rwGreen'], [1.6, 0.85, 0.16, 0, 2.55, 0.7, 'rwGreen']], p: [0, 1.05, -0.4], pb: [[1.2, 0.95, 0.5, 0, 0, -0.6, 'rwGreen'], [0.7, 0.75, 2.6, 1.25, 0.1, -0.7, 'rwDark'], [0.7, 0.75, 2.6, -1.25, 0.1, -0.7, 'rwDark']] },
+  talonm: { b: [[2.6, 1.0, 2.6, 0, 0.5, 0, 'rwGreen']], y: [0, 1.15, 0], yb: [[1.5, 1.4, 2.2, 0, 1.0, 0.2, 'rwGreen'], [1.6, 0.85, 0.16, 0, 2.55, 0.7, 'rwGreen']], p: [0, 1.05, -0.4], pb: [[1.2, 0.95, 0.5, 0, 0, -0.6, 'rwGreen'], [0.7, 0.75, 2.6, 1.25, 0.1, -0.7, 'rwDark'], [0.7, 0.75, 2.6, -1.25, 0.1, -0.7, 'rwDark']] },
+  lance: { b: [[1.9, 1.6, 1.9, 0, 0.8, 0, 'composite'], [5.0, 0.3, 0.45, 0, 0.6, 0, 'composite'], [0.45, 0.3, 5.0, 0, 0.6, 0, 'composite']], y: [0, 1.62, 0], yb: [[1.5, 1.4, 2.9, 0, 0.8, -0.1, 'ceramic'], [1.2, 0.75, 0.9, 0, 1.95, 0.95, 'composite'], [0.6, 0.65, 0.75, -0.95, 1.05, -0.75, 'composite']], p: [1.05, 1.0, -0.45], pb: [[0.6, 0.6, 4.3, 0, 0, -1.5, 'ceramic']] },
+};
+LO_SPEC.lancem = LO_SPEC.lance;
+const LO_FAR = { ciws: 170, sparrow: 170, talonm: 190, lancem: 190 };   // m from the camera to the lo level (default 220)
+function buildLo(type, side) {
+  const S = LO_SPEC[type], g = new THREE.Group(), team = teamMat(side), body = group(g); body.userData.part = true;
+  const bx = (p, b) => { for (const [w, h, d, x, y, z, k] of b) box(p, P[k], w, h, d, x, y, z); };
+  bx(body, S.b);
+  const yaw = group(g, ...S.y); yaw.userData.part = true; bx(yaw, S.yb);
+  const pitch = group(yaw, ...S.p); pitch.userData.part = true; bx(pitch, S.pb);
+  { const top = S.yb[0], pnl = box(yaw, team, top[0] * 0.5, 0.03, top[2] * 0.35, top[3], top[4] + top[1] / 2 + 0.02, top[5]); pnl.userData.keep = true; }
+  bake(g, { seed: 7 });
+  g.userData = { yaw, pitch, team };
+  return g;
+}
+
+export const BUILD = { vads: buildVADS, vadst: buildM167, shilka: buildShilka, zu23: buildZU23, ciws: buildCIWS, sparrow: buildSparrow, talon: buildTalon, lance: buildLance,
   talonm: side => buildTalon(side, { mount: true }), lancem: side => buildLance(side) };   // SEAWORLD: ship mounts (game level, bible section 3)
-export function buildDefence(type, side) { const m = BUILD[type](side); m.userData.defType = type; return m; }
+
+// =========================================================================== instances
+// Each type / side is modelled and baked ONCE (a prototype); every unit is a clone that shares its geometry and
+// materials (the LANCE's glow and radiator materials are per unit: they light up per unit). A unit is a THREE.LOD:
+// the full model near the camera, the box stand-in beyond LO_FAR. The crews are added per unit (crew.js).
+// userData (the brain.js / war.js contract, see the top of this file) also carries:
+//   hi, lo        the two LOD levels;  loYaw / loPitch: the stand-in's turret (brain.js mirrors the real one)
+//   crew          [{ spot, fig, tick }]: the animated crewmen (spot = the model's crewSpots entry)
+//   setState(st)  'intact' | 'damaged' | 'destroyed' (war.js killStruct calls it): the wreck stays on the slot,
+//                 burnt (charred material), turret knocked askew, barrels drooping, crew gone, lamps out
+const PROTO = new Map(), LOPROTO = new Map();
+// the burnt-out look: every paint goes to scorched rust-brown and soot (its old shade still shows a little), per face
+const BURNT = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+BURNT.onBeforeCompile = sh => {
+  sh.vertexShader = sh.vertexShader.replace('#include <color_vertex>', `#include <color_vertex>
+    { float l = dot(vColor.rgb, vec3(0.3, 0.59, 0.11)); vec3 b = vec3(0.075, 0.052, 0.04) + l * vec3(0.55, 0.42, 0.33);
+      float n = fract(sin(dot(floor(position * 2.3), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+      vColor.rgb = mix(vColor.rgb, b * (0.55 + 0.9 * n), 0.88); }`);
+};
+function cloneTree(src) {   // clone with object references in userData remapped to the copies (Object3D.copy would JSON them)
+  const ud = src.userData; src.userData = {};
+  const c = src.clone(true); src.userData = ud;
+  const a = [], b = []; src.traverse(o => a.push(o)); c.traverse(o => b.push(o));
+  const map = new Map(); a.forEach((o, i) => map.set(o, b[i]));
+  const M = v => v && v.isObject3D ? map.get(v) || v : v && v.cover ? { ...v, cover: map.get(v.cover) || v.cover } : v;
+  const out = {};
+  for (const [k, v] of Object.entries(ud)) out[k] = Array.isArray(v) ? v.map(M) : M(v);
+  for (const key of ['glow', 'finM']) if (ud[key]) { const m = ud[key].clone(); c.traverse(o => { if (o.material === ud[key]) o.material = m; }); out[key] = m; }
+  c.userData = out; return c;
+}
+export function buildDefence(type, side) {
+  const k = type + ':' + side;
+  if (!PROTO.has(k)) PROTO.set(k, BUILD[type](side));
+  if (!LOPROTO.has(k)) LOPROTO.set(k, buildLo(type, side));
+  const hi = cloneTree(PROTO.get(k)), lo = cloneTree(LOPROTO.get(k)), ud = hi.userData;
+  const root = new THREE.LOD(); root.addLevel(hi, 0); root.addLevel(lo, LO_FAR[type] ?? 220);
+  Object.assign(ud, { defType: type, hi, lo, loYaw: lo.userData.yaw, loPitch: lo.userData.pitch, crew: [] });
+  hi.userData = {}; lo.userData = {}; root.userData = ud;
+  // crews: figures on the mount (seated / in the hatches) and on the ground round it
+  for (const spot of ud.crewSpots || []) {
+    if (spot.kit === 'tick') { const T = makeTick(); T.g.scale.setScalar(0.75); T.g.position.set(...spot.home); hi.add(T.g); ud.crew.push({ spot, fig: T, tick: true, at: 'home', s: 0 }); continue; }
+    const C = makeCrew(spot.kit), par = spot.parent === 'yaw' ? ud.yaw : hi;
+    if (spot.role === 'gunner') { C.g.position.set(spot.p[0], spot.p[1] - HIP, spot.p[2]); C.pose('sit'); }
+    else if (spot.role === 'hatch') { C.g.position.set(spot.p[0], spot.p[1] - (spot.low ? 1.5 : 1.08), spot.p[2]); for (const l of [C.thighL, C.thighR]) l.visible = false; C.pose('hatch'); }
+    else { C.g.position.set(spot.home[0], 0, spot.home[1]); C.pose('stand'); }
+    par.add(C.g); ud.crew.push({ spot, fig: C, job: 'idle', x: C.g.position.x, z: C.g.position.z, t: 0 });
+  }
+  const yaw0 = ud.yaw.position.clone(), rot0 = ud.yaw.rotation.clone(), hidden = [];
+  ud.state = 'intact';
+  ud.setState = st => {
+    const was = ud.state; ud.state = st; if (st === was) return;
+    const burnt = st === 'destroyed';
+    for (const lvl of [hi, lo]) lvl.traverse(o => { if (o.isMesh && (o.material === BAKED || o.material === BURNT)) o.material = burnt ? BURNT : BAKED; });
+    for (const c of ud.crew) c.fig.g.visible = !burnt;
+    if (burnt) {
+      // everything that glows or carries a colour goes dark: lamps, IFF strips, flashes, the team panel, the LANCE's seams
+      for (const lvl of [hi, lo]) lvl.traverse(o => { if (o.isMesh && o.visible && o.material !== BURNT && !(ud.cells || []).some(c => c.cover === o)) { o.visible = false; hidden.push(o); } });
+      const r = (a, b) => a + Math.random() * (b - a), sd = Math.random() < 0.5 ? -1 : 1, towed = type === 'vadst' || type === 'zu23';
+      ud.yaw.position.y += towed ? 0 : r(0.08, 0.2); ud.yaw.rotation.y += r(-0.6, 0.6);
+      ud.yaw.rotation.x = r(-0.12, 0.12); ud.yaw.rotation.z = sd * (towed ? r(0.25, 0.4) : r(0.08, 0.22));   // blown off its ring / knocked over on its mount
+      ud.pitch.rotation.x = r(-0.12, -0.04);                                                                // barrels droop
+      if (ud.radar) ud.radar.rotation.z = sd * r(0.4, 0.8);                                                  // the mast bent over
+      if (ud.loYaw) ud.loYaw.rotation.set(ud.yaw.rotation.x, ud.yaw.rotation.y, ud.yaw.rotation.z);
+    } else {
+      for (const o of hidden) o.visible = !(o === ud.lamp || ud.flashes.includes(o)); hidden.length = 0;
+      ud.yaw.position.copy(yaw0); ud.yaw.rotation.copy(rot0); if (ud.radar) ud.radar.rotation.z = 0;
+    }
+  };
+  return root;
+}
