@@ -729,6 +729,27 @@ function turnIntoClear() {
   if (best === null) return false;
   war.orderCarrier(c.p.x - Math.sin(best) * 500, c.p.z - Math.cos(best) * 500); feed('ALBATROSS: TURNING INTO CLEAR WATER FOR THE LAUNCH'); return true;
 }
+// COMMANDER part 2: the recovery lane - the glideslope astern of the ALBATROSS clear of the islands (3.5 deg from the
+// round-down, 15 m over the ground out to 1300 m). A jet holding for high ground on its final (pilot.js needsLane: the
+// wingman, an escort) has the ship turn and steam onto a heading with a clear final and clear water ahead.
+function laneAstern(c, yaw) {
+  const ax = Math.sin(yaw), az = Math.cos(yaw);
+  for (let R = 80; R <= 1300; R += 40) if (terrainH(c.p.x + ax * R, c.p.z + az * R) + 15 > CARRIER.DECK + Math.tan(3.5 * Math.PI / 180) * (R - 40)) return false;
+  return true;
+}
+// open water from the ship's centre along heading yaw (laneClear measures from the bow as she lies: no use for a turn)
+function seaAhead(c, yaw, max = 700) { const fx = -Math.sin(yaw), fz = -Math.cos(yaw); for (let d = 40; d <= max; d += 15) if (terrainH(c.p.x + fx * d, c.p.z + fz * d) > -1) return d; return max + 1; }
+let laneT = 0;
+function recoveryLane(dt) {
+  laneT -= dt; if (laneT > 0) return; laneT = 2;
+  const c = war.carrier; if (!c || c.sinking !== undefined || (c.sky && c.sky.up)) return;
+  const want = [...JETS, ...TOMCATS].some(d => d.wing && d.wing.needsLane) || war.units.some(u => u.side === 1 && u.ai && u.ai.needsLane);
+  if (!want || laneAstern(c, c.yaw) || (c.laneT && war.time - c.laneT < 30)) return;
+  for (let k = 1; k <= 24; k++) for (const s of [1, -1]) {
+    const y = c.yaw + s * k * Math.PI / 12;
+    if (laneAstern(c, y) && seaAhead(c, y) > 450) { c.laneT = war.time; war.orderCarrier(c.p.x - Math.sin(y) * 700, c.p.z - Math.cos(y) * 700); feed('ALBATROSS: TURNING FOR A CLEAR APPROACH  -  RECOVERY COURSE ' + String(Math.round(((-y * 180 / Math.PI) % 360 + 360) % 360)).padStart(3, '0')); return; }
+  }
+}
 // 5 on the ALBATROSS deck: climb into a Hornet on the catapult (craftjet.js); Y on deck: get out and walk
 const launchJet = () => deckLaunch('jet');   // COMMANDER: the Hornet you are in, one out, one parked, else a fresh one
 const swapToHeli = () => getInOut();
@@ -2542,6 +2563,7 @@ function frame(now) {
   if (G.state === 'play') {
     if (G.mode === 'zarch') updateZarch(dt, inp); else updateThrust(dt, inp);
     updateExt();   // COMMANDER: every unit of the fleet that is out is a target too (war.ext)
+    recoveryLane(dt);   // COMMANDER: the ship turns for a final clear of the islands when a jet is holding for one
     war.update(dt, PL, params.has('peace'));
     if (G.mode === 'zarch') { crafts.afterWar(); seats.afterWar(dt); }   // FOUNDATION: decks moved - the soldier, vehicles, parked jets catch up (ngc/interiors: the troops in their seats)
     fogT -= dt; if (fogT <= 0) { fogT = 0.25; fog.update(war.visionSources(PL)); war.setVisibility(fog); updateFogImg(); }
@@ -2570,4 +2592,4 @@ function frame(now) {
 const PROF = { sim: 0, prep: 0, render: 0 };
 buildCaves(); war.reset(); resetZarch(true); placeVehicles(); updateFogImg(); terrainStream(Z.pos.x, Z.pos.z);
 requestAnimationFrame(frame);
-if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ, JETS, TOMCATS, ARMS, HUEYS, EXT, withSlot, swapHuey, heliSpotFree, shipHeloSpot, freeShipSpot, deliverArmour, newHueySlot, hurtHueyAway, checkSpent, get keyboardOnly() { return keyboardOnly; }, set keyboardOnly(v) { keyboardOnly = v; } }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }
+if (params.has('debug')) { window.__G = { PROF_LOAD, fineTerrain, terrain, G, m60C, m113C, AW, HARDS, armDelivery, deliverArmour, cmH, RWR , tomcatC, Z, T, H, HI, SY, HELI, helm, toggleHelm, get ckFov() { return ckFov; }, setCkFov, menuKey, D, JP, CTL, view, islandH, HW, forest, groundY, inZone, launchJet, swapToHeli, get cockpitCam() { return cockpitCam; }, set cockpitCam(v) { cockpitCam = v; }, THREE, fx, PL, ISLANDS, PADS, PAD, HOME_B, terrainH, head, hurtHeli, cockpit, drop, callLogistics, openMenu, menuPick, get menu() { return menu; }, zCam, PROF, renderer, newGame, war, fog, nav, BASES, command, get selIsl() { return selIsl; }, set selIsl(v) { selIsl = v; }, enterCave, respawnHome, exitCave, get camB() { return camB; }, crafts, foot, GR, pool, get carC() { return pool.first('m151'); }, jetC, heliC, getInOut, deliverVehicle, toHeli, stowCrafts, hurtPlayer, marine, sealife, fleet, commander, roster, heliAI, autoNext, killPlayerZ, JETS, TOMCATS, ARMS, HUEYS, EXT, withSlot, swapHuey, heliSpotFree, shipHeloSpot, freeShipSpot, deliverArmour, newHueySlot, hurtHueyAway, checkSpent, laneAstern, laneClear, get keyboardOnly() { return keyboardOnly; }, set keyboardOnly(v) { keyboardOnly = v; } }; if (params.has("auto")) newGame(); if (params.has('thrust')) { newGame(); const b = BASES[+params.get('thrust') || 0]; Z.pos.set(b.x, b.h - 1, b.z); Z.vel.set(0, -4, 0); enterCave(b); } }

@@ -263,7 +263,7 @@ export function createPilot(A, o = {}) {
   function legClear(env, x0, z0, y0, x1, z1, y1) {
     if (!env.terrain) return 1e9;
     const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.ceil(L / 40)); let m = 1e9;
-    for (let i = 0; i <= n; i++) { const k = i / n; m = Math.min(m, y0 + (y1 - y0) * k - Math.max(0, env.terrain(x0 + (x1 - x0) * k, z0 + (z1 - z0) * k))); }
+    for (let i = 0; i <= n; i++) { const k = i / n, g = env.terrain(x0 + (x1 - x0) * k, z0 + (z1 - z0) * k); if (g > 1) m = Math.min(m, y0 + (y1 - y0) * k - g); }   // (land only: over the sea the approach's own rules hold)
     return m;
   }
   // the ground ahead on the present path: the least height over it in the next `secs` seconds (velocity extrapolated)
@@ -311,7 +311,11 @@ export function createPilot(A, o = {}) {
       _t.x += (c.vx || 0) * 8; _t.z += (c.vz || 0) * 8;
       dirTo(_t.x, _t.y, _t.z, 0.25);
       fly(_d, dt, env, { speed: PL.wp >= 3 ? 118 : 130, g: 3 }); A.brakeCmd = A.eas > 140 ? 1 : 0;
-      if (Math.hypot(_t.x - A.pos.x, _t.z - A.pos.z) < 300) { if (PL.wp >= 3) set('final', 'BASE'); else PL.wp++; }
+      if (Math.hypot(_t.x - A.pos.x, _t.z - A.pos.z) < 300) {
+        if (PL.wp < 3) PL.wp++;
+        else if (finalClear(c, env, w[0] * (PL.patSide || 1), w[1], aimZ) < 15) { PL.needsLane = true; PL.wp = 1; PL.patSide = patternSide(c, env, aimZ); if (!PL.laneSaid) { PL.laneSaid = true; say('HOLDING  -  HIGH GROUND ON THE FINAL'); } }   // the islands are on the glideslope: go round again (the host turns the ship: needsLane)
+        else { PL.needsLane = false; PL.laneSaid = false; set('final', 'BASE'); }
+      }
       return;
     }
     // ---- final: dirty up, carrot onto the centreline, then the LSO controller
@@ -335,7 +339,7 @@ export function createPilot(A, o = {}) {
       }
     }
     if (R < -10 && !A.onGround) { PL.waveoffs++; set('waveoff', 'OVERFLEW THE DECK'); return; }
-    if (R > 60 && !A.onGround && aheadClear(env, 6) < 18) { PL.waveoffs++; PL.why = 'TERRAIN'; PL.patFlip = true; set('waveoff', 'TERRAIN'); return; }   // the ground comes up on the approach: go round (the next pattern is laid the other side)
+    if (R > 60 && !A.onGround && aheadClear(env, 6) < 10) { PL.waveoffs++; PL.why = 'TERRAIN'; PL.patFlip = true; set('waveoff', 'TERRAIN'); return; }   // the ground comes up on the approach: go round (the next pattern is laid the other side)
     if (R > 700 || Math.abs(latErr) > 40 || Math.abs(herr) > 0.3) {
       if (R < 450) { PL.waveoffs++; set('waveoff', `NOT LINED UP  lat ${latErr.toFixed(0)} hdg ${(herr / D2R).toFixed(0)}°`); return; }
       // carrot: a point on the centreline ahead of us, at the glideslope height

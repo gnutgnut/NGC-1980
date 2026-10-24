@@ -2689,3 +2689,14 @@ stays game-level (no weapon figures changed). New files: `units/runaway/rwlod.js
   While the board is open the pad is the board's (CTL suspended, no pad to the unit); buttons held when it opens act only
   once released.
 - **Scene fix**: marinelife.mjs rides an M151A2 from the motor pool (the TEST CAR is gone).
+- **The AI pilot is terrain-safe in the carrier pattern** (units/air/pilot.js: the escorts and the wingman). With the
+  TERRAIN rebuild (ngc/integ: bigger islands) the wingman flew into a hillside in the pattern: the CAP and transit legs
+  had the terrain guard, the final and the wave-off did not. Now: the pattern is laid on the side of the ship whose
+  legs and final clear the islands (`patternSide`: port unless starboard is clearer; the other side after a wave-off for
+  the ground), a waypoint over high ground is flown 70 m over it, a straight-in is taken only with a clear glideslope,
+  on the final the next 6 s of the flight path is looked at against the land (not the sea or the deck) and with less
+  than 18 m it waves off ('TERRAIN'); the wave-off climb uses the terrain guard (power, climb and turn) when high
+  ground is within 8 s; the CAP orbit's floor is the highest ground under the whole ring, not just the anchor.
+  commanderbench: the wingman recalled over the real islands (world.js islandH) from 10 carrier positions / headings:
+  10/10 trapped, no crash, 26 m least height over land (the old pilot: 8 m). The player's Hornet is untouched:
+  jetfingerprint SAME (bit-identical), airbench 28/28, tomcatbench 32/32.
