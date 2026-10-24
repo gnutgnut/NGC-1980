@@ -2577,7 +2577,9 @@ stays game-level (no weapon figures changed). New files: `units/runaway/rwlod.js
   mate 18 m vs 2.9 m); groundwarbench 33/33 (21.8 ms CPU per simulated s, 21 units); scenes rwpolish 6/6 (tracers in a
   fight + a controlled burst, LOD stand-ins, draw calls, three MBT wrecks with one catastrophic, RW-7 wreck, smoking RW-7,
   arm stump, air reaction, big map), groundwar 10/10, smoke 5/5, runaway / runawaycloseup / runawaylive / rwmodels /
-  striderfall all clean, mv22landing and ch46capture (see below). Baseline groundwar.mjs failed 'both sides fire' once
+  striderfall all clean; after merging experimental: smoke 5/5, groundwar 10/10, rwpolish 6/6, ch46capture 5/5,
+  benches 50/50 and 33/33. mv22landing (before the merge) landed and took SANDBAR but missed one wall-clock wait at load
+  average ~140 (experimental has since polled those waits). Baseline groundwar.mjs failed 'both sides fire' once
   (the STRIDERs fired exactly 20, wants > 20: the Marines killed the last two fast) - flaky, pre-existing.
 - **Gotchas.** Dead vehicles are never stepped (groundsim skips them), so a killed RW-7 hung at hover height: the wreck
   pose lives in the model. GL lines are one pixel - at the game's 0.45 render scale tracers vanished: ribbons. Additive
