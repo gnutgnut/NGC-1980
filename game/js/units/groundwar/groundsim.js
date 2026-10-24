@@ -27,6 +27,7 @@ import { createMBT, MBT } from '../runaway/mbt.js';
 import { AMMO, normalizeHit } from '../runaway/hit.js';
 import { WPN } from '../runaway/sandbox.js';
 import { rng } from '../runaway/rwworld.js';
+import { zoneSurf, inGrid, SURFACE } from '../../world/terrain.js';   // TERRAIN (wave 3): the one surface table
 // ngc/infdepth: the near Marines on the real rifleman + medical sims, and casualty care (corpsman, buddy aid, CCP)
 import { createRichMarine, ROLE_KIT } from './richmarine.js';
 import { createFieldCare } from './fieldcare.js';
@@ -79,7 +80,8 @@ export function createGroundSim(o) {
   const hAt = (x, z) => { const I = maps.at(x, z); return I && maps.has(I) ? maps.get(I).height(x, z) : terrainH(x, z); };
   const envLand = { height: hAt };
   const envHover = { height: (x, z) => Math.max(hAt(x, z), 0) };
-  const armorEnv = { height: hAt, surface: (x, z) => { const h = hAt(x, z); if (h < 1.2) return 'sand'; const e = 1, s = Math.hypot(hAt(x + e, z) - hAt(x - e, z), hAt(x, z + e) - hAt(x, z - e)) / 2; return s > 0.7 ? 'rock' : (Math.sin(x * 0.05) * Math.cos(z * 0.047) > 0.3 ? 'dirt' : 'grass'); }, water: (x, z) => (hAt(x, z) < 0 ? 0 : -Infinity) };
+  // TERRAIN (wave 3): the islands' own soils (world/terrain.js) where the zone grid reaches; the old guess elsewhere
+  const armorEnv = { height: hAt, surface: (x, z) => { if (inGrid(x, z)) return SURFACE[zoneSurf(x, z)].soil; const h = hAt(x, z); if (h < 1.2) return 'sand'; const e = 1, s = Math.hypot(hAt(x + e, z) - hAt(x - e, z), hAt(x, z + e) - hAt(x, z - e)) / 2; return s > 0.7 ? 'rock' : (Math.sin(x * 0.05) * Math.cos(z * 0.047) > 0.3 ? 'dirt' : 'grass'); }, water: (x, z) => (hAt(x, z) < 0 ? 0 : -Infinity) };
 
   // ngc/infdepth: casualty care (wounded call out and crawl to cover, the corpsman, buddy aid, drags to the CCP)
   function worldAt(x, z) { const I = maps.at(x, z); return I && maps.has(I) && maps.get(I).ready ? maps.get(I).world : null; }

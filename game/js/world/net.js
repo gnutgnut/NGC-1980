@@ -13,6 +13,7 @@
 // deep valley. world.js applies roadBed() inside islandH(), so the physics height, the terrain bake and the road
 // ribbons agree to the centimetre.
 import { rawH, BOUND, ISLANDS, forestAt } from '../world.js';
+import { beachesOf } from './terrain.js';   // TERRAIN (wave 3): the landing beaches are kept clear of villages and cottages
 import { hash2, rng } from './rng.js';
 import { townItems, farmItems } from './layout.js';   // lots and farm buildings (their platforms are part of the ground)
 
@@ -359,11 +360,21 @@ export function ensure(x, z) {
 // ------------------------------------------------------------------------------------------- the control zone
 // Rules that match main.js / war.js: the landing pad (island centre, or 30 m south of a cave island's centre), its flat
 // apron, the cave apron and the ground over the cave, the HQ / production building slots (structAngle).
-export const padOf = I => I.cave ? { x: I.x, z: I.z + 30, r0: 12, r1: 34 } : { x: I.x, z: I.z, r0: 30, r1: 52 };
+export const padOf = I => I.cave ? { x: I.x, z: I.z + 30, r0: 12, r1: 34 } : { x: I.x, z: I.z, r0: 30, r1: 44 };   // (TERRAIN: r1 52 -> 44, as main.js PADS)
 // on a cardinal direction (+-0.15 rad) from the pad, so the buildings sit between the AA slots on the diagonals
 export const structAngle = I => Math.floor(hash2(I.id, 77, 1) * 4) * Math.PI / 2 + (hash2(I.id, 78, 1) - 0.5) * 0.3;
+// TERRAIN: an island's main landing beach and the way up from it (the LCM-8 puts armour ashore there)
+function onLanding(I, x, z, pad) {
+  for (const B of beachesOf(I)) {
+    if (!B.main) continue;
+    const dx = x - B.x, dz = z - B.z, u = dx * B.fx + dz * B.fz, lat = -dx * B.fz + dz * B.fx;
+    if (u > -10 - pad && u < B.u1 + 25 + pad && Math.abs(lat) < B.w + 6 + pad) return true;
+  }
+  return false;
+}
 export function zoneReserved(I, x, z, pad = 0) {
   const p = padOf(I); if (Math.hypot(x - p.x, z - p.z) < p.r0 + 6 + pad) return true;
+  if (onLanding(I, x, z, pad * 0.5)) return true;
   if (I.cave) { if (Math.hypot(x - I.x, z - I.z) < 62 + pad) return true; if (Math.abs(x - I.x) < 90 + pad && Math.abs(z - I.z) < 24 + pad) return true; }
   if (I.name === 'IRONHOLD') { const a = Math.atan2(-I.z, -I.x); for (let d = 20; d < I.r + 40; d += 4) { const x1 = I.x + Math.cos(a) * d, z1 = I.z + Math.sin(a) * d; if (rawH(x1, z1) < 2.5) { if (Math.hypot(x - x1, z - z1) < 34 + pad) return true; break; } } }
   return false;
@@ -389,7 +400,10 @@ export function zoneNet() {
     // road from the pad apron to the village
     const a = Math.atan2(V.z - p.z, V.x - p.x), sx = p.x + Math.cos(a) * (p.r0 - 2), sz = p.z + Math.sin(a) * (p.r0 - 2);
     const pts = route(sx, sz, V.x, V.z, { ds: 12, step: 6, wmax: 40, g: ROAD.lane.g, water: 80, res: 5, smooth: 2 });
-    const prof = pts && profile(pts, 'lane', undefined, V.y, { maxBridge: 0, pin1: 9 });
+    // TERRAIN (wave 3): the lane leaves the pad apron at the pad's own height (main.js PADS / BASES: the island centre's
+    // ground, rounded and clamped), so its first metres lie on the concrete instead of floating over it
+    const padY = Math.min(I.cave ? 16 : 14, Math.max(I.cave ? 4 : 3, Math.round(rawH(I.x, I.z))));
+    const prof = pts && profile(pts, 'lane', padY, V.y, { maxBridge: 0, pin0: 6, pin1: 9 });
     if (prof) { prof.kind = 'zone'; prof.a = `zp${I.id}`; prof.b = V.id; const rd = addRoad(prof); site.roads.push(rd.id); node(prof.a, sx, sz, prof.ys[0]).roads.push({ road: rd.id, end: 0 }); node(V.id, V.x, V.z, V.y).roads.push({ road: rd.id, end: 1 }); }
     addDisc(V.x, V.z, V.y, 9, 'plaza'); addClear({ x0: V.x - 60, z0: V.z - 60, x1: V.x + 60, z1: V.z + 60, cx: V.x, cz: V.z, r: 52 });
     // a harbour lane on to the shore facing away from the island

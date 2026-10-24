@@ -3,7 +3,11 @@
 // it in the game and against a stub in a node bench.
 //
 //   const GR = createGround({ war, terrainH, holeOf, PADS, ISLANDS, CARRIER, trees, crafts, inZone });
-//   GR.sample(x, z, out)          -> { h, nx, ny, nz, surface, water, plat, mu, crr }   (see SURF below)
+//   GR.sample(x, z, out)          -> { h, nx, ny, nz, surface, water, plat, mu, crr, sink, skid, bed }   (see SURF below;
+//                                    under water surface is 'water' and bed what the sea bed is: sand, rock, shingle)
+//   GR.surfaceAt(x, z)            -> the surface name at (x, z) without the normal (cheap): decks, pads, roads, the
+//                                    islands' own ground (world/terrain.js zoneSurf), 'water' afloat, 'hole' over a shaft
+//   GR.surfAt(x, z)               -> SURF[GR.surfaceAt(x, z)]: { mu, crr, sink, speed, skid } (skids and landing gear)
 //   GR.floor(x, z, y, step)       -> the surface you would stand on at (x, z) from height y: decks / terrain / pads;
 //                                    +Infinity for a wall (more than `step` above y, a shaft mouth), seabed under water
 //   GR.collide(o, skip)           -> pushes the circle o = { x, z, r, y0, y1 } out of trees, buildings, ship
@@ -20,23 +24,25 @@
 //   GR.G                          -> 9.81 (the ground units use real gravity, like the Huey)
 import { createPlatforms } from './platform.js';
 import { shipPointY } from './units/naval/seamotion.js';
+import { zoneSurf, inGrid, SURFACE, beachesOf } from './world/terrain.js';   // TERRAIN (wave 3): the islands' surface types
 
 // surface table: tyre / boot friction coefficient mu and rolling-resistance coefficient crr for a pneumatic tyre.
 // INFERRED typical values (Wong, Theory of Ground Vehicles 4th ed. tables 1.2 / 2.1; SAE J2452 ranges):
 //   dry asphalt / concrete mu 0.8-0.9, crr 0.013-0.015; gravel / rock mu 0.6-0.7, crr 0.02; grass / farmland mu 0.4-0.55,
 //   crr 0.05-0.08; loose sand mu 0.4-0.55, crr 0.15-0.3; mud mu 0.3-0.4, crr 0.1-0.15; non-skid steel deck mu ~0.8.
 // `sink`: how far a wheel / track settles in (m), `speed`: soldier walking speed factor.
+// skid: helicopter skid (steel shoe) friction relative to concrete (TERRAIN, INFERRED: it ploughs in sand, glides on mud).
+// TERRAIN (wave 3): the islands' own surfaces (wetsand, shingle, marsh, and the canonical numbers for the rest) come from
+// world/terrain.js SURFACE, the one table every sim reads; road / deck / water / hole are the host's.
 export const SURF = {
-  road:  { mu: 0.85, crr: 0.015, sink: 0,    speed: 1 },
-  deck:  { mu: 0.8,  crr: 0.015, sink: 0,    speed: 1 },
-  rock:  { mu: 0.7,  crr: 0.02,  sink: 0,    speed: 0.85 },
-  grass: { mu: 0.5,  crr: 0.06,  sink: 0.02, speed: 0.95 },
-  sand:  { mu: 0.5,  crr: 0.18,  sink: 0.06, speed: 0.8 },
-  mud:   { mu: 0.35, crr: 0.13,  sink: 0.08, speed: 0.7 },
-  water: { mu: 0.45, crr: 0.15,  sink: 0.05, speed: 0.5 },   // the (sandy) bottom under shallow water: wading drag is the sim's
-  dirt:  { mu: 0.65, crr: 0.04,  sink: 0.02, speed: 1 },     // SEAWORLD: a dirt / gravel farm track (Wong: gravel road mu 0.6-0.7, crr 0.02-0.05)
-  hole:  { mu: 0,    crr: 1,     sink: 0,    speed: 0 },
+  road:  { mu: 0.85, crr: 0.015, sink: 0,    speed: 1,   skid: 1 },
+  deck:  { mu: 0.8,  crr: 0.015, sink: 0,    speed: 1,   skid: 1 },
+  water: { mu: 0.45, crr: 0.15,  sink: 0.05, speed: 0.5, skid: 0.9 },   // the (sandy) bottom under shallow water: wading drag is the sim's
+  hole:  { mu: 0,    crr: 1,     sink: 0,    speed: 0,   skid: 0 },
 };
+for (const [k, v] of Object.entries(SURFACE)) SURF[k] = { mu: v.mu, crr: v.crr, sink: v.sink, speed: v.speed, skid: v.skid };
+// the natural ground's surface: the islands' surface map inside the zone grid, the old height / slope rule in the wild lands
+const naturalSurf = (x, z, t, ny, inZone) => inGrid(x, z) ? zoneSurf(x, z) : t < 2.5 ? 'sand' : ny < 0.78 || (inZone(x, z) ? t > 30 : t > 200) ? 'rock' : 'grass';
 export const GRAV = 9.81;
 
 
@@ -56,6 +62,7 @@ export function createGround(ctx) {
   GR.sample = (x, z, out = {}) => {
     const t = terrainH(x, z), deck = deckH(x, z);
     out.plat = null; out.water = 0; out.nx = 0; out.ny = 1; out.nz = 0;
+    out.bed = null;
     if (holeOf(x, z)) { out.h = -1e4; out.surface = 'hole'; }
     else if (deck > -1e8 && deck >= Math.max(t, 0) - 0.05) { out.h = deck; out.surface = 'deck'; out.plat = war.shipAt(x, z) || null; }
     else {
@@ -64,11 +71,21 @@ export function createGround(ctx) {
       const hx = terrainH(x + e, z) - terrainH(x - e, z), hz = terrainH(x, z + e) - terrainH(x, z - e), l = Math.hypot(hx, 2 * e, hz);
       out.nx = -hx / l; out.ny = 2 * e / l; out.nz = -hz / l;
       let s = null; for (const f of providers) { s = f(x, z, t); if (s) break; }
-      out.surface = s || (t <= 0 ? 'water' : padAt(x, z) ? 'road' : t < 2.5 ? 'sand' : out.ny < 0.78 || (ctx.inZone(x, z) ? t > 30 : t > 200) ? 'rock' : 'grass');
+      out.surface = s || (t <= 0 ? 'water' : padAt(x, z) ? 'road' : naturalSurf(x, z, t, out.ny, ctx.inZone));
+      if (t <= 0) out.bed = naturalSurf(x, z, t, out.ny, ctx.inZone);
     }
-    const S = SURF[out.surface] || SURF.grass; out.mu = S.mu; out.crr = S.crr; out.sink = S.sink;
+    const S = SURF[out.surface] || SURF.grass; out.mu = S.mu; out.crr = S.crr; out.sink = S.sink; out.skid = S.skid;
     return out;
   };
+  // TERRAIN: the surface alone (no normal: cheap enough for every skid / wheel contact each step)
+  GR.surfaceAt = (x, z) => {
+    if (holeOf(x, z)) return 'hole';
+    const t = terrainH(x, z), deck = deckH(x, z);
+    if (deck > -1e8 && deck >= Math.max(t, 0) - 0.05) return 'deck';
+    for (const f of providers) { const s = f(x, z, t); if (s) return s; }
+    return t <= 0 ? 'water' : padAt(x, z) ? 'road' : naturalSurf(x, z, t, 1, ctx.inZone);
+  };
+  GR.surfAt = (x, z) => SURF[GR.surfaceAt(x, z)] || SURF.grass;
   GR.addSurface = fn => { providers.push(fn); };
   // the surface under (x, z) you can stand on from height y (feet): the deck if it is within `step` above you or
   // below you, else the terrain / seabed. Walls (a superstructure, a shaft mouth) come back as +Infinity.
@@ -333,6 +350,13 @@ export function createGround(ctx) {
   // waterline, gentle, clear, nose inland - where a landing craft would put a vehicle or a squad ashore
   GR.beach = (I, toward) => {
     const t0 = toward || (war.carrier ? [war.carrier.p.x, war.carrier.p.z] : [0, 0]), a0 = Math.atan2(t0[1] - I.z, t0[0] - I.x);
+    // TERRAIN (wave 3): the island's real landing beaches first (world/terrain.js), the one facing `toward` best
+    const bs = beachesOf(I).map(B => ({ B, d: Math.abs(Math.atan2(Math.sin(Math.atan2(-B.fz, -B.fx) - a0), Math.cos(Math.atan2(-B.fz, -B.fx) - a0))) })).sort((p, q) => p.d - q.d);
+    for (const { B } of bs) for (let u = 8; u <= Math.max(10, B.u1 - 4); u += 2) {
+      const [x, z] = B.at(u), h = terrainH(x, z);
+      if (h < 0.4 || h > 2.4 || holeOf(x, z) || !GR.clearAt(x, z, 2.5)) continue;
+      return { name: B.name, x, z, y: h, yaw: B.yaw, plat: null };   // nose inland
+    }
     for (let k = 0; k < 24; k++) {
       const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.13, cx = Math.cos(a), sz = Math.sin(a);
       for (let r = 10; r < (I.r || 80) + 120; r += 1.5) {
