@@ -351,7 +351,7 @@ export function createPilot(A, o = {}) {
       world(c, mx(w[0]), wz, _t); _t.y = c.deck + T.patAlt * w[2] + (PL.patLift || 0);
       _t.x += (c.vx || 0) * 8; _t.z += (c.vz || 0) * 8;   // the ship moves: aim where the waypoint will be
       let hold = false;   // at the break with another jet just broken ahead: carry on up the deck heading, then break
-      if (PL.wp === 2 && lz < -150 && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && o.t - o.brokeAt < (T.breakGap ?? 11)) hold = true;
+      if (PL.wp === 2 && (lz < -150 || Math.hypot(_t.x - A.pos.x, _t.z - A.pos.z) < 200) && env.traffic) for (const o of env.traffic(PL)) if (o !== PL && o.t - o.brokeAt < (T.breakGap ?? 11)) hold = true;
       if (hold) FD.dirHdg(hdgS, clamp((_t.y - A.pos.y) * 0.01, -0.1, 0.1), _d); else dirTo(_t.x, _t.y, _t.z, 0.25);
       const brk = PL.wp === 3;
       fly(_d, dt, env, { speed: PL.wp >= 4 ? vApproach() + (PL.wp === 4 ? 16 : 12) : w[3], g: brk ? 4.2 : 3, k: brk ? 2.4 : 1.6, ab: false });

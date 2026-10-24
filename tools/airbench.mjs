@@ -137,7 +137,7 @@ if (!ONLY || ONLY === 'section') {
   const T = run(1100, t => {
     if (!wingUp && t > 25) { wingUp = true; Wg.P.launch(W); }
     if (t > 230 && L.P.state === 'cap' && L.A.fuel > 1950) L.A.fuel = 1950;   // the lead calls bingo
-    for (const u of [L, Wg]) {
+    for (const u of [Wg, L]) {   // the wing first: the harder order for the break interval (it sees the lead break a frame late)
       if (u === Wg && !wingUp) continue;
       if (parked.has(u.P)) continue;
       u.P.update(DT, W);
