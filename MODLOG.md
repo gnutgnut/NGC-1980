@@ -2576,7 +2576,7 @@ the terrain rebuild (ngc/terrain) will change which lots take them.
 **Shared-file hooks**: none (war.js untouched: it already calls `setState` when present). Dev page: `&revet=1` digs
 the game's emplacement (world/structures.js `buildAASite`) round the unit; `__D.hurt(n)`, `__D.kill()`, `__D.build()`.
 
-**Tests.** `scenes/defencepolish.mjs` 14/14 (look: six units fighting in their revetments; crew: the ZU-23-2 runs low
+**Tests.** `scenes/defencepolish.mjs` 20/20 (look: six units fighting in their revetments; crew: the ZU-23-2 runs low
 and is fed, tracers, the TICK on deck; wreck: damaged -> destroyed for Shilka / M167 / TALON; war: PELICAN's gun
 knocked out in game, wreck on the slot, a new gun ordered on the same slot hauls it away; lod: far / near levels,
 build cost). `defcrewposes.mjs` (pose sheet). defence.mjs 11/11, defencewar.mjs 6/6 (+ the revetment seating check),
