@@ -81,6 +81,7 @@ export function createAirWar(W, ctx, H) {
     const c = carrierOf(1);
     if (!c) return 'NO DECK TO LAUNCH FROM  -  THE ALBATROSS IS GONE';
     const n = W.units.filter(u => u.type === 'escort' && !u.dead && !u.dying).length + AW.pending.filter(u => u.type === 'escort').length;
+    if (W.allow && !W.allow(1, 'escort')) return W.gateMsg(1, 'escort');   // TECH TREE gate
     if (n >= AIR.ESCORT_MAX) return 'THREE TOMCATS ALREADY UP';
     if (W.P.mat < H.COST_ESCORT) return 'NOT ENOUGH MATERIEL';
     W.P.mat -= H.COST_ESCORT;
@@ -241,20 +242,21 @@ export function createAirWar(W, ctx, H) {
   // ---------------------------------------------------------------- the enemy commander's air plans (every 2 s)
   AW.think = (pl) => {
     const E = W.E, t = W.time, alive = type => W.units.filter(u => u.type === type && !u.dead && !u.dying).length;
-    const escorts = alive('escort'), shrikes = alive('shrike');
+    const escorts = alive('escort'), shrikes = alive('shrike'), ok = k => !W.allow || W.allow(2, k);   // TECH TREE gates
+    // (a locked type's timer keeps running: it launches on the first tick after the research is done)
     // fighters: answer our Tomcats, and sweep now and then
     AW.shrikeT -= 2;
-    if (((escorts > shrikes && t > 90) || AW.shrikeT <= 0) && shrikes < AIR.SHRIKE_MAX && E.mat >= AIR.COST.shrike * 2) {
+    if (((escorts > shrikes && t > 90) || AW.shrikeT <= 0) && shrikes < AIR.SHRIKE_MAX && E.mat >= AIR.COST.shrike * 2 && ok('shrike')) {
       AW.shrikeT = Math.max(150, 260 - t / 10); E.mat -= AIR.COST.shrike * 2;
       const b = enemyBase(); for (let i = 0; i < 2; i++) AW.spawnShrike({ ...b, x: b.x + i * 30, z: b.z + i * 30 }, W.carrier ? W.carrier.p : null);
       feed('RADAR: TWO RUNAWAY FIGHTERS (RW-4 SHRIKE) AIRBORNE', 'bad');
     }
     // a REAPER to find the ALBATROSS
     AW.reaperT -= 2;
-    if (AW.reaperT <= 0 && alive('reaper') < 1 && E.mat >= AIR.COST.reaper && carrierOf(1)) { AW.reaperT = 200; E.mat -= AIR.COST.reaper; AW.spawnReaper(carrierOf(1).p); }
+    if (AW.reaperT <= 0 && alive('reaper') < 1 && E.mat >= AIR.COST.reaper && carrierOf(1) && ok('reaper')) { AW.reaperT = 200; E.mat -= AIR.COST.reaper; AW.spawnReaper(carrierOf(1).p); }
     // SHAHED salvos: at the spotted ALBATROSS, else at one of our islands' buildings
     AW.shahedT -= 2;
-    if (AW.shahedT <= 0 && E.mat >= AIR.COST.shahed * 4) {
+    if (AW.shahedT <= 0 && E.mat >= AIR.COST.shahed * 4 && ok('shahed')) {
       AW.shahedT = Math.max(110, 190 - t / 15);
       let tgt = null;
       if (AW.spot && t - AW.spot.t < 40 && AW.spot.ship.sinking === undefined) tgt = { ship: AW.spot.ship, x: AW.spot.ship.p.x, y: CARRIER.DECK, z: AW.spot.ship.p.z };

@@ -18,6 +18,7 @@ The enemy carrier KRAKEN is out there doing the same, and whoever controls the m
 - **Archipelago and fog of war.** You only see what your helicopter, carrier, drones and islands can see. Radar islands see further.
 - **Capture islands.** Silence the owner's AA guns, then land on the pad or send a CH-46 Sea Knight with a Marine squad (command 1). Fortress islands hide a cave: fly down the shaft, Thrust-style, and steal the pod. Every cave is procedurally generated (the same island always has the same cave), and the heavier the fortress, the deeper and more twisted its cave and the more turrets guard it.
 - **Economy.** Islands produce fuel and materiel. Spend materiel on Sea Knight landings, AA guns, spare helicopters and escort fighters.
+- **A tech tree for both sides.** TASK FORCE ALBATROSS sails with Hueys, Marines, CH-46 air assault, AA batteries, the motor pool and the Hornets; Tomcat escorts and the flyable F-14A, LCM-8 armour (M113A2, then the M60A3), C-130 logistics, field medicine, radar pickets, Seabees, island production, heliborne doctrine, damage control and the SKY CARRIER refit are researched with materiel on war time (SHIFT+\\ or T on the command board: the RESEARCH page, a grease-pencil plotting board). The RUNAWAY commander researches its own tree (REAPER, RW-7 hover tanks, LANCE lasers, SHRIKEs, SHAHEDs, seized MBTs, the LEVIATHAN programme) and the feed reports what it fields. Pure logic in `game/js/techtree.js`, so the CPU-vs-CPU simulation explores the same trees.
 - **An enemy commander.** It sends RUNAWAY MV-22 Ospreys full of machine troopers to take islands, swarms of RW-3 WASP ducted-fan drones to hunt you, fortifies, raids your carrier, ships supplies in autonomous container ships, and builds the LEVIATHAN railgun monitor in its factories to hunt the ALBATROSS. Bomb the factories to slow it down.
 - **HORNET carrier jet.** Land on the ALBATROSS and press 5: an F/A-18-style fighter on the catapult. Full 6-DOF flight model with a Hornet-like flight computer, a 3D cockpit with a conformal HUD and working displays, catapult launches, arrested landings, gun, AIM-9s and CCIP bombs, ejection. Built for a T.Flight HOTAS 4 and rudder pedals with toe brakes (any stick, pad or keyboard works).
 - **Fly the TOMCAT.** Land on the ALBATROSS and press 8: an F-14A on cat 1 (two in the hangar). The AI escorts' real flight model (swing wings on the CADC, TF30s that stall at high AoA, a mechanical stick with stability augmentation and no limiter) with a 1980 analog cockpit: the AVG-12 HUD, the VDI and HSD CRTs, steam gauges (AoA in units, airspeed / Mach, altimeter, VSI, accelerometer, the wing sweep indicator, TF30 RPM / TIT / fuel flow / nozzles, fuel), the caution panel, the throttles' sweep switch and the emergency sweep handle (OVERSWEEP on deck), pitch trim and the autopilot; every switch clickable, and a cold start on them (ENG CRANK, the throttles OFF -> IDLE at 20%, generators, a wet start if you rush it). The RIO sits behind you. Change to the RIO's seat for the AWG-9's TID and DDD (hook, lock, launch Phoenix and Sparrow) while the pilot flies where you tell him. Warnings are 1980 tones and lights, not a voice. Ejection takes both of you.
@@ -75,6 +76,7 @@ update it. The launcher lives in `%LOCALAPPDATA%\ThrustZarch` (log: `launcher.lo
 | 1-4, 6 | send drone, build AA gun, spare helicopter, Tomcat escort (CAP over the selected island, else over the ALBATROSS), SKY CARRIER refit |
 | 1-5 | send a Sea Knight + Marines, build AA gun, spare helicopter, escort fighter, SKY CARRIER refit |
 | Tab | take / leave the SKY CARRIER helm (landed on her deck) |
+| Shift+6 | SKY CARRIER now: the ALBATROSS lifts off at once, no materiel, from any unit (6 alone is the 300-materiel, 24 s refit) |
 | V / C | cockpit view / chase camera |
 | H | stability assist on/off (on: the cyclic holds attitude, pedals hold heading; default for keyboard) |
 | J | controls panel: bind and calibrate HOTAS / pedals (throttle lever = collective, pedals or twist = anti-torque) |
@@ -125,6 +127,13 @@ tanks, APCs, jeeps and trucks can be out at once, up to what the reserve (and ma
 in takes you to the next one of it. **5** / **8** work from any unit (no need to land the Huey). On a game pad, hold
 BACK / VIEW to open the board: D-pad (or the stick) to pick the unit and the base, A deploy or switch, B close, X stand
 down, Y recall, START another. Deliveries (7, 9, 0) are units out of the same reserve (with none left, materiel buys one).
+
+**RESEARCH**: **SHIFT+\\** (or **T** on the board) opens the research page: the task force's programmes by tier, what each needs
+(pencilled lines), its cost in materiel (paid up front) and its time in war seconds. ENTER starts the selected one, X
+cancels it with a full refund, one at a time; the war goes on while it runs. Locked types on the board and locked orders
+on the map say which research they need. `?tech=all` (and any `?debug` run without `?tech`) is the war without the tree:
+everything unlocked, no upgrades; `?tech=default` the opening set, `?tech=max` everything researched, `?etech=` the same
+for the enemy alone.
 
 The unit you leave carries on: a Huey in the air is flown home by her crew (to the nearest friendly pad or the
 ALBATROSS, onto a free helicopter spot - not one another Huey or a parked jet has - matching the deck's motion); a Hornet or Tomcat in the air goes to the escorts' AI pilot (CAP
@@ -317,6 +326,8 @@ node tools/worldsolidbench.mjs      # the lived-in world as colliders: houses st
 Sea and world: `seaworld.mjs` (`PARTS=lift,house,bridge,mounts,horizon,sea`): the ALBATROSS's lift carrying a spotted Hornet and a soldier, a parked Hornet stopping a walker, a village house wall, a bridge crossed on its deck, the KRAKEN's TALON and LANCE mounts firing, no black above the horizon from six views (deck / 600 m, chase / cockpit, scripted cameras), sea states 1 / 4 / 7 from the deck, from 100 m and from a Hornet at 600 m.
 
 Naval: `game/dev/ships.html` orbits each ship on a sea with sea-state, speed and turn sliders (`?ship=albatross|kraken|leviathan|container`). Scenes: `naval.mjs` (every ship in the game, the deck moving with the sea, crew clearing out from under a helicopter), `shipsdev.mjs` (the preview page from many angles, draw calls).
+
+Tech tree: `node tools/techbench.mjs` (95 checks: acyclic, reachable, start sets ('all' = the game before the tree), gates, mods, timing in war seconds, refunds, snapshot / restore, determinism, the AI policy and doctrines, every gate asked by the game code), scene `techtree.mjs` (the locked board and orders, the RESEARCH page, a programme on war time, cancel, the enemy researching, 300 war seconds on the default trees, `?debug` = the old game).
 
 Air AI: `node tools/airbench.mjs` (a Tomcat sortie cat -> CAP -> bingo -> trap off a fake carrier, wave-off and bolter, terrain, Tomcat vs SHRIKE), `node tools/tomcatbench.mjs` (the F-14A flight model vs published data), scenes `escorts.mjs`, `airfly.mjs`, `airmodels.mjs`.
 node tools/wheeledbench.mjs         # the wheeled vehicles against TM / factory figures (speed, grades, fording, stability, fuel)

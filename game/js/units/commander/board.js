@@ -10,6 +10,8 @@
 //     can(base) -> '' | why not here, deploy(base) -> '' | why it failed (the reserve is already taken),
 //     switchTo() -> '' | why, recall?() -> '' | why (jets on CAP), standDown?() -> '' | why (parked at a base) }
 // and bases() -> [{ key, kind: 'ship' | 'island', name, x, z }] (nearest first is not needed: the board sorts).
+// TECH TREE (optional): gate(id) -> '' | 'NEEDS ... RESEARCH' locks a type's deploy and buy (one already out can still
+// be switched to); research() opens the RESEARCH page (T); researchLine() -> '' | text for the board's sub line.
 // DOM only; no THREE.
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -34,6 +36,7 @@ export function createCommander(h) {
 #cmdBoard .row{display:grid;grid-template-columns:22px 1fr 110px;gap:1px 8px;padding:5px 8px;margin:3px 0;background:rgba(0,40,60,.6);border:1px solid #275;cursor:pointer}
 #cmdBoard .row.sel{background:rgba(0,90,120,.85);border-color:#8ff}
 #cmdBoard .row.off{opacity:.45}
+#cmdBoard .row.lock .st{color:#f97}
 #cmdBoard .row .k{color:#6aa;font-size:12px;padding-top:2px}
 #cmdBoard .row .nm{color:#fff;letter-spacing:1px}
 #cmdBoard .row .nm small{color:#7aa;letter-spacing:0;margin-left:6px}
@@ -69,6 +72,8 @@ export function createCommander(h) {
     const others = act && r.multi && r.outCount && r.outCount() > 1;   // you are in one and more of the type are out: ENTER takes you to the next
     if (act && !another && !others) { o.action = 'here'; o.label = 'YOU ARE HERE'; return o; }
     if (out && !another) { o.action = 'switch'; o.label = others ? 'SWITCH TO THE NEXT ONE' : 'SWITCH TO IT'; return o; }
+    const gate = h.gate ? h.gate(r.id) : '';   // TECH TREE: a type not yet researched can't be taken out
+    if (gate) { o.why = gate; o.label = gate; o.locked = true; return o; }
     const why = !b ? 'NO BASE' : !t.at.includes(b.kind) ? (b.kind === 'island' ? 'CARRIER ONLY' : 'ISLANDS ONLY') : r.can(b);
     if (why) { o.why = why; o.label = why; return o; }
     if (n > 0) { o.action = 'deploy'; o.label = `DEPLOY AT ${b.name}`; return o; }
@@ -142,6 +147,7 @@ export function createCommander(h) {
   const nav = () => { if (C.lossMode && !C.choosing) { C.choosing = true; C.banner = C.banner.replace(/NEXT: .*$/, 'PICK YOUR NEXT UNIT'); } };
   C.key = e => {   // while open: every key is the board's (the unit you are in gets no input)
     const c = e.code, R = h.roster;
+    if (c === 'Backslash' && e.shiftKey && h.research) { C.close(); h.research(); return true; }   // TECH TREE: SHIFT+\ the RESEARCH page
     if (c === 'Escape' || c === 'Backslash') { C.close(); return true; }
     if (c === 'ArrowUp' || c === 'KeyW') { nav(); C.sel = (C.sel - 1 + R.length) % R.length; render(true); return true; }
     if (c === 'ArrowDown' || c === 'KeyS') { nav(); C.sel = (C.sel + 1) % R.length; render(true); return true; }
@@ -155,6 +161,7 @@ export function createCommander(h) {
     if (c === 'KeyX') { nav(); C.standDown(); render(true); return true; }
     if (c === 'KeyN') { nav(); C.act(C.sel, true); render(true); return true; }   // another one (the motor pool's types)
     if (c === 'Slash') { C.next(); return true; }
+    if (c === 'KeyT' && h.research) { C.close(); h.research(); return true; }   // TECH TREE: the RESEARCH page
     return !['KeyM', 'KeyP', 'KeyK', 'KeyJ'].includes(c);   // the map, pause, keyboard-only and the controls panel still work
   };
 
@@ -199,17 +206,17 @@ export function createCommander(h) {
     C.bases = basesNow(); if (!C.bases.some(b => b.key === C.baseKey)) C.baseKey = nearestBaseKey();
     C.rows = h.roster.map(r => rowOf(r));
     const b = base();
-    let html = `<h3>COMMAND</h3><div class="sub">TASK FORCE ALBATROSS  ·  MATERIEL <b>${Math.floor(h.mat())}</b>  ·  FUEL STORES <b>${Math.round(h.fuelStores())}</b>  ·  LOSSES <b>${fleet.losses()}</b></div>`;
+    let html = `<h3>COMMAND</h3><div class="sub">TASK FORCE ALBATROSS  ·  MATERIEL <b>${Math.floor(h.mat())}</b>  ·  FUEL STORES <b>${Math.round(h.fuelStores())}</b>  ·  LOSSES <b>${fleet.losses()}</b>${h.researchLine ? h.researchLine() : ''}</div>`;
     if (C.banner) html += `<div class="ban">${esc(C.banner)}</div>`;
     if (C.note && C.noteT > 0) html += `<div class="note">${esc(C.note)}</div>`;
     html += `<div class="base"><span data-b="-1">&lt;</span><b>DEPLOY AT: ${b ? esc(b.name) + (b.kind === 'island' ? ' (ISLAND)' : ' (CARRIER)') : 'NO BASE'}${b && b.d > 60 ? `  ·  ${Math.round(b.d)} m` : ''}</b><span data-b="1">&gt;</span></div>`;
     C.rows.forEach((o, i) => {
-      const cls = ['row', i === C.sel ? 'sel' : '', o.action === 'none' ? 'off' : '', o.act ? 'here' : ''].join(' ');
+      const cls = ['row', i === C.sel ? 'sel' : '', o.action === 'none' ? 'off' : '', o.act ? 'here' : '', o.locked ? 'lock' : ''].join(' ');
       const more = o.r.multi && (o.out || o.act) ? `  ·  N: ANOTHER AT ${esc(b ? b.name : '')}` : '';
       const st = o.act ? `<i>YOU ARE HERE</i>  ·  ${esc(o.status)}${o.action === 'switch' ? '  ·  ENTER: THE NEXT ONE' : ''}${o.r.recall && /CAP/.test(o.status) ? '  ·  R: RECALL' : ''}${o.r.canStandDown && o.r.canStandDown() ? '  ·  X: STAND DOWN' : ''}${more}` : o.out ? `<i>OUT</i>  ·  ${esc(o.status)}  ·  ENTER: SWITCH TO IT${o.r.recall && /CAP/.test(o.status) ? '  ·  R: RECALL' : ''}${o.r.standDown && o.r.canStandDown && o.r.canStandDown() ? '  ·  X: STAND DOWN' : ''}${more}` : `${o.action === 'none' ? '' : 'ENTER: '}${esc(o.label)}`;
       html += `<div class="${cls}" data-i="${i}"><span class="k">${i + 1}</span><span class="nm">${esc(o.t.short)}<small>${esc(o.r.label || o.t.label)}  ·  ${esc(o.t.note)}</small></span><span class="ct">${o.n}<small>IN RESERVE</small></span><span class="st">${st}</span></div>`;
     });
-    html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER OF THE TYPE  ·  / NEXT UNIT  ·  \\ CLOSE<br>PAD: HOLD BACK TO OPEN / CLOSE  ·  D-PAD SELECT / BASE  ·  A DEPLOY OR SWITCH  ·  B CLOSE  ·  X STAND DOWN  ·  Y RECALL  ·  START ANOTHER<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
+    html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER OF THE TYPE  ·  / NEXT UNIT  ·  T RESEARCH  ·  \\ CLOSE<br>PAD: HOLD BACK TO OPEN / CLOSE  ·  D-PAD SELECT / BASE  ·  A DEPLOY OR SWITCH  ·  B CLOSE  ·  X STAND DOWN  ·  Y RECALL  ·  START ANOTHER<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
     if (force || html !== C.lastHtml) { C.lastHtml = html; el.innerHTML = html; }
   }
   // per frame: the HUD fleet strip; the open board refreshes ~4x a second (statuses move)

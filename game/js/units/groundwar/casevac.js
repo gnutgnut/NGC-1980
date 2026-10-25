@@ -78,7 +78,7 @@ export function createCasevac(o) {
   }
   // ---- the sickbay and the pool
   function sickbayTick(dt) {
-    for (let i = CV.sickbay.length - 1; i >= 0; i--) { const s = CV.sickbay[i]; s.t += dt; if (s.t > EVAC.RECOVER) { CV.sickbay.splice(i, 1); CV.ready++; CV.stats.returned++; } }
+    for (let i = CV.sickbay.length - 1; i >= 0; i--) { const s = CV.sickbay[i]; s.t += dt * (W.techMod ? W.techMod(1, 'medic') : 1); if (s.t > EVAC.RECOVER) { CV.sickbay.splice(i, 1); CV.ready++; CV.stats.returned++; } }
   }
   // war.js: a Sea Knight's materiel, less a 13th of it for every man back from the sickbay who fills a seat
   CV.poolCredit = cost => Math.min(EVAC.SEAT, CV.ready) / EVAC.SEAT * cost;

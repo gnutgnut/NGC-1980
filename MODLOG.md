@@ -2856,3 +2856,58 @@ figures (they vanish with the wreck); no per-unit sounds for the towed guns' cre
   aid; AI Marines don't react to a dropped live grenade (no dive for cover: they take the fragments); the first-person
   fists stay fists when swimming (no open-hand mesh); hands on the rails are placed for the island ladders' width, not
   each ladder's real rails; the AI's grenades are drawn within 260 m only.
+
+## 2026-10-25 — NGC-1980 TECH TREE (branch ngc/techtree)
+User: "a non player cpu test simulation ... explore strategy of most likely outcomes with command decisions ... a tech
+tree that unlocks these different features and allow that to also be tested in the sim mode". This branch is the tree;
+ngc/simmode (CPU vs CPU) plugs it into its commanders through the API below.
+- **game/js/techtree.js** (pure, no THREE / DOM / Math.random; the API contract is its header): `TECH` (34 nodes:
+  TASK FORCE ALBATROSS 18, RUNAWAY 16, tiers 0-3), `createTech(side, { start })` -> has / canResearch / research (pays
+  up front) / cancel (full refund) / update(dt game s) / current / progress / remaining / unlocked / allows / mod /
+  available / onDone / snapshot / restore / reset / log, `unitAllowed(T, key)`, `gateMsg`, `aiPickResearch(T, econ,
+  situation, doctrine)` (doctrine orders + reactions: their air -> fighters, their armour -> hover tanks, the LEVIATHAN
+  out -> damage control; keeps a 25 materiel reserve), `DOCTRINES`, `GATES` (each key and the file that asks it),
+  `MODS`, `techStartFromQuery`.
+- **Start sets**: 'default' = tier 0 (player: Huey, Marines, CH-46 air assault, AA, motor pool, Hornet; enemy: MV-22 +
+  STRIDERs, WASPs, TALON AA, freighters); **'all' = every unit / ability node and no upgrades = the game exactly as it
+  was** (every old scene runs with `?debug`, which defaults to 'all' when there is no `?tech`); 'max' = everything incl.
+  upgrades; 'none'; a list. URL: `?tech=`, `?etech=` (enemy only), `?tech=id,id` = tier 0 + those.
+- **Gates (real code only)**: player - heli (command 3), drone (sendDrone), aa (orderAA), escort (airwar sendEscort),
+  sky (upgradeCarrier; SHIFT+6 / F6, the free instant refit, deliberately skips it), m60 / m113 (deliverArmour, and the
+  parked M60A3 / deck M113A2 at a new war), m151 / m35 (motor pool), logistics (callLogistics: the C-130 drop / fuel team),
+  and every fleet type's deploy and buy on the command board (gate(id) hook in board.js). Enemy - transport, gunship (the
+  guards, hunters and raids), aa, freighter, battleship (no LEVIATHAN build-up before it), in war.js think; reaper /
+  shrike / shahed in airwar think; hovertank / mbt in groundwar think (no armour budget saved before); lance in
+  defence/brain.js pick (the starting garrisons keep theirs).
+- **Mods (game-level multipliers)** where the stat is used: econ.mat / econ.fuel (island output), cap.time, sight (fog
+  radii), aa.build, aa.hp, rebuild, ship.repair, bship.rate, hp.<type> (makeAir: hp.drone, hp.gunship, hp.transport),
+  medic (casevac.js sickbay recovery).
+- **war.js**: `W.tech = [null, T1, T2]`, `W.allow(side, key)`, `W.gateMsg`, `W.techMod`, `W.research(side, id)` /
+  `W.cancelResearch(side)` (pay from W.P / W.E), `W.researchPolicy[side]` (enemy = aiPickResearch unless its tree started
+  'all'; player null = the RESEARCH page; the sim swaps in policies), `W.doctrine[side]`, `W.researchTick(side, pl)`;
+  reset with the war, updated every war frame, research picked in the 2 s commander tick; feed lines "RESEARCH COMPLETE"
+  and "INTEL: THE RUNAWAY HAVE FIELDED ...".
+- **The RESEARCH page** (game/js/techui.js, DOM + 2D canvas): SHIFT+\\ from anywhere, T on the command board; a perspex
+  plotting board with chalk tier columns, stencilled cards (green + tick done, amber with grease-pencil hatching under
+  way, chalk outline open, dashed + padlock locked), grease-pencil lines from each need (the selected card's in bold),
+  a details strip (what it does, needs, unlocks / mods, cost, why not), INTEL on what the enemy has fielded. Keys:
+  arrows / WASD, ENTER start, X cancel, T board, ESC / SHIFT+\\ close; click to select, again to start. The board's
+  locked rows are greyed with "NEEDS ... RESEARCH" and a research line under the header; the big map's order list
+  marks locked orders [RESEARCH] and now fits the screen on two lines (the one long line ran off both edges at 1280 px
+  before this branch).
+- **Tests**: techbench 95/95 (default-policy enemy in a 1 materiel/s war: REAPER at 64 s, RW-7 at 174 s, SHRIKE 726 s,
+  MBTs 852 s, the LEVIATHAN programme at 1490 s; whole tree in an hour; doctrines air / ground / naval differ).
+  Scene techtree.mjs 26/26 (screenshots: the locked board, the research page idle / under way / done / armour, the
+  map's orders, INTEL; 300 war seconds on the default trees in the page with the enemy researching 3+ programmes, no
+  errors; `?debug` alone = every gate open, every mod 1, the M60A3 / M113A2 parked). smoke 5/5, commanderbench 32/32,
+  groundwarbench 33/33, airbench 28/28.
+- **Shared-file lines**: war.js (import, the W.tech block, buildAA hp, killStruct rebuild, upgradeCarrier, makeAir hp,
+  sendDrone, orderAA, capture rates, economy, think gates + research, reset, update, visionSources, defence allow);
+  main.js (import, techUI keys / create / update / close, command 3, deliverArmour, deliverVehicle, callLogistics,
+  placeVehicles, the board's gate / research / researchLine, SHIFT+\\ in commandKey, the map's order lines, __G.tech /
+  techUI); board.js (gate, T, SHIFT+\\, the research line, .lock); airwar.js, groundwar.js, brain.js, casevac.js (one or
+  two lines each); index.html HOW TO PLAY.
+- **Untested / next**: no save games exist, so snapshot / restore is only used by tests and the sim; balance (costs,
+  times, the enemy's 25-materiel reserve) is a first cut for the sim to tune; the player has no CPU research policy in
+  the live game (W.researchPolicy[1] = aiPickResearch turns one on); the enemy sees no fog (its "situation" counts every
+  unit); research is one programme at a time with no queue.

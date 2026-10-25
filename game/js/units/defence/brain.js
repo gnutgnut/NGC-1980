@@ -49,7 +49,7 @@ export function createDefence(env) {
     const lances = I.structs ? I.structs.filter(s => !s.dead && s.def && s.def.type === 'lance').length : 0;
     const want = I.name === 'IRONHOLD' ? 2 : (I.kind === 'hq' || I.kind === 'fortress') ? 1 : 0;
     const guns = I.structs ? I.structs.filter(s => s.kind === 'aa' && !s.dead).length : 0;
-    return lances < want && guns % 2 === 0 ? 'lance' : 'talon';
+    return lances < want && guns % 2 === 0 && (initial || !env.allow || env.allow(side, 'lance')) ? 'lance' : 'talon';   // TECH TREE: new LANCEs need the research
   }
   function model(side, I, initial) { return buildDefence(pick(side, I, initial), side); }
 

@@ -1,0 +1,14 @@
+{
+  "name": "skycarrierkey",
+  "query": "?debug&auto&kb&res=0.45",
+  "steps": [
+    "waitFor 20000 window.__G && __G.G.state==='play' && __G.war && __G.war.carrier",
+    "eval (window.__m0 = __G.war.P ? __G.war.P.mat : __G.G.mat, dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit6', key: '^', shiftKey: true })), dispatchEvent(new KeyboardEvent('keyup', { code: 'Digit6', key: '^', shiftKey: true })), { msg: document.getElementById('msg') && document.getElementById('msg').textContent, m0: window.__m0 })",
+    "waitFor 60000 __G.war.carrier.sky && __G.war.carrier.sky.up",
+    "expect __G.war.carrier.sky && __G.war.carrier.sky.up",
+    "expect (__G.war.P ? __G.war.P.mat : __G.G.mat) >= window.__m0",
+    "wait 15000",
+    "shot sky-carrier",
+    "eval ({ y: __G.war.carrier.p.y, up: __G.war.carrier.sky.up, mat: __G.war.P ? __G.war.P.mat : __G.G.mat })"
+  ]
+}

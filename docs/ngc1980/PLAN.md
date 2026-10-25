@@ -69,3 +69,16 @@ Priority order (each a focused agent; later ones build on earlier ones):
 4. **VEHICLES AT JET QUALITY** (armorgame-polish, wheeledgame running): every station a clickable working
    interior, crew visible, procedures, failures, damage, inside/outside sound, HOTAS.
 5. Then: a full regression + performance pass on a mid-range GPU budget, and a playtest pass (balance, UX, help).
+
+## Wave 4 (user request 2026-10-25): sim mode, tech tree, sea life
+User: "a non player cpu test simulation that uses all the same gameplay ... explore strategy of most likely outcomes
+with command decisions such that we can optimise the gameplay to make it a fun game. Lets have a tech tree that
+unlocks these such different features and allow that to also be tested in the sim mode ... sea biology sim ... fish
+react to the physics and school around."
+
+| Feature | Branch | Status | Notes |
+|---|---|---|---|
+| TECH TREE (game/js/techtree.js API, both sides, research UI, gates every buy) | ngc/techtree | merged | techbench 95/95, techtree.mjs 26/26, smoke 5/5; Shift+\\ or T on the board opens RESEARCH |
+| SIM MODE (CPU vs CPU, doctrines, tools/warsim.mjs batch/tournament/sweep, ?sim spectator, fun metrics, SIMREPORT.md) | ngc/simmode | running | merges ngc/techtree when its API lands |
+| SEA LIFE 2 (fish round units, physics reactions, bait balls, dolphins, birds, surface signs) | ngc/sealife2 | running | builds on fishsim.js / sealife.js |
+| Next: BALANCE pass driven by the sim's tournament (apply SIMREPORT tuning, re-run until no dominant doctrine) | | queued | after techtree + simmode merge |

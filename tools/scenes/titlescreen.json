@@ -1,0 +1,19 @@
+{
+  "name": "titlescreen",
+  "query": "?debug&res=0.6",
+  "steps": [
+    "waitFor 20000 window.__G && __G.G.state==='title'",
+    "wait 1500",
+    "shot title-collapsed",
+    "expect document.getElementById('title').innerText.length < 600",
+    "eval (document.querySelector('#howto summary').click(), document.getElementById('title').innerText.length)",
+    "wait 800",
+    "shot title-howto-open",
+    "expect document.getElementById('howto').open && document.getElementById('title').innerText.length > 3000",
+    "eval (document.querySelector('#howto summary').click(), dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter', key: 'Enter' })), 1)",
+    "waitFor 20000 __G.G.state==='play' && __G.war && __G.war.carrier",
+    "eval (dispatchEvent(new KeyboardEvent('keydown', { code: 'F6', key: 'F6' })), dispatchEvent(new KeyboardEvent('keyup', { code: 'F6', key: 'F6' })), 1)",
+    "waitFor 20000 __G.war.carrier.sky && __G.war.carrier.sky.up",
+    "expect __G.war.carrier.sky && __G.war.carrier.sky.up"
+  ]
+}

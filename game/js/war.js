@@ -20,6 +20,7 @@ import { createSeaWeather } from './units/naval/seaweather.js';   // SEAWORLD: t
 import { createNavalFx } from './units/naval/navalfx.js';
 import { createAirWar } from './units/air/airwar.js';             // AIR: sim-flown Tomcats, SHRIKE / REAPER / SHAHED (ngc/airfw)
 import { homeAAM, decoyCheck } from './units/air/gameproj.js';     // AIR: the shared game-level missile homing and decoy rule
+import { createTech, unitAllowed, gateMsg, aiPickResearch, techStartFromQuery } from './techtree.js';   // TECH TREE: research gates every buy / build / launch
 
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -45,6 +46,22 @@ export function createWar(ctx) {
   // position to the motion model); setSea retunes it in place (the waves keep their phases: nothing jumps).
   // W.weather drifts the state over the war when the player turns WEATHER DRIFT on (pause menu; seaweather.js).
   W.weather = createSeaWeather(W.sea.ss, W.sea.dir, 23);
+  // TECH TREE hook (techtree.js): one research model per side. W.allow(side, key) is the gate every buy / build / launch
+  // asks (player orders and the AI alike), W.techMod(side, key) the upgrade multiplier where a stat is used.
+  // ?tech= / ?etech= pick the start set; 'all' (and ?debug without ?tech) is exactly the game before the tree.
+  // W.researchPolicy[side] = (T, econ, situation, doctrine) -> id | null: who picks the research (null = nobody; the
+  // player picks on the RESEARCH page). The enemy runs the default policy unless its tree started 'all'.
+  W.techStart = [null, techStartFromQuery(_sq, 1), techStartFromQuery(_sq, 2)];
+  W.tech = [null, createTech(1, { start: W.techStart[1] }), createTech(2, { start: W.techStart[2] })];
+  W.allow = (side, key) => unitAllowed(W.tech[side], key);
+  W.gateMsg = (side, key) => gateMsg(W.tech[side], key);
+  W.techMod = (side, key) => W.tech[side] ? W.tech[side].mod(key) : 1;
+  W.researchPolicy = [null, null, W.tech[2].mode === 'all' ? null : aiPickResearch];
+  W.doctrine = [null, 'balanced', 'balanced'];
+  W.research = (side, id) => W.tech[side].research(id, side === 1 ? W.P : W.E);   // pays from the side's store
+  W.cancelResearch = side => W.tech[side].cancel(side === 1 ? W.P : W.E);
+  W.tech[1].onDone(n => { feed(`RESEARCH COMPLETE: ${n.name}`, 'good'); sfx.dock?.(); });
+  W.tech[2].onDone(n => { if ((n.unlocks.units || []).length) feed(`INTEL: THE RUNAWAY HAVE FIELDED ${n.name}`, 'bad'); });
   W.setSea = (ss, dir = W.sea.dir) => { W.weather.set(ss); retuneSea(W.sea, ss, dir); return W.sea.name; };
   W.setSeaDrift = on => { W.weather.set(W.weather.base, !!on); retuneSea(W.sea, W.weather.base, W.sea.dir); };
   W.seaY = (x, z) => seaElevation(W.sea, x, z);   // the drawn surface height (game m) at a world point
@@ -60,7 +77,7 @@ export function createWar(ctx) {
   // NGC-1980 DEFENCE hook: the 'aa' structures and the ALBATROSS gun mounts are drawn and fought by units/defence/
   // (turrets with slew limits, line-of-sight locks with tells, tracers / airbursts / missiles / the LANCE beam).
   // war.js still owns their hp, building, capture rules, rebuilds and the projectile hits.
-  const defence = createDefence({ scene, fx, sfx, terrainH, hear, feed, time: () => W.time, player: ctx.player, hurtPlayer: (a, why) => ctx.hurtPlayer(a, why),
+  const defence = createDefence({ scene, fx, sfx, terrainH, hear, feed, time: () => W.time, allow: (side, key) => W.allow ? W.allow(side, key) : true, player: ctx.player, hurtPlayer: (a, why) => ctx.hurtPlayer(a, why),
     shoot: (...a) => shoot(...a), damage: (...a) => damage(...a), hitTest: (...a) => hitTest(...a) });
   W.defence = defence;
 
@@ -82,7 +99,11 @@ export function createWar(ctx) {
     return Array.from({ length: n }, (_, k) => { const a = k * Math.PI / 2 + Math.PI / 4; return [p.x + Math.cos(a) * r, p.z + Math.sin(a) * r]; });
   }
   function freeSlot(I) { return aaSlots(I).find(([x, z]) => !I.structs.some(s => s.kind === 'aa' && !s.dead && Math.hypot(s.x - x, s.z - z) < 3)); }
-  function buildAA(I, side) { const sl = freeSlot(I); if (!sl) return null; const s = addStruct(I, 'aa', sl[0], sl[1], side); s.building = 4; s.mesh.scale.setScalar(0.01); return s; }
+  function buildAA(I, side) {
+    const sl = freeSlot(I); if (!sl) return null; const s = addStruct(I, 'aa', sl[0], sl[1], side); s.building = 4; s.mesh.scale.setScalar(0.01);
+    const hm = seeding ? 1 : W.techMod(side, 'aa.hp'); if (hm !== 1) { s.hp *= hm; s.max *= hm; }   // TECH: armour for new guns
+    return s;
+  }
   W.aliveAA = (I, side = I.owner) => I.structs.filter(s => s.kind === 'aa' && !s.dead && s.side === side && !s.building).length;
   function coastPoint(I, toward) {   // a spot on the island's shore facing `toward`
     const a = Math.atan2(toward[1] - I.z, toward[0] - I.x);
@@ -142,7 +163,7 @@ export function createWar(ctx) {
     if (s.mesh.userData.setState) s.mesh.userData.setState('destroyed');   // WORLD: the structure shows its own ruin
     else { s.mesh.visible = false; s.rubble = buildRubble(s.r * 0.9); s.rubble.position.set(s.x, s.y, s.z); islandGroup.add(s.rubble); }
     if (s.chimneys) for (const c of s.chimneys) c.off = true;
-    if (s.kind !== 'aa') s.rebuild = 60;
+    if (s.kind !== 'aa') s.rebuild = 60 * W.techMod(s.side, 'rebuild');   // TECH: engineers
     if (s.kind === 'shipyard') { W.E.bship = Math.max(0, W.E.bship - 30); feed('SHIPYARD DESTROYED  -  LEVIATHAN SET BACK', 'good'); }
     if (!quiet && s.side === 2) { ctx.addScore(s.kind === 'aa' ? 250 : 600); feed(`${s.I.name}: ${s.kind === 'aa' ? 'AA GUN' : s.kind.toUpperCase()} DESTROYED`, 'good'); }
     if (!quiet && s.side === 1) feed(`${s.I.name}: OUR ${s.kind === 'aa' ? 'AA GUN' : s.kind.toUpperCase()} DESTROYED`, 'bad');
@@ -214,14 +235,16 @@ export function createWar(ctx) {
   // and the lift lever all move slowly, and the ship answers them slowly - minutes of inertia, not seconds.
   // sky.manual: someone is at the helm (main.js sets sky.tel / sky.helmIn / sky.lift each frame).
   const SKY = { VMAX: 16, ACC: 0.3, DEC: 0.45, YAW: 0.06, YAW_ACC: 0.01, CLIMB: 3.2, V_ACC: 0.32, CEIL: 230, CRUISE: 70 };
-  W.upgradeCarrier = () => {
+  W.upgradeCarrier = (o = {}) => {   // o.free: no materiel; o.instant: no 24 s refit (SHIFT+6 in main.js)
     const u = W.carrier;
     if (!u || u.sinking !== undefined) return 'NO CARRIER TO REFIT';
-    if (u.sky) return u.sky.up ? 'THE ALBATROSS ALREADY FLIES' : `REFIT UNDER WAY  -  ${Math.ceil(u.sky.refit)}s`;
-    if (W.P.mat < COST.sky) return `SKY CARRIER REFIT NEEDS ${COST.sky} MATERIEL`;
-    W.P.mat -= COST.sky; u.path = []; u.goal = null;
+    if (u.sky) { if (!u.sky.up && o.instant) { u.sky.refit = 0.01; return 'SKY CARRIER  -  LIFT FANS COMING ONLINE'; } return u.sky.up ? 'THE ALBATROSS ALREADY FLIES' : `REFIT UNDER WAY  -  ${Math.ceil(u.sky.refit)}s`; }
+    if (!o.free && !W.allow(1, 'sky')) return W.gateMsg(1, 'sky');   // TECH (SHIFT+6, free and instant, skips the gate)
+    if (!o.free && W.P.mat < COST.sky) return `SKY CARRIER REFIT NEEDS ${COST.sky} MATERIEL`;
+    if (!o.free) W.P.mat -= COST.sky; u.path = []; u.goal = null;
     addLiftFans(u.parts);
-    u.sky = { refit: 24, up: false, deploy: 0, spin: 0, tel: 0, helmIn: 0, lift: 0, telV: 0, helmV: 0, liftV: 0, yawRate: 0, vy: 0, pitch: 0, roll: 0, manual: false, hold: 0, scrapeT: 0 };
+    u.sky = { refit: o.instant ? 0.01 : 24, up: false, deploy: 0, spin: 0, tel: 0, helmIn: 0, lift: 0, telV: 0, helmV: 0, liftV: 0, yawRate: 0, vy: 0, pitch: 0, roll: 0, manual: false, hold: 0, scrapeT: 0 };
+    if (o.instant) { sfx.dock(); return 'SKY CARRIER  -  LIFT FANS COMING ONLINE  -  TAB AT THE HELM'; }
     feed('SKY CARRIER REFIT STARTED  -  LIFT FANS GOING ON THE ALBATROSS (24s)', 'good'); sfx.dock();
     return 'SKY CARRIER REFIT  -  STAND CLEAR OF THE OUTRIGGERS';
   };
@@ -399,11 +422,12 @@ export function createWar(ctx) {
   const GW = createGroundWar({ W, scene, fx, sfx, terrainH, nav, feed, hear, boomAt, ear, addScore: ctx.addScore, player: ctx.player, hurtPlayer: (a, why, at, dir) => ctx.hurtPlayer(a, why, at, dir) });
   W.ground = GW; ROT.ground = GW;
   function makeAir(type, side, x, y, z, extra = {}) {
-    { const ru = ROT.make(type, side, x, y, z, extra); if (ru) { W.units.push(ru); return ru; } }   // NGC-1980 hook
+    const hpMod = u => { const k = W.techMod(side, 'hp.' + type); if (k !== 1) { u.hp *= k; u.hpMax *= k; } return u; };   // TECH: armour upgrades
+    { const ru = ROT.make(type, side, x, y, z, extra); if (ru) { W.units.push(hpMod(ru)); return ru; } }   // NGC-1980 hook
     const m = type === 'drone' ? buildDrone() : type === 'transport' ? buildTransport() : type === 'escort' ? buildTomcat(side) : buildGunship(side);
     const hp = { drone: 5, transport: 7, gunship: 3, escort: 4 }[type];
     const u = { type, side, p: new THREE.Vector3(x, y, z), v: new THREE.Vector3(), yaw: 0, hp, hpMax: hp, mesh: m.group, parts: m, r: type === 'transport' ? 4.5 : type === 'escort' ? 4 : 3.2, cd: rnd(1, 2.5), ph: rnd(6.28), state: 'go', ...extra };
-    m.group.position.copy(u.p); scene.add(m.group); W.units.push(u); return u;
+    m.group.position.copy(u.p); scene.add(m.group); W.units.push(hpMod(u)); return u;
   }
   function launchPoint(side) {   // from the carrier deck if it is afloat, else the HQ pad
     const c = side === 1 ? W.carrier : W.enemyCarrier;
@@ -412,6 +436,7 @@ export function createWar(ctx) {
   }
   W.sendDrone = I => {
     // NGC-1980 ngc/infdepth hook: Marines back from the sickbay (casualty evacuation) fill seats: less materiel
+    if (!W.allow(1, 'drone')) return W.gateMsg(1, 'drone');   // TECH
     const cost = COST.drone - (GW.CV ? GW.CV.poolCredit(COST.drone) : 0);
     if (W.P.mat < cost) return 'NOT ENOUGH MATERIEL';
     const reinforce = I.owner === 1 && !I.cave && GW.presence(I, 2) > 0;   // NGC-1980 GROUND WAR hook: Marines to one of our islands the machines have landed on
@@ -423,10 +448,11 @@ export function createWar(ctx) {
     sfx.dock(); return `SEA KNIGHT LAUNCHED  -  13 MARINES${back ? ` (${back} BACK FROM THE SICKBAY)` : ''} ${reinforce ? 'TO REINFORCE' : 'FOR'} ${I.name}`;
   };
   W.orderAA = I => {
+    if (!W.allow(1, 'aa')) return W.gateMsg(1, 'aa');   // TECH
     if (I.owner !== 1) return 'GUNS CAN ONLY GO ON OUR ISLANDS';
     if (W.P.mat < COST.aa) return 'NOT ENOUGH MATERIEL';
     const s = buildAA(I, 1); if (!s) return `${I.name}: NO ROOM FOR MORE GUNS`;
-    W.P.mat -= COST.aa; s.building = 12; return `AA GUN GOING UP ON ${I.name}`;
+    W.P.mat -= COST.aa; s.building = 12 * W.techMod(1, 'aa.build'); return `AA GUN GOING UP ON ${I.name}`;
   };
   function flyTo(u, tx, ty, tz, sp, dt, k = 1.4) {
     const dx = tx - u.p.x, dz = tz - u.p.z, d = Math.hypot(dx, dz) || 1, s = Math.min(sp, d * 0.8);
@@ -713,11 +739,11 @@ export function createWar(ctx) {
   function updateCapture(dt, pl) {
     for (const I of W.islands) {
       const p = I.pad; let side = 0, rate = 0, who = '';
-      if (pl.alive && !pl.inCave && pl.landed && Math.hypot(pl.pos.x - p.x, pl.pos.z - p.z) < p.r + 1 && I.owner !== 1 && !I.cave) { side = 1; rate = 1 / (pl.capTime || CAP_TIME.heli); who = pl.kind === 'foot' ? 'infantry' : 'heli'; }   // FOUNDATION: any craft on the pad (pl.capTime)
+      if (pl.alive && !pl.inCave && pl.landed && Math.hypot(pl.pos.x - p.x, pl.pos.z - p.z) < p.r + 1 && I.owner !== 1 && !I.cave) { side = 1; rate = 1 / ((pl.capTime || CAP_TIME.heli) * W.techMod(1, 'cap.time')); who = pl.kind === 'foot' ? 'infantry' : 'heli'; }   // FOUNDATION: any craft on the pad (pl.capTime)
       for (const u of W.units) if (u.landed && u.target === I && !u.dead && !u.dying && u.side !== I.owner) {
         if (I.cave && u.side === 1) continue;
         if (I.kind === 'hq' && u.side === 2) continue;   // our HQ can't be taken by transports
-        if (!side || side === u.side) { side = u.side; rate += 1 / (u.capTime || CAP_TIME[u.type]); who = who || u.type; }   // squads carry their own capture time
+        if (!side || side === u.side) { side = u.side; rate += 1 / ((u.capTime || CAP_TIME[u.type]) * W.techMod(u.side, 'cap.time')); who = who || u.type; }   // squads carry their own capture time
       }
       const guarded = W.aliveAA(I) > 0;
       if (!side || guarded) { if (I.cap && (!side || guarded)) { I.cap.t = Math.max(0, I.cap.t - dt * 0.2); if (I.cap.t <= 0) I.cap = null; } if (side && guarded) I.capBlocked = W.time; continue; }
@@ -731,25 +757,27 @@ export function createWar(ctx) {
   }
   function updateEconomy(dt) {
     W.econT += dt; if (W.econT < 1) return; const k = W.econT; W.econT = 0;
+    const bshipOk = W.allow(2, 'battleship'), kb = k * W.techMod(2, 'bship.rate');   // TECH: the LEVIATHAN programme
     for (const I of W.islands) {
       if (!I.owner) continue;
       const S = store(I.owner), pk = PROD_KIND[I.kind], prodOk = !pk || I.structs.some(s => s.kind === pk && !s.dead), hqOk = I.structs.some(s => s.kind === 'hq' && !s.dead);
       const P = PROD[I.kind];
       if (prodOk && hqOk) {
-        if (I.owner === 2 && I.kind !== 'hq') I.stock = (I.stock || 0) + ((P.mat || 0) + (P.fuel || 0) * 0.5) * k;   // enemy outposts ship their output by freighter
-        else { if (P.fuel) S.fuel = Math.min(S.fuelMax ?? 1e9, S.fuel + P.fuel * k); if (P.mat) S.mat += P.mat * k; }
+        const km = k * W.techMod(I.owner, 'econ.mat'), kf = k * W.techMod(I.owner, 'econ.fuel');   // TECH: production upgrades
+        if (I.owner === 2 && I.kind !== 'hq') I.stock = (I.stock || 0) + (P.mat || 0) * km + (P.fuel || 0) * 0.5 * kf;   // enemy outposts ship their output by freighter
+        else { if (P.fuel) S.fuel = Math.min(S.fuelMax ?? 1e9, S.fuel + P.fuel * kf); if (P.mat) S.mat += P.mat * km; }
       }
-      if (I.owner === 2 && I.kind === 'factory' && prodOk) W.E.bship += 0.08 * k;
+      if (I.owner === 2 && I.kind === 'factory' && prodOk && bshipOk) W.E.bship += 0.08 * kb;
       // rebuild flattened buildings when the owner can pay for it and nobody has hit the island for a while
       for (const s of I.structs) if (s.dead && s.kind !== 'aa' && s.side === I.owner) {
         s.rebuild -= k;
         if (s.rebuild <= 0 && W.time - I.lastHit > 30 && S.mat >= 20) { S.mat -= 20; restoreStruct(s); if (I.owner === 1) feed(`${I.name}: ${s.kind.toUpperCase()} REBUILT`, 'good'); }
       }
     }
-    if (W.islands.find(I => I.name === 'IRONHOLD').yard && !W.islands.find(I => I.name === 'IRONHOLD').yard.dead && W.islands.find(I => I.name === 'IRONHOLD').owner === 2) W.E.bship += 0.06 * k;
+    if (W.islands.find(I => I.name === 'IRONHOLD').yard && !W.islands.find(I => I.name === 'IRONHOLD').yard.dead && W.islands.find(I => I.name === 'IRONHOLD').owner === 2 && bshipOk) W.E.bship += 0.06 * kb;
     if (W.battleship) W.E.bship = Math.min(W.E.bship, 99);
     // carriers patch themselves up with materiel when nobody is shooting at them
-    for (const c of [W.carrier, W.enemyCarrier]) if (c && c.sinking === undefined && c.hp < c.hpMax && W.time - (c.lastHit ?? -99) > 15) { const S = store(c.side), fix = Math.min(c.hpMax - c.hp, 3 * k, S.mat * 4); c.hp += fix; S.mat -= fix / 4; }
+    for (const c of [W.carrier, W.enemyCarrier]) if (c && c.sinking === undefined && c.hp < c.hpMax && W.time - (c.lastHit ?? -99) > 15) { const S = store(c.side), fix = Math.min(c.hpMax - c.hp, 3 * k * W.techMod(c.side, 'ship.repair'), S.mat * 4); c.hp += fix; S.mat -= fix / 4; }
   }
 
   // ------------------------------------------------------------------------------------- the enemy commander
@@ -770,7 +798,20 @@ export function createWar(ctx) {
     }
     return best;
   }
+  // TECH TREE: a side's research, by its policy (the enemy: techtree.js aiPickResearch; the sim can swap policies in)
+  function research(side, pl) {
+    const T = W.tech[side], pol = W.researchPolicy[side]; if (!T || !pol || T.current) return;
+    const foe = side === 1 ? 2 : 1, n = f => W.units.filter(u => u.side === foe && !u.dead && !u.dying && f(u)).length;
+    const plAir = side === 2 && pl && pl.alive && !pl.inCave && (pl.kind === 'jet' || pl.kind === 'tomcat') ? 1 : 0;
+    const sit = { time: W.time, foeAir: n(u => u.type === 'escort' || u.type === 'gunship' || u.type === 'shrike') + plAir,
+      foeArmour: W.islands.reduce((s, I) => s + (I.owner === side ? GW.presence(I, foe) : 0), 0), foeShips: n(u => u.type === 'battleship'),
+      mine: W.islands.filter(I => I.owner === side).length };
+    const id = pol(T, side === 1 ? W.P : W.E, sit, W.doctrine[side]);
+    if (id) W.research(side, id);
+  }
+  W.researchTick = research;
   function think(pl) {
+    research(2, pl); research(1, pl);   // TECH TREE: the commanders' research (the player's policy is null: the RESEARCH page)
     const E = W.E, ec = W.enemyCarrier && W.enemyCarrier.sinking === undefined ? W.enemyCarrier : null;
     const air = W.units.filter(u => u.side === 2 && u.p && !u.dims && !u.dead && !u.dying);
     const guns = air.filter(u => u.type === 'gunship'), trans = air.filter(u => u.type === 'transport');
@@ -779,16 +820,16 @@ export function createWar(ctx) {
     if (pl.alive && !pl.inCave) {
       const near = [...mine.map(I => [I.x, I.z]), ...(ec ? [[ec.p.x, ec.p.z]] : [])].some(([x, z]) => Math.hypot(pl.pos.x - x, pl.pos.z - z) < 260 * (pl.detect ?? 1));
       const hunting = guns.filter(g => g.target === 'player').length;
-      if (near && hunting < 2 + Math.floor(W.time / 300) && guns.length < cap && E.mat >= 12) { E.mat -= 12; W.spawnGunship(2, nearestLaunch(pl.pos.x, pl.pos.z)).target = 'player'; }
+      if (near && hunting < 2 + Math.floor(W.time / 300) && guns.length < cap && E.mat >= 12 && W.allow(2, 'gunship')) { E.mat -= 12; W.spawnGunship(2, nearestLaunch(pl.pos.x, pl.pos.z)).target = 'player'; }
     }
     // 2. expand: send transports at neutral (or undefended player) islands
     W.transT -= 2;
-    if (trans.length < 2 && E.mat >= 25 && W.transT <= 0) { const I = pickExpansion(); if (I) { W.transT = Math.max(18, 40 - W.time / 30); E.mat -= 25; const [x, y, z] = launchPoint(2); makeAir('transport', 2, x, y, z, { target: I }); } }
+    if (trans.length < 2 && E.mat >= 25 && W.transT <= 0 && W.allow(2, 'transport')) { const I = pickExpansion(); if (I) { W.transT = Math.max(18, 40 - W.time / 30); E.mat -= 25; const [x, y, z] = launchPoint(2); makeAir('transport', 2, x, y, z, { target: I }); } }
     // 3. fortify: guns on islands that have few
-    for (const I of mine) if (E.mat >= 30 && W.aliveAA(I) + I.structs.filter(s => s.kind === 'aa' && s.building > 0).length < (I.kind === 'factory' || I.kind === 'hq' ? 3 : 2)) { const s = buildAA(I, 2); if (s) { E.mat -= 30; s.building = 14; } break; }
+    for (const I of mine) if (E.mat >= 30 && W.allow(2, 'aa') && W.aliveAA(I) + I.structs.filter(s => s.kind === 'aa' && s.building > 0).length < (I.kind === 'factory' || I.kind === 'hq' ? 3 : 2)) { const s = buildAA(I, 2); if (s) { E.mat -= 30; s.building = 14 * W.techMod(2, 'aa.build'); } break; }
     // 4. raid: every so often, a strike group at the player's weakest guarded island or the carrier
     W.raidT -= 2;
-    if (W.raidT <= 0 && E.mat >= 36 && guns.length < cap) {
+    if (W.raidT <= 0 && E.mat >= 36 && guns.length < cap && W.allow(2, 'gunship')) {
       W.raidT = Math.max(50, 110 - W.time / 20);
       const ours = W.islands.filter(I => I.owner === 1 && I.kind !== 'hq');
       let tgt = null;
@@ -797,10 +838,10 @@ export function createWar(ctx) {
       if (tgt) { const n = 2 + Math.min(3, Math.floor(W.time / 240)); E.mat -= 12 * n; for (let i = 0; i < n; i++) W.spawnGunship(2, null, tgt); feed(tgt === W.carrier ? 'RADAR: ENEMY STRIKE INBOUND ON THE ALBATROSS' : `RADAR: ENEMY STRIKE HEADING FOR ${tgt.I.name}`, 'bad'); }
     }
     // 5. a couple of guards over the carrier
-    if (ec && guns.filter(g => !g.target && Math.hypot(g.home[0] - ec.p.x, g.home[1] - ec.p.z) < 200).length < 2 && E.mat >= 12 && guns.length < cap) { E.mat -= 12; W.spawnGunship(2); }
+    if (ec && guns.filter(g => !g.target && Math.hypot(g.home[0] - ec.p.x, g.home[1] - ec.p.z) < 200).length < 2 && E.mat >= 12 && guns.length < cap && W.allow(2, 'gunship')) { E.mat -= 12; W.spawnGunship(2); }
     // 6. supply: a freighter takes an island's stockpile to the KRAKEN (or IRONHOLD)
     W.freightT -= 2;
-    if (W.freightT <= 0) {
+    if (W.freightT <= 0 && W.allow(2, 'freighter')) {
       W.freightT = 16;
       const I = mine.filter(I => (I.stock || 0) >= 18 && !W.units.some(u => u.type === 'freighter' && u.from === I)).sort((a, b) => b.stock - a.stock)[0];
       if (I) {
@@ -809,7 +850,7 @@ export function createWar(ctx) {
       }
     }
     // 7. the battleship
-    if (E.bship >= 100 && !W.battleship) {
+    if (E.bship >= 100 && !W.battleship && W.allow(2, 'battleship')) {
       E.bship = 0; const I = W.islands.find(I => I.name === 'IRONHOLD'), y = I.yard || I;
       const [wx, wz] = nav.nearestWater(y.x + (0 - y.x) * 0.2, y.z + (0 - y.z) * 0.2);
       W.battleship = makeShip('battleship', 2, wx, wz, Math.atan2(-(0 - wx), -(0 - wz)));
@@ -874,12 +915,12 @@ export function createWar(ctx) {
   // ------------------------------------------------------------------------------------- public
   function end(result, why) { if (!W.over) { W.over = { result, why }; ctx.onEnd(result, why); } }
   W.visionSources = pl => {
-    const s = [];
+    const s = [], sm = W.techMod(1, 'sight');   // TECH: the radar picket
     if (pl.alive) s.push({ x: pl.pos.x, z: pl.pos.z, r: pl.inCave ? 60 : pl.sight || SIGHT.heli });
     if (pl.alive && pl.sources) s.push(...pl.sources);
     for (const u of W.units) if (u.side === 1 && !u.dead && !u.gone) s.push({ x: u.p.x, z: u.p.z, r: u.dims ? SIGHT.carrier * (1 + clamp(u.p.y / 120, 0, 0.8)) : SIGHT.drone });
     for (const I of W.islands) if (I.owner === 1) s.push({ x: I.x, z: I.z, r: I.kind === 'radar' && I.structs.some(q => q.kind === 'radar' && !q.dead) ? SIGHT.radar : SIGHT.island + I.r * 0.4 });
-    return s;
+    return sm === 1 ? s : s.map(v => ({ ...v, r: v.r * sm }));   // (copies: pl.sources may be the caller's own objects)
   };
   W.reset = () => {
     for (const u of W.units) scene.remove(u.mesh); W.units.length = 0; nfx.sweep(W.units); ROT.reset();
@@ -890,6 +931,7 @@ export function createWar(ctx) {
     for (const I of W.islands) { I.owner = I.owner0 ?? I.owner; I.lostT = -1e9; I.stock = 0; }
     buildIslands();
     W.E.fuel = 200; W.E.mat = 50; W.E.bship = 0; W.time = 0; W.over = null; W.raidT = 150; W.thinkT = 3; W.transT = 20; W.freightT = 30; W.battleship = null;
+    W.tech[1].reset(); W.tech[2].reset();   // TECH TREE: a new war starts from the start sets
     W.carrier = makeShip('carrier', 1, ctx.carrierStart[0], ctx.carrierStart[1], ctx.carrierStart[2]);
     W.enemyCarrier = makeShip('carrier', 2, ctx.enemyStart[0], ctx.enemyStart[1], ctx.enemyStart[2]);
     for (const I of W.islands) ctx.onOwner(I, I.owner);
@@ -897,6 +939,7 @@ export function createWar(ctx) {
   };
   W.update = (dt, pl, peace) => {
     W.time += dt; W._pl = pl; W.peace = peace;
+    W.tech[1].update(dt); W.tech[2].update(dt);   // TECH TREE: research runs on game time
     for (const u of W.units) { if (u.ext) continue; if (u.dims) sailShip(u, dt); else updateAir(u, dt, pl); }
     {   // ships keep clear of each other (a gentle shove when two hulls would overlap)
       const sh = W.units.filter(u => u.dims && u.sinking === undefined && !(u.sky && u.p.y > 12));

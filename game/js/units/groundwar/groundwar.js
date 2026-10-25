@@ -535,7 +535,8 @@ export function createGroundWar(ctx) {
     GW.hoverT -= 2; GW.mbtT -= 2;
     // the ground arm saves up: when armour is due it takes a share of the materiel as it comes in (the air arm would
     // otherwise spend every point on WASPs), and pays for the launch out of that
-    const wantH = t >= GW_T.HOVER_AT && hovers < Math.min(4, 1 + Math.floor(t / 420)), wantM = t >= GW_T.MBT_AT && mbts < Math.min(3, Math.floor(t / 540));
+    const ok = k => !W.allow || W.allow(2, k);   // TECH TREE gates: no armour budget for a type not yet researched
+    const wantH = t >= GW_T.HOVER_AT && hovers < Math.min(4, 1 + Math.floor(t / 420)) && ok('hovertank'), wantM = t >= GW_T.MBT_AT && mbts < Math.min(3, Math.floor(t / 540)) && ok('mbt');
     // (the KRAKEN's own vehicle deck: a steady armour budget, plus any surplus the commander has lying about - the air
     // arm and the expansion keep first call on the materiel)
     if ((wantH || wantM) && GW.bank < GW_T.MBT_COST) { const take = Math.max(0, Math.min(E.mat - 60, 4)); E.mat -= take; GW.bank += take + GW_T.DECK_RATE * 2; }
