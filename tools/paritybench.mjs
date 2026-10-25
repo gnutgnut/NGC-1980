@@ -34,19 +34,19 @@ console.log('--- USS IOWA (the LEVIATHAN\'s counterpart) ---');
 }
 {   // the gun duel: the two capital ships alone in open water, 260 m apart, both sides' guns firing
   let iw = 0, lw = 0; const res = [];
-  for (const seed of [11, 12, 13, 14, 15, 16]) {
+  for (const seed of [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]) {   // (odd seeds: the IOWA to the west; even: to the east)
     let out = null;
     await war({ seed, tmax: 260, tech: 'all', blue: { ...(await import('../game/js/sim/doctrine.js')).doctrine(1, 'TURTLE'), mix: { air: 0, ground: 0, naval: 0 }, sky: 0, escorts: 0 }, pilot: 'none',
       hook: ({ W }) => {
         const x = 0, z = 60;   // the open water mid-map
-        W.iowa = W.makeShip('battleship', 1, x - 130, z, Math.PI / 2); W.battleship = W.makeShip('battleship', 2, x + 130, z, -Math.PI / 2);
+        const k = seed % 2 ? 1 : -1; W.iowa = W.makeShip('battleship', 1, x - 130 * k, z, k * Math.PI / 2); W.battleship = W.makeShip('battleship', 2, x + 130 * k, z, -k * Math.PI / 2);
         for (const s of [W.iowa, W.battleship]) { s.max = 0; s.plan = 1e9; }
         W.P.bship = 0; W.E.bship = 0;
       },
       onStep: W => { if (out) return; const a = W.iowa, b = W.battleship; if (!a || a.sinking !== undefined) out = 'L'; else if (!b || b.sinking !== undefined) out = 'I'; else if (W.time > 250) out = a.hp / a.hpMax > b.hp / b.hpMax ? 'i' : 'l'; if (out) res.push(`${out}${Math.round(100 * (a ? a.hp / a.hpMax : 0))}/${Math.round(100 * (b ? b.hp / b.hpMax : 0))}`); } });
     if (out === 'I' || out === 'i') iw++; else lw++;
   }
-  check('IOWA vs LEVIATHAN duel: even over 6 seeds', iw >= 2 && lw >= 2, `IOWA ${iw} : LEVIATHAN ${lw}  (${res.join(' ')}; capital = sunk, lower = ahead on hp at 250 s)`, 'each side wins 2+');
+  check('IOWA vs LEVIATHAN duel: even over 10 seeds', iw >= 3 && lw >= 3, `IOWA ${iw} : LEVIATHAN ${lw}  (${res.join(' ')}; capital = sunk, lower = ahead on hp at 250 s)`, 'each side wins 3+');
 }
 console.log('--- the KRAKEN\'s sky refit (the SKY CARRIER\'s counterpart) ---');
 {

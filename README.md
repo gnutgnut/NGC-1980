@@ -75,6 +75,7 @@ update it. The launcher lives in `%LOCALAPPDATA%\ThrustZarch` (log: `launcher.lo
 | M | command map: click the sea to sail the carrier, click an island to select it |
 | 1-4, 6 | send drone, build AA gun, spare helicopter, Tomcat escort (CAP over the selected island, else over the ALBATROSS), SKY CARRIER refit |
 | 1-5 | send a Sea Knight + Marines, build AA gun, spare helicopter, escort fighter, SKY CARRIER refit |
+| Shift+1-5 | support orders at the island selected on the map (also on the command board): AH-1T Cobra sortie, M60A3 by LCM-8 (an AI tank), E-2C Hawkeye, BGM-109 salvo (at the KRAKEN once the Hawkeye has spotted her, else the island's buildings), task the IOWA (bombard / escort / hunt) |
 | Tab | take / leave the SKY CARRIER helm (landed on her deck) |
 | Shift+6 | SKY CARRIER now: the ALBATROSS lifts off at once, no materiel, from any unit (6 alone is the 300-materiel, 24 s refit) |
 | V / C | cockpit view / chase camera |
