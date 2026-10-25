@@ -1500,10 +1500,18 @@ function hurtHueyAway(s, amt, why) {
 // ---------------------------------------------------------------- the Huey's spots: the deck's helicopter spots, the pads
 // ALBATROSS (ship-local x right, z aft): H3 (the old aft spot) first, then the round-down, port abeam the island, port forward -
 // 15 m apart (the 48 ft disc). A spot is free with no other Huey on or bound for it and nothing parked in the way.
-const HELO_SPOTS = [[-2, 32], [-2, 49], [-8, 12], [-4, -6]];
+// (H3 and the round-down 5.5 m to port of the old x = -2: at -2 the disc came within 2 m of the parked Tomcats' fins
+// (x 9, z 27 / 46.5) and a crew Huey that touched down 2.5 m off her spot on a moving deck struck them: findings/commander2.md)
+const HELO_SPOTS = [[-5.5, 32], [-5.5, 49], [-8, 12], [-4, -6]];
+const _ringR = 7.6;   // the UH-1H disc (7.3 m) and a little: nothing in it may stand above the blade tips' reach
+function discClear(x, z) {
+  const g0 = groundY(x, z);
+  for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6; if (groundY(x + Math.cos(a) * _ringR, z + Math.sin(a) * _ringR) > g0 + 1.5) return false; }
+  return true;
+}
 function heliSpotFree(x, z, key) {
   for (const s of HUEYS) { if (!s.z.alive) continue; if (Math.hypot(s.H.pos.x - x, s.H.pos.z - z) < 15) return false; if (key && s.AI.phase !== 'off' && s.AI.spotKey === key) return false; }
-  return GR.clearAt(x, z, 4.5, heliC);   // parked jets, vehicles (this Huey itself: the main craft, skipped)
+  return GR.clearAt(x, z, 4.5, heliC) && discClear(x, z);   // parked jets, vehicles (this Huey itself: the main craft, skipped); the deck's own parked aircraft, the island, high ground under the disc
 }
 function shipHeloSpot(k) {
   const c = war && war.carrier; if (!c || c.sinking !== undefined) return null;

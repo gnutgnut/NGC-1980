@@ -128,8 +128,8 @@ export default {
     await h.expect(`!__G.heliSpotFree(__G.JP.J.pos.x, __G.JP.J.pos.z, null)`, 'a spot under a parked jet is not free');
     await h.wait(800); await h.shot('three-hueys');
     // c. ENTER on the Huey row while in one: the next Huey (swapped in where she stands)
-    await h.eval(`(window.__p3 = __G.H.pos.clone(), __G.commander.deploy("heli"), 1)`); await h.wait(600);
-    await h.expect(`__G.G.craft === 'heli' && __G.HUEYS.length === 2 && __G.H.pos.distanceTo(__p3) > 10 && __G.HUEYS.some(s => s.H.pos.distanceTo(__p3) < 1)`, 'switched to the next Huey; the one you left stays parked where she was');
+    await h.eval(`(window.__shp = p => { const c = __G.war.carrier, q = __G.GR.toShip(c, p.x, p.y, p.z); return new __G.THREE.Vector3(q.x, q.y, q.z); }, window.__p3 = __shp(__G.H.pos), __G.commander.deploy("heli"), 1)`); await h.wait(600);   // (ship frame: she steams on while the build runs a few fps)
+    await h.expect(`__G.G.craft === 'heli' && __G.HUEYS.length === 2 && __shp(__G.H.pos).distanceTo(__p3) > 10 && __G.HUEYS.some(s => __shp(s.H.pos).distanceTo(__p3) < 1)`, 'switched to the next Huey; the one you left stays parked where she was');
     // d. the Huey you leave in the air lands on a free spot: in the air off the deck, then out on foot (a Marine)
     await h.eval(`(() => { const c = ${W}.carrier, H = __G.H; const x = c.p.x - Math.sin(c.yaw) * 20 + Math.cos(c.yaw) * 80, z = c.p.z - Math.cos(c.yaw) * 20 - Math.sin(c.yaw) * 80;
       H.reset(new __G.THREE.Vector3(x, 45, z), c.yaw, false, 1); H.vel.set(c.v.x, 0, c.v.z); __G.HI.setCollective(0.45); return [x, z]; })()`);
