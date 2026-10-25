@@ -2,7 +2,7 @@
 // Local frame: +y up, front along -z, origin on the ground (or the deck) under the turret ring.
 //
 // Every builder returns a THREE.Group whose userData is the contract with brain.js / war.js:
-//   type     DEF key ('vads' | 'shilka' | 'ciws' | 'sparrow' | 'talon' | 'lance')
+//   type     DEF key ('vads' | 'shilka' | 'ciws' | 'sparrow' | 'talon' | 'lance' | 'hawk')
 //   yaw      Group turning about y (traverse);  pitch: Group turning about x (elevation, + = up), child of yaw
 //   spin     [Group] barrel clusters, spun about their local z
 //   radar    Group spun about y while searching (null if none); dish: Group tilted to the target while tracking
@@ -398,6 +398,112 @@ export function buildLance(side = 2) {
   return finish(g, { type: 'lance', yaw, pitch, spin: [], radar: null, dish: null, muzzles: [V(0, 0, -4.0)], lens: V(0, 0, -4.0), vents, lamp, flashes: [], team, glow, finM, h: 4.0 }, { mudH: 0.6 });
 }
 
-export const BUILD = { vads: buildVADS, shilka: buildShilka, ciws: buildCIWS, sparrow: buildSparrow, talon: buildTalon, lance: buildLance,
+// =========================================================================== MIM-23 HAWK battery section (player)
+// One firing section of a 1980 US Army Improved HAWK battery, dug in on an island AA slot: the M192 towed launcher
+// (trailer on outriggers, a turret that trains and elevates three missiles riding on top of their launcher beams), the
+// AN/MPQ-50 pulse acquisition radar (a rotating lattice reflector on its own trailer), a generator set, the cable run
+// between them and a sandbag wall round the launcher. Olive drab, white stencils, star, bumper codes. Missiles: 5.03 m
+// x 0.37 m, span 1.19 m. Footprint inside ~5 m of the origin; the launcher's turret ring sits at (-0.8, 0, 0.4).
+// cells = the three missiles (each its own baked part, hidden when fired, shown again on reload).
+function hawkMissile(p, x, y, z0) {
+  const m = group(p, x, y, 0); m.userData.part = true;
+  const r = 0.185, L = 5.03, zn = z0, zt = z0 + L;
+  cyl(m, P.white, r, 0.0, 0.95, 0, 0, zn + 0.475, 'z', 12);                 // radome (cone, point forward)
+  cyl(m, P.white, r, r, L - 1.05, 0, 0, zn + 0.95 + (L - 1.05) / 2, 'z', 12);
+  cyl(m, P.yellow, r + 0.005, r + 0.005, 0.07, 0, 0, zn + 1.5, 'z', 12);    // warhead band
+  cyl(m, P.canvas, r + 0.005, r + 0.005, 0.06, 0, 0, zn + 2.3, 'z', 12);    // motor band
+  cyl(m, P.black, r * 0.8, r * 0.9, 0.1, 0, 0, zt - 0.05, 'z', 10);         // nozzle
+  for (let k = 0; k < 4; k++) {                                            // cropped-delta wings with elevons, in an X
+    const a = Math.PI / 4 + k * Math.PI / 2, f = group(m); f.rotation.z = a;
+    prism(f, P.white, [[zt - 2.0, r - 0.02], [zt - 0.75, r + 0.4], [zt - 0.3, r + 0.41], [zt - 0.25, r - 0.02]], 0.03);
+    prism(f, P.steel, [[zt - 0.25, r], [zt - 0.3, r + 0.41], [zt - 0.08, r + 0.41], [zt - 0.06, r]], 0.025);
+  }
+  box(m, P.stencil, 0.02, 0.05, 0.6, r + 0.002, 0.05, zn + 2.8);          // stencil lines along the side
+  return m;
+}
+export function buildHawk(side = 1) {
+  const g = new THREE.Group(), team = teamMat(side), base = group(g); base.userData.part = true;
+  const sand = paint(0x7a7052, 1, { chip: 0 }), sand2 = paint(0x6c6447, 1, { chip: 0 });
+  const LX = -0.8, LZ = 0.4;
+  // ---- M192 launcher trailer: frame, axle and wheels, four outriggers on jack pads, tow bar with lunette
+  const tr = group(base, LX, 0, LZ);
+  box(tr, P.od, 1.3, 0.35, 3.9, 0, 0.62, -0.2); box(tr, P.odDark, 1.1, 0.12, 3.6, 0, 0.4, -0.2);
+  for (const sd of [-1, 1]) {
+    cyl(tr, P.rubber, 0.42, 0.42, 0.3, sd * 0.95, 0.42, 1.0, 'x', 14); cyl(tr, P.od, 0.25, 0.25, 0.32, sd * 0.95, 0.42, 1.0, 'x', 10);
+    box(tr, P.od, 0.4, 0.06, 1.1, sd * 0.95, 0.9, 1.0);                                           // mudguard
+    for (const dz of [-1, 1]) {                                                                 // outrigger arm, jack, pad
+      const px = sd * 1.95, pz = dz < 0 ? -1.9 : 1.6, ax = sd * 0.6, az = dz < 0 ? -1.6 : 1.4;
+      strut(tr, P.od, [ax, 0.55, az], [px, 0.35, pz], 0.14, 0.18);
+      cyl(tr, P.steel, 0.06, 0.06, 0.35, px, 0.2, pz, 'y', 6); cyl(tr, P.steel, 0.2, 0.22, 0.05, px, 0.03, pz, 'y', 10);
+    }
+  }
+  strut(tr, P.od, [-0.4, 0.5, -2.1], [0, 0.45, -3.15], 0.1, 0.12); strut(tr, P.od, [0.4, 0.5, -2.1], [0, 0.45, -3.15], 0.1, 0.12);
+  cyl(tr, P.steel, 0.12, 0.12, 0.05, 0, 0.45, -3.25, 'y', 10); cyl(tr, P.steel, 0.04, 0.04, 0.45, 0, 0.22, -2.9, 'y', 6);   // lunette, parking leg
+  for (const sd of [-1, 1]) { box(tr, P.stencil, 0.01, 0.1, 0.9, sd * 0.655, 0.66, -1.2); box(tr, P.red, 0.01, 0.08, 0.12, sd * 0.655, 0.64, 1.65); box(tr, P.stencil, 0.01, 0.07, 0.35, sd * 0.655, 0.52, 1.4); }
+  box(tr, P.odDark, 0.6, 0.3, 0.5, 0.0, 0.94, -1.5); box(tr, P.black, 0.3, 0.12, 0.02, 0.0, 0.98, -1.76);   // junction box
+  cyl(tr, P.odDark, 0.75, 0.8, 0.1, 0, 0.84, 0, 'y', 16);                                          // turret ring
+  // ---- the turret: turntable, pedestal, trunnions; the pitch frame carries the torque tube, three beams, three missiles
+  const yaw = group(g, LX, 0.9, LZ); yaw.userData.part = true;
+  cyl(yaw, P.od, 0.7, 0.72, 0.18, 0, 0.09, 0, 'y', 16);
+  box(yaw, P.od, 0.8, 0.62, 1.0, 0, 0.45, 0.25); box(yaw, P.odDark, 0.9, 0.08, 1.1, 0, 0.78, 0.25);
+  for (const sd of [-1, 1]) { box(yaw, P.od, 0.12, 0.55, 0.42, sd * 0.42, 0.78, 0); cyl(yaw, P.steel, 0.1, 0.1, 0.06, sd * 0.5, 0.85, 0, 'x', 8); }
+  strut(yaw, P.steel, [0, 0.2, -0.65], [0, 0.6, -0.2], 0.12, 0.12); cyl(yaw, P.black, 0.04, 0.04, 0.9, 0.35, 0.4, 0.75, 'y', 6);   // elevation jack, cable riser
+  { const pnl = box(yaw, team, 0.42, 0.14, 0.02, 0, 0.5, -0.26); pnl.userData.keep = true; }
+  for (const sd of [-1, 1]) box(yaw, P.stencil, 0.01, 0.06, 0.5, sd * 0.405, 0.45, 0.35);
+  const pitch = group(yaw, 0, 0.85, 0); pitch.userData.part = true;
+  cyl(pitch, P.od, 0.13, 0.13, 2.4, 0, 0, 0, 'x', 10);                                             // torque tube
+  box(pitch, P.odDark, 2.3, 0.12, 0.35, 0, 0.08, -0.9); box(pitch, P.odDark, 2.3, 0.12, 0.3, 0, 0.08, 0.6);   // cross members
+  const cells = [], xs = [-0.95, 0, 0.95];
+  for (const x of xs) {
+    box(pitch, P.od, 0.2, 0.24, 3.6, x, 0.2, -0.6);                                                // launcher beam
+    box(pitch, P.steel, 0.08, 0.04, 3.4, x, 0.34, -0.6);                                           // rail
+    box(pitch, P.odDark, 0.24, 0.1, 0.25, x, 0.2, -2.45);                                           // beam nose
+    const ms = hawkMissile(pitch, x, 0.55, -3.4);
+    cells.push({ cover: ms, pos: V(x, 0.55, -3.5) });
+  }
+  cyl(pitch, P.black, 0.03, 0.03, 1.9, 0.12, 0.33, -0.6, 'z', 5);                                  // umbilical
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), lampMat(0xffaa22)); lamp.position.set(0.3, 0.84, 0.6); yaw.add(lamp);
+  // ---- AN/MPQ-50 acquisition radar trailer: two-wheel trailer, equipment box, pedestal, rotating lattice reflector
+  const RX = 3.1, RZ = -1.5, rt = group(base, RX, 0, RZ); rt.rotation.y = 0.6;
+  box(rt, P.od, 1.5, 0.3, 2.9, 0, 0.7, 0); box(rt, P.od, 1.35, 0.55, 1.2, 0, 1.12, 0.6);
+  for (const sd of [-1, 1]) {
+    cyl(rt, P.rubber, 0.4, 0.4, 0.28, sd * 0.92, 0.4, 0.2, 'x', 14); cyl(rt, P.od, 0.23, 0.23, 0.3, sd * 0.92, 0.4, 0.2, 'x', 10);
+    for (const z of [-1.15, 1.15]) { strut(rt, P.od, [sd * 0.55, 0.6, z], [sd * 1.15, 0.25, z * 1.12], 0.1, 0.12); cyl(rt, P.steel, 0.16, 0.18, 0.05, sd * 1.15, 0.03, z * 1.12, 'y', 8); cyl(rt, P.steel, 0.05, 0.05, 0.25, sd * 1.15, 0.15, z * 1.12, 'y', 6); }
+    box(rt, P.stencil, 0.01, 0.1, 0.8, sd * 0.755, 0.72, -0.6);
+  }
+  star(rt, P.stencil, 0.2, 0.68, 1.12, 0.55, Math.PI / 2); star(rt, P.stencil, 0.2, -0.68, 1.12, 0.55, -Math.PI / 2);
+  strut(rt, P.od, [-0.4, 0.6, -1.4], [0, 0.55, -2.2], 0.08, 0.1); strut(rt, P.od, [0.4, 0.6, -1.4], [0, 0.55, -2.2], 0.08, 0.1);
+  cyl(rt, P.odDark, 0.35, 0.45, 0.6, 0, 1.15, -0.55, 'y', 12);                                     // pedestal
+  const radar = group(g); radar.userData.part = true;
+  { const rw = new THREE.Vector3(0, 1.45, -0.55).applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.6); radar.position.set(RX + rw.x, rw.y, RZ + rw.z); }
+  cyl(radar, P.od, 0.22, 0.25, 0.3, 0, 0.15, 0, 'y', 10); box(radar, P.odDark, 0.5, 0.35, 0.6, 0, 0.4, 0.2);   // rotary joint, drive housing
+  // the reflector: a cylindrical-parabolic lattice, 2.6 m wide, 1.3 m tall, tilted back; bars only (you see through it)
+  const W = 2.6, H = 1.3, F = 0.55, nx = 9, ny = 5, ac = new THREE.Group(); ac.position.set(0, 1.15, 0.15); ac.rotation.x = -0.18; radar.add(ac);
+  const pt = (u, v) => [u * W / 2, v * H / 2, (u * W / 2) ** 2 / (4 * F) * -1 + 0.0];   // dish curving forward at the edges (front = -z)
+  for (let j = 0; j <= ny; j++) for (let i = 0; i < nx; i++) { const u0 = -1 + 2 * i / nx, u1 = -1 + 2 * (i + 1) / nx, v = -1 + 2 * j / ny; const a = pt(u0, v), b = pt(u1, v); strut(ac, j % ny === 0 ? P.od : P.steel, [a[0], a[1], -a[2]], [b[0], b[1], -b[2]], 0.035, 0.035); }
+  for (let i = 0; i <= nx; i++) { const u = -1 + 2 * i / nx, a = pt(u, -1), b = pt(u, 1); strut(ac, i % nx === 0 ? P.od : P.steel, [a[0], a[1], -a[2]], [b[0], b[1], -b[2]], 0.035, 0.035); }
+  for (const sd of [-1, 1]) strut(ac, P.odDark, [0, -0.35, 0.2], [sd * 1.0, 0, 0.12], 0.07, 0.07);   // backing truss
+  strut(ac, P.odDark, [0, -0.7, 0.0], [0, 0.6, 0.15], 0.1, 0.12);
+  strut(ac, P.od, [0, -0.62, -0.05], [0, -0.35, -0.95], 0.06, 0.06); box(ac, P.odDark, 0.32, 0.22, 0.2, 0, -0.3, -1.0);   // feed horn on its boom
+  // ---- generator set on skids, its exhaust, the cable run, a tarp-covered crate
+  const gen = group(base, -2.1, 0, -3.7); gen.rotation.y = 0.3;
+  for (const sd of [-1, 1]) box(gen, P.steel, 0.08, 0.1, 1.7, sd * 0.45, 0.05, 0);
+  box(gen, P.od, 1.0, 0.85, 1.5, 0, 0.53, 0); box(gen, P.odDark, 1.04, 0.05, 1.54, 0, 0.97, 0);
+  for (let i = 0; i < 5; i++) box(gen, P.black, 0.02, 0.5, 0.06, 0.51, 0.55, -0.5 + i * 0.15);   // louvres
+  cyl(gen, P.black, 0.05, 0.05, 0.5, -0.3, 1.2, 0.5, 'y', 6); box(gen, P.stencil, 0.01, 0.1, 0.6, -0.511, 0.7, 0); box(gen, P.yellow, 0.01, 0.12, 0.12, 0.511, 0.8, 0.55);
+  const cab = paint(0x1a1b1a, 0.4, { mud: 0.5, chip: 0 });
+  const cable = (pts) => { for (let i = 0; i < pts.length - 1; i++) strut(base, cab, pts[i], pts[i + 1], 0.05, 0.05); };
+  cable([[-1.6, 0.1, -3.2], [-0.4, 0.03, -2.8], [1.2, 0.03, -2.6], [1.9, 0.03, -2.1], [2.0, 0.3, -1.75], [2.05, 0.62, -1.62]]);
+  cable([[-0.4, 0.03, -2.8], [-0.7, 0.03, -2.0], [-0.7, 0.5, -1.8]]);
+  box(base, P.canvas, 0.8, 0.45, 0.6, -3.3, 0.23, -1.2, 0, 0.4); box(base, P.odDark, 0.82, 0.05, 0.62, -3.3, 0.47, -1.2, 0, 0.4);
+  // ---- sandbag wall: two courses round the back of the launcher, the tow bar side left open (clear of the missiles at any train / elevation)
+  for (let c = 0; c < 2; c++) for (let i = 0; i < 15; i++) {
+    const a = -1.5 + (i + (c ? 0.5 : 0)) / 15 * 3.0, rr = 2.85;
+    box(base, (i + c) % 3 ? sand : sand2, 0.62, 0.24, 0.32, LX + Math.sin(a) * rr, 0.12 + c * 0.23, LZ + Math.cos(a) * rr, 0, a + Math.PI / 2, 0);
+  }
+  return finish(g, { type: 'hawk', yaw, pitch, spin: [], radar, dish: null, muzzles: [], cells, lamp, flashes: [], team, h: 2.4 }, { mudH: 0.5 });
+}
+
+export const BUILD = { vads: buildVADS, shilka: buildShilka, ciws: buildCIWS, sparrow: buildSparrow, talon: buildTalon, lance: buildLance, hawk: buildHawk,
   talonm: side => buildTalon(side, { mount: true }), lancem: side => buildLance(side) };   // SEAWORLD: ship mounts (game level, bible section 3)
 export function buildDefence(type, side) { const m = BUILD[type](side); m.userData.defType = type; return m; }

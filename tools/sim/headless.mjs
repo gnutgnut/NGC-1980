@@ -36,9 +36,10 @@ const { installResearch } = await import('../../game/js/sim/policy.js');
 const { createFleet } = await import('../../game/js/units/commander/fleet.js');
 const GWM = await import('../../game/js/units/groundwar/groundwar.js');
 const AWM = await import('../../game/js/units/air/airwar.js');
+const PARM = await import('../../game/js/units/parity/paritywar.js');   // PARITY: its tunables sweep too
 
 // the knobs a sweep may turn (game tunables, restored after every war)
-const TUNABLES = { COST: WAR.COST, CAP_TIME: WAR.CAP_TIME, PROD: WAR.PROD, GW_T: GWM.GW_T, AIR: AWM.AIR };
+const TUNABLES = { COST: WAR.COST, CAP_TIME: WAR.CAP_TIME, PROD: WAR.PROD, GW_T: GWM.GW_T, AIR: AWM.AIR, PAR_T: PARM.PAR_T };
 const snapshot = () => JSON.parse(JSON.stringify(TUNABLES, (k, v) => v === Infinity ? 'Infinity' : v));
 const BASE = snapshot();
 function restore() { const fix = (dst, src) => { for (const k of Object.keys(src)) { const v = src[k]; if (v && typeof v === 'object') fix(dst[k], v); else dst[k] = v === 'Infinity' ? Infinity : v; } }; for (const k of Object.keys(TUNABLES)) fix(TUNABLES[k], BASE[k]); }

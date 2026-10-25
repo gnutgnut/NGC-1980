@@ -37,7 +37,11 @@ export function createDefence(env) {
   // side 1: our starting guns are the Soviet contingent's ZSU-23-4s; everything command 2 builds is an M163.
   // side 2: a LANCE on hq and fortress islands (two on IRONHOLD), seized TALON trucks everywhere else.
   function pick(side, I, initial) {
-    if (side === 1) return initial ? 'shilka' : 'vads';
+    if (side === 1) {   // PARITY: a MIM-23 HAWK on our HQ / fortress islands (two on HOME ISLAND), the LANCE's counterpart, once researched
+      if (initial || !I || !I.structs || !(I.kind === 'hq' || I.kind === 'fortress') || (env.allow && !env.allow(side, 'hawk'))) return initial ? 'shilka' : 'vads';
+      const hawks = I.structs.filter(s => !s.dead && s.def && s.def.type === 'hawk').length, guns = I.structs.filter(s => s.kind === 'aa' && !s.dead).length;
+      return hawks < (I.name === 'HOME ISLAND' ? 2 : 1) && guns % 2 === 0 ? 'hawk' : 'vads';
+    }
     if (!I) return 'talon';
     const lances = I.structs ? I.structs.filter(s => !s.dead && s.def && s.def.type === 'lance').length : 0;
     const want = I.name === 'IRONHOLD' ? 2 : (I.kind === 'hq' || I.kind === 'fortress') ? 1 : 0;

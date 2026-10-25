@@ -995,7 +995,7 @@ export function createWar(ctx) {
   W.damage = damage; W.hitTest = hitTest; W.pickExpansion = pickExpansion;
   W.sim = { makeAir, buildAA, makeShip, launchPoint, nearestLaunch, end, COST };   // SIM MODE hook: what the CPU commanders (game/js/sim/) build with
   W.makeShip = makeShip;   // NAVAL: tests and the dev tools place ships with it
-  W.air = createAirWar(W, ctx, { shoot, damage, blast, hear, boomAt, feed, CARRIER, COST_ESCORT: COST.escort });   // AIR (units/air/airwar.js)
+  W.air = createAirWar(W, ctx, { shoot, damage, blast, hear, boomAt, feed, CARRIER, COST_ESCORT: COST.escort, COST_HAWKEYE: COST.hawkeye });   // AIR (units/air/airwar.js)
   const PAR = createParityWar(W, ctx, { makeShip, makeAir, feed, store, launchPoint, nav, sfx, COST });   // PARITY (units/parity/paritywar.js)
   W.parity = PAR;
   return W;

@@ -14,13 +14,17 @@ import { createPilot } from './pilot.js';
 import { buildTomcatModel } from './tomcatmodel.js';
 import { buildShrikeModel, buildReaperModel, buildShahedModel } from './rwmodel.js';
 import { createAirSound } from './airsound.js';
+import { createHawkeyeSim } from './hawkeyefm.js';   // PARITY: the E-2C (the REAPER's counterpart)
+import { buildHawkeyeModel } from './hawkeyemodel.js';
+import { buildGLCMModel } from './glcmmodel.js';      // PARITY: the BGM-109 salvo's look (it flies the SHAHED's point-mass sim)
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 export const AIR = {
   ESCORT_MAX: 3, FUEL_X: 8, SHRIKE_MAX: 4, CAT_GAP: 6,
   COST: { shrike: 30, reaper: 20, shahed: 6 },
-  HP: { escort: 4, shrike: 2, reaper: 3, shahed: 1 }, R: { escort: 4.5, shrike: 3.5, reaper: 5, shahed: 2 },
+  HP: { escort: 4, shrike: 2, reaper: 3, shahed: 1, hawkeye: 3, glcm: 1 }, R: { escort: 4.5, shrike: 3.5, reaper: 5, shahed: 2, hawkeye: 6, glcm: 2 },   // (PARITY: hawkeye / glcm = the REAPER's / SHAHED's)
+  HAWKEYE_SIGHT: 520, SPOT_R: 600,
 };
 
 export function createAirWar(W, ctx, H) {
@@ -129,6 +133,17 @@ export function createAirWar(W, ctx, H) {
     fx.mix?.spawn(b.x, b.y, b.z, 0, 2, 0, 3, 2, 6, .8, .9, 1, 0.5, -0.3, 1.2);   // rail launch puff
     return addSimUnit('shrike', 2, A, P, model, { name: 'RW-4 SHRIKE', decoys: 2, home: b });
   };
+  // PARITY: the E-2C HAWKEYE, our counterpart of the REAPER: off the ALBATROSS's bow climbing out (the catapult and
+  // deck flow are ngc/bugsweep's: she is spawned airborne as the REAPER is), orbits toward the KRAKEN, spots her
+  AW.spawnHawkeye = (orbit) => {
+    const c = carrierOf(1); if (!c) return null;
+    const fx_ = -Math.sin(c.yaw), fz = -Math.cos(c.yaw), x = c.p.x + fx_ * 160, z = c.p.z + fz * 160;
+    const A = createHawkeyeSim(9, { fuelX: 3 }), model = buildHawkeyeModel({ modex: 600 + (AW.hkN = ((AW.hkN || 0) % 4) + 1) }), P = createPilot(A, { side: 1, capAlt: 300, capR: 450 });
+    A.reset(x, 0, z, c.yaw, { running: true, airborne: true, alt: Math.max(CARRIER.DECK + c.p.y + 60, ground(x, z) + 80), speed: 50 }); for (const e of A.eng) e.n = 0.9;
+    P.anchor = orbit || c.p; P.spawnAir('patrol');
+    feed('HAWKEYE 60' + AW.hkN + ' OFF CAT 1  -  OUTBOUND FOR THE KRAKEN');
+    return addSimUnit('hawkeye', 1, A, P, model, { name: 'HAWKEYE 60' + AW.hkN, home: { x: c.p.x, y: c.p.y, z: c.p.z, ship: c }, sight: AIR.HAWKEYE_SIGHT, orbit });
+  };
   AW.spawnReaper = (orbit) => {
     const b = enemyBase(), A = createReaperSim(9, { fuelX: 3 }), model = buildReaperModel(), P = createPilot(A, { side: 2, capAlt: 230, capR: 260 });
     A.reset(b.x, 0, b.z, b.yaw, { running: true, airborne: true, alt: Math.max(b.y, ground(b.x, b.z) + 80), speed: 28 }); A.eng[0].n = 0.7;
@@ -149,6 +164,20 @@ export function createAirWar(W, ctx, H) {
     return out;
   };
 
+  // PARITY: a BGM-109 salvo from the island of ours nearest the target - the SHAHED salvo's counterpart. It flies the
+  // SHAHED's game-level point-mass sim and dive (rwfm.js) unchanged; only the model is the GLCM's.
+  AW.salvoTomahawk = (tgt, n = 4) => {
+    const isl = W.islands.filter(I => I.owner === 1).sort((a, b) => Math.hypot(a.x - tgt.x, a.z - tgt.z) - Math.hypot(b.x - tgt.x, b.z - tgt.z))[0];
+    if (!isl) return [];
+    const out = [];
+    for (let k = 0; k < n; k++) {
+      const D = createShahedSim(9), model = buildGLCMModel(), x = isl.pad.x - 14, z = isl.pad.z - 10 - k * 3;
+      D.launch(x, isl.pad.h + 2, z, Math.atan2(tgt.x - x, -(tgt.z - z)) + (k - (n - 1) / 2) * 0.12);
+      const u = { type: 'glcm', side: 1, drone: D, p: D.pos, v: D.vel, yaw: 0, hp: AIR.HP.glcm, hpMax: AIR.HP.glcm, mesh: model.group, parts: model, r: AIR.R.glcm, air: true, name: 'BGM-109', tgt, delay: 0.2 + k * 1.3 };
+      AW.pending.push(u); out.push(u);
+    }
+    return out;
+  };
   // ---------------------------------------------------------------- per unit
   const _m = new THREE.Matrix4();
   AW.update = (u, dt, pl) => {
@@ -164,6 +193,13 @@ export function createAirWar(W, ctx, H) {
       if (u.cap && u.cap.pad) P.anchor = _anchor(u, u.cap.pad.x, u.cap.pad.h, u.cap.pad.z);
       else if (c) P.anchor = _anchor(u, c.p.x, c.p.y, c.p.z);
       if (A.fuel <= 0 && !u.ejected && !A.onGround && A.eng.every(e => !e.run)) { u.ejected = true; feed(`${u.name}: FLAMED OUT  -  CREW EJECTED`, 'bad'); u.hp = 0; u.dying = true; u.v.y = 2; }
+    } else if (u.type === 'hawkeye') {   // PARITY: orbit the KRAKEN's area (a live anchor), bingo home to the ALBATROSS, spot
+      const c = carrierOf(1), ec = carrierOf(2);
+      if (!u.goingHome) { if (ec) P.anchor = _anchor(u, ec.p.x, 0, ec.p.z); }
+      else if (c) { u.home.x = c.p.x; u.home.z = c.p.z; P.anchor = _anchor(u, c.p.x, c.p.y, c.p.z); }
+      if (A.fuel < 600 && !u.goingHome) { u.goingHome = true; P.set('cap', 'HOME'); feed(`${u.name}: BINGO  -  RTB`); }
+      if (u.goingHome && Math.hypot(A.pos.x - u.home.x, A.pos.z - u.home.z) < 260) { u.dead = true; W.P.mat += H.COST_HAWKEYE ? H.COST_HAWKEYE * 0.5 : 10; feed(`${u.name} RECOVERED`, 'good'); return; }
+      if (ec && Math.hypot(u.p.x - ec.p.x, u.p.z - ec.p.z) < AIR.SPOT_R) { if (!W.spotP || W.time - W.spotP.t > 60) feed(`${u.name}: KRAKEN IN SIGHT  -  TOMAHAWKS CAN FLY (SHIFT+4)`, 'good'); W.spotP = { t: W.time, ship: ec }; }
     } else if (u.type === 'shrike' || u.type === 'reaper') {
       if (A.fuel < (u.type === 'shrike' ? 220 : 120) && !u.goingHome) { u.goingHome = true; P.T.radar = 0; P.tgt = null; P.anchor = u.home; P.set('cap', 'HOME'); }
       if (u.goingHome && Math.hypot(A.pos.x - u.home.x, A.pos.z - u.home.z) < 260) { u.dead = true; W.E.mat += AIR.COST[u.type] * 0.5; return; }   // recovered aboard
@@ -209,14 +245,14 @@ export function createAirWar(W, ctx, H) {
     shahedGuide(D, tp, ground); D.step(dt);
     if (D.t < 2.5) fx.add.spawn(D.pos.x, D.pos.y, D.pos.z, 0, 0, 0, 0.12, 0.8, 0.4, 1, .7, .3, 1);   // booster
     const m = u.mesh; m.position.copy(D.pos); m.rotation.set(D.gam, -D.hdg, -D.bank, 'YXZ'); u.parts.animate(D, dt);
-    const floor = Math.max(ground(D.pos.x, D.pos.z), W.deckY(D.pos.x, D.pos.z, 2));
+    const floor = Math.max(ground(D.pos.x, D.pos.z), W.deckY(D.pos.x, D.pos.z, u.side));   // (PARITY: own decks don't stop it, either side)
     const there = Math.hypot(D.pos.x - tp.x, D.pos.z - tp.z) < 5 && D.pos.y < tp.y + 4;
     if (D.pos.y <= floor + 0.3 || there || D.t > 150) {
       const x = D.pos.x, y = Math.max(D.pos.y, floor), z = D.pos.z;
       fx.explode(x, y, z, 2.2, { debris: 6, crater: 2.4, fire: isWater(x, z) ? 0 : 25 }); boomAt(x, y, z, 1.1);
       const ship = W.deckY(x, z) > 0.5 && y < W.deckY(x, z) + 2 ? W.shipAt(x, z) : null;
-      if (ship && ship.side === 1 && ship.sinking === undefined) damage(ship, 20, 2);
-      blast(x, y + 1, z, 10, 16, 2); u.dead = true;
+      if (ship && ship.side !== u.side && ship.sinking === undefined) damage(ship, 20, u.side);
+      blast(x, y + 1, z, 10, 16, u.side); u.dead = true;
     }
   }
 
@@ -227,6 +263,7 @@ export function createAirWar(W, ctx, H) {
       u.toldDown = true;
       if (u.type === 'escort' && !u.ejected) feed(`${u.name} IS DOWN  -  ${u.sim && u.sim.dead ? 'CRASHED' : 'SHOT DOWN, CREW EJECTED'}`, 'bad');
       else if (u.type === 'shrike') feed('SPLASH ONE SHRIKE', 'good');
+      else if (u.type === 'hawkeye') feed(`${u.name} IS DOWN`, 'bad');   // PARITY
       else if (u.type === 'reaper') { feed('ENEMY REAPER SHOT DOWN', 'good'); ctx.addScore?.(300); }
     }
     for (const u of AW.pending.slice()) {

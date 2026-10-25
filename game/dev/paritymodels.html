@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parity Models</title>
+<script type="importmap">{"imports":{"three":"../vendor/three.module.min.js"}}</script>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#8fb6d8;font:12px Consolas,monospace;color:#dff}
+canvas{display:block}
+#info{position:fixed;left:8px;top:6px;color:#023;text-shadow:0 0 3px #fff}
+#info.hide{display:none}
+</style></head><body>
+<div id="info">?model=hawkeye|glcm|hawk &amp;s={json state} &amp;cam=yaw,pitch,dist,tx,ty,tz (drag: orbit, wheel: zoom) &middot; glcm: s.t = seconds since launch &middot; hawk: s.yaw / s.pitch / s.fired</div>
+<script type="module" src="./paritymodels.js"></script>
+</body></html>
