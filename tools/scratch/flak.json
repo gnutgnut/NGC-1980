@@ -1,0 +1,17 @@
+{
+  "name": "flakdbg",
+  "query": "?debug&kb&res=0.45",
+  "steps": [
+    "waitFor 10000 window.__G",
+    "key tap Enter",
+    "wait 1200",
+    "eval (()=>{ __G.G.bench=true; const I=__G.ISLANDS.find(i=>i.name==='ANVIL'); const x=I.pad.x+14, z=I.pad.z; __G.H.reset(new __G.THREE.Vector3(x, __G.terrainH(x,z)+1.2, z), 0, true, 0); __G.D.hp.rotor=0.3; return [I.owner, __G.war.aliveAA(I)] })()",
+    "wait 1000",
+    "eval (__G.callLogistics(), 1)",
+    "waitFor 6000 !!__G.drop.state",
+    "eval (window.__fl=[], window.__flI=setInterval(()=>{ const M=__G.drop.state; if(!M||M.plane.gone) return; const S=M.plane.sim; const T=M.target; const R=M.run||{}; __fl.push([Math.round(M.t), Math.round(S.pos.y), Math.round(T.y), Math.round(S.kias), Math.round(Math.hypot(S.pos.x-T.x,S.pos.z-T.z)), R.setup?1:0, +(R.h||0).toFixed(2), +S.track().toFixed(2), M.light, M.jumpSwitch, M.ap?1:0, +S.flap.toFixed(2), M.left]); }, 3000), 1)",
+    "wait 60000",
+    "eval __fl",
+    "shot a"
+  ]
+}
