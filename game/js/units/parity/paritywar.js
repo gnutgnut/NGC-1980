@@ -30,7 +30,7 @@ export const PAR_T = {
   SKY_RESERVE: 60,                         // materiel the enemy keeps after paying for the KRAKEN's refit
   // the IOWA's hit points: her hull is a smaller target than the LEVIATHAN's (104 x 13 m, deck 3.4 vs 96 x 16 m, deck 5),
   // so equal hp made her win the gun duel 5 : 1 (tools/paritybench.mjs); fewer hp for the same effective toughness
-  IOWA_HP: 380,
+  IOWA_HP: 400,   // (duel over 10 seeds: 420 -> IOWA 5:1, 380 -> 2:8, 350 -> 1:9, 400 -> 6:4, 410 -> 5:5)
   IOWA_RATE: 0.08, IOWA_HOME: 0.06,        // reactivation % / s per factory island of ours, + while HOME ISLAND's HQ stands (= the LEVIATHAN's)
 };
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
