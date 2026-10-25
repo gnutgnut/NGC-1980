@@ -25,6 +25,7 @@ import { createTech, unitAllowed, gateMsg, aiPickResearch, techStartFromQuery } 
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const angDiff = (a, b) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; return d; };
+const YAW_ACC = 0.015;   // ships: yaw acceleration, rad/s2 (ngc/bugsweep: 0 -> the 0.09 rad/s turn rate in 6 s)
 export const COST = { drone: 40, aa: 30, heli: 60, escort: 30, jet: 80, sky: 300 };
 export const SIDE_NAME = ['NEUTRAL', 'FRIENDLY', 'ENEMY'];
 const CAP_TIME = { heli: 6, drone: 9, transport: 10 };
@@ -390,7 +391,11 @@ export function createWar(ctx) {
       else { tgtYaw = Math.atan2(-(tx - u.p.x), -(tz - u.p.z)); const last = u.path.length === 1; want = u.max * (last ? clamp(d / 80, 0.15, 1) : 1); }
     }
     const turn = angDiff(u.yaw, tgtYaw), rate = 0.09 * clamp(u.speed / 3, 0.3, 1);
-    u.w = clamp(turn, -rate, rate) * (Math.abs(turn) > 0.02 ? 1 : 0); u.yaw += u.w * dt;
+    // ngc/bugsweep: the yaw rate builds and eases off (YAW_ACC, with a stopping rule so it doesn't overshoot) instead
+    // of stepping: a stepped yaw rate jerked a deck spot 35 m from the middle sideways by ~3 m/s in one frame, and the
+    // gear friction rolled the Ospreys / Sea Knights parked there over (tools/rotarydeck.mjs)
+    const wT = Math.abs(turn) > 0.004 ? Math.sign(turn) * Math.min(rate, Math.sqrt(2 * YAW_ACC * Math.abs(turn))) : 0;
+    u.w += clamp(wT - u.w, -YAW_ACC * dt, YAW_ACC * dt); u.yaw += u.w * dt;
     if (Math.abs(turn) > 1.2) want *= 0.35;
     u.speed += clamp(want - u.speed, -0.6 * dt, 0.35 * dt);
     // never run aground: if the bow would be in the shallows, brake hard
