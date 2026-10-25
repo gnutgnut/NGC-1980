@@ -98,7 +98,7 @@ export function createSquadAI(world, opt = {}) {
         }
         if (vis) {
           // detection builds faster close in, on movers and shooters, slower on targets in cover
-          const mv = Math.hypot(t.vx || 0, t.vz || 0), rate = (1.6 + 2.5 * Math.min(1, mv / 2) + (t.firing < 2 ? 3 : 0)) * (1 - 0.7 * (t.cover || 0)) * clamp(1.4 - d / sight, 0.15, 1.4) * (t.kind === 'vehicle' ? 2 : 1);
+          const mv = Math.hypot(t.vx || 0, t.vz || 0), rate = (1.6 + 2.5 * Math.min(1, mv / 2) + (t.firing < 2 ? 3 : 0)) * (1 - 0.7 * (t.cover || 0)) * clamp(1.4 - d / sight, 0.15, 1.4) * (t.kind === 'vehicle' ? 2 : 1) * (m.spotK || 1);   // (PARITY, ngc/parity: m.spotK - a member's sight quality, e.g. the M60A3's thermal sight; 1 = the machines' sensors)
           sp = Math.min(1.5, sp + rate * ldt);
         } else sp = Math.max(0, sp - ldt * 0.5);
         a.spot.set(t.id, sp);
@@ -155,6 +155,7 @@ export function createSquadAI(world, opt = {}) {
     for (const m of ms) own += AI_T.POWER[m.kind] * (0.3 + 0.7 * m.hp) * (m.up ? 1 : 0.3);
     // (the data link spans squads: friendly machines within 200 m count, at 70%)
     for (const O2 of AI.squads) if (O2 !== S && O2.side === S.side) for (const m of O2.members) if (m.alive && dist2(m.x, m.z, cx, cz) < 200) own += 0.7 * AI_T.POWER[m.kind] * (0.3 + 0.7 * m.hp);
+    own += S.allyPower || 0;   // PARITY (ngc/parity): friendly forces outside this AI (the Marines a Task Force tank supports; set by the host)
     for (const k of en) if (k.conf > 0.3 && dist2(k.x, k.z, cx, cz) < 350) theirs += AI_T.THREAT[k.kind] * (k.kind === 'at' && ms.some(m => m.vehicle) ? 1.5 : 1);
     S.ratio = theirs > 0 ? own / theirs : 99;
     const near = en.filter(k => k.conf > 0.35 && dist2(k.px, k.pz, cx, cz) < 320);
@@ -430,7 +431,7 @@ export function createSquadAI(world, opt = {}) {
   AI.steerVel = (m, speed) => {
     const a = m.ai; if (!a.move) return [0, 0];
     const dx = a.move[0] - m.x, dz = a.move[1] - m.z, d = Math.hypot(dx, dz); if (d < (m.vehicle ? 4 : 0.6)) return [0, 0];   // (a tank stops near the spot rather than circling it)
-    const [ux, uz] = world.steer(m.x, m.z, dx, dz, m.vehicle ? 2.5 : 0.6, m.vehicle ? 10 : 5, m.kind === 'hovertank' ? 0.32 : m.kind === 'mbt' ? 0.45 : 0);
+    const [ux, uz] = world.steer(m.x, m.z, dx, dz, m.vehicle ? 2.5 : 0.6, m.vehicle ? 10 : 5, m.maxGrade ?? (m.kind === 'hovertank' ? 0.32 : m.kind === 'mbt' ? 0.45 : 0));   // (PARITY: m.maxGrade - the host's per-unit climbing limit)
     const s = speed * Math.min(1, d / 3); return [ux * s, uz * s];
   };
   return AI;

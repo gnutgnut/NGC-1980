@@ -20,6 +20,9 @@ import { FIGURES } from '../air/rotary/figures.js';
 import { createCasevac } from './casevac.js';   // ngc/infdepth
 import { careHands, throwHands } from '../infantry/carepose.js';   // ngc/infdepth-fix
 import { m67Geometry, grenadeMaterial } from '../infantry/grenademodel.js';   // ngc/marine-polish: the AI's M67s drawn in flight
+// PARITY (ngc/parity): the Task Force's AI armour - an M60A3 the LCM-8 lands (the player's tank and landing craft models)
+import { buildM60View } from './m60view.js';
+import { buildLCM8Mesh, LCM8, lcmSound } from '../armor/lcm8.js';
 
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -28,6 +31,11 @@ FIGURES.marine = o => buildMarineFigure({ ...o, detail: 'full' });
 export const GW_T = {
   HOVER_AT: 240, HOVER_COST: 32, HOVER_GAP: 70,     // s from the start / materiel / s between launches
   MBT_AT: 540, MBT_COST: 55, MBT_GAP: 150,
+  // PARITY (ngc/parity): the Task Force's M60A3 by LCM-8 (GW.launchArmour; the commander side - who orders it, the tech
+  // gate - is war.js's). Cheaper than a seized MBT: an older tank that loses two tank duels in three to a T-90M
+  // (groundwarbench.mjs duels) but carries the Marines' fight against the STRIDERs. LCM_KT: the boat's speed, loaded
+  // (9 kt, LCM8.SPEED) - slow beside the KRAKEN's 40 kt LCAC, as it was.
+  M60_COST: 40, M60_GAP: 150, LCM_SPEED: LCM8.SPEED, LCM_SPEED_LIGHT: LCM8.SPEED_LIGHT,
   DECK_RATE: 0.12,                                  // materiel / s of armour the KRAKEN's vehicle deck readies (game)
   STRIDERS: 8, SQUAD: 4,                            // per MV-22 load; per squad
   CAP_RW: 12, CAP_MAR: 9,                           // s to take a pad (the war's CAP_TIME for the old troops: 10 / 9)
@@ -102,7 +110,7 @@ export function createGroundWar(ctx) {
     let V = GW.views.get(u.id); if (V) return V;
     if (u.kind === 'strider') { V = buildStrider({ weapon: u.weaponName, tag: u.tag }); root.add(V.group); }
     else if (u.kind === 'hovertank') { V = buildHoverTank({ tag: u.tag }); root.add(V.group, V.shadow); }
-    else if (u.kind === 'mbt') { V = u.adoptView || buildMBT(u.mbtType, { tag: u.tag }); if (!V.group.parent || V.group.parent !== root) root.add(V.group); }
+    else if (u.kind === 'mbt') { V = u.adoptView || (u.side === 1 ? buildM60View() : buildMBT(u.mbtType, { tag: u.tag })); if (!V.group.parent || V.group.parent !== root) root.add(V.group); }   // (PARITY: side 1 = our M60A3)
     else { V = u.adoptView || buildMarineFigure({ seed: u.seed, weapon: u.role === 'gren' ? 'M16A1/M203' : 'M16A1' }); root.add(V.group); if (u.role === 'gren') V.setWeapon('M16A1/M203'); }
     V.kind = u.kind; GW.views.set(u.id, V); return V;
   }
@@ -144,7 +152,7 @@ export function createGroundWar(ctx) {
       V = viewOf(u); V.group.visible = true; if (V.shadow && V.shadow !== V.group) V.shadow.visible = true;
       if (u.kind === 'strider') V.update(u.sim, dt, W.time);
       else if (u.kind === 'hovertank') V.update(u.sim, dt, W.time, GS.hAt(u.x, u.z) > 0 ? GS.hAt(u.x, u.z) : 0.05);
-      else if (u.kind === 'mbt') V.update(u.sim, dt, W.time);
+      else if (u.kind === 'mbt') { if (u.side === 1) V.fighting = !!(u.squad && /contact|flank|assault|defend|retreat/.test(u.squad.state) && u.ai && u.ai.aim); V.update(u.sim, dt, W.time); }
       else {
         const M = u.body, g = V.group;
         g.position.set(M.x, M.y, M.z); g.rotation.set(0, M.yaw, 0);
@@ -189,7 +197,7 @@ export function createGroundWar(ctx) {
       else if (e.e === 'drag') say(`${GS.units.find(q => q.id === e.id)?.name || 'A MARINE'} DRAGGING ${GS.units.find(q => q.id === e.to)?.name || 'A CASUALTY'} TO THE CCP`, 80, 10, 'good');
     }
   }
-  GW.setVisibility = fog => { for (const u of GS.units) if (u.side === 2) u.fogVis = fog.visibleAt(u.x, u.z); for (const L of GW.lcacs) L.view.group.visible = fog.visibleAt(L.x, L.z); };
+  GW.setVisibility = fog => { for (const u of GS.units) if (u.side === 2) u.fogVis = fog.visibleAt(u.x, u.z); for (const L of GW.lcacs) L.fogVis = L.side === 1 || fog.visibleAt(L.x, L.z); };   // (PARITY: our landing craft are always seen)
 
   // ------------------------------------------------------------------------------------------- effects + sound
   let rwa = null, sndT = 0, silenceTimer = null;
@@ -220,7 +228,7 @@ export function createGroundWar(ctx) {
       switch (e.e) {
         case 'shot': {
           if (!near(e.x, e.z, 700) || e.ammo === 'm67') break;   // (a hand grenade: no flash)
-          const big = e.ammo === 'coil120' || e.ammo === 'mbt120' || e.ammo === 'mbt125', cyan = e.side === 2 && (e.ammo === 'needle' || e.ammo === 'coil120');
+          const big = e.ammo === 'coil120' || e.ammo === 'mbt120' || e.ammo === 'mbt125' || e.ammo === 'mbt105', cyan = e.side === 2 && (e.ammo === 'needle' || e.ammo === 'coil120');
           fx.add.spawn(e.x + e.dx * 0.5, e.y + e.dy * 0.5, e.z + e.dz * 0.5, 0, 0, 0, 0.05, big ? 4 : 0.7, big ? 2 : 0.3, cyan ? 0.6 : 1, cyan ? 0.95 : 0.8, cyan ? 1 : 0.45, 1);
           if (e.ammo === 'coil120') for (let i = 0; i < 26; i++) { const k = i * 4; fx.add.spawn(e.x + e.dx * k, e.y + e.dy * k, e.z + e.dz * k, 0, 0.3, 0, 0.25, 0.8, 0.2, 0.75, 0.97, 1, 1); }
           if (big || e.ammo === 'law') for (let i = 0; i < 8; i++) fx.mix.spawn(e.x, e.y, e.z, rnd(-2, 2) + e.dx * 4, rnd(0, 1.5), rnd(-2, 2) + e.dz * 4, rnd(1.5, 3), 0.8, 3.5, .7, .68, .62, 0.45, -0.2, 1.2, 0.4);
@@ -248,7 +256,7 @@ export function createGroundWar(ctx) {
       ctx.addScore(e.kind === 'strider' ? 150 : e.kind === 'hovertank' ? 600 : 800);
       if (vehicle) feed(`${e.I ? e.I.name + ': ' : ''}${e.kind === 'hovertank' ? 'RW-7 HOVER TANK' : (e.mbtType === 't90m' ? 'SEIZED T-90M' : 'SEIZED M1A2')} DESTROYED`, 'good');
       else tally(e.I, 'striders');
-    }
+    } else if (vehicle) feed(`${e.I ? e.I.name + ': ' : ''}OUR M60A3 KNOCKED OUT`, 'bad');   // PARITY: the Task Force's tank
   }
   // kill and casualty tallies, fed in batches (a firefight would flood the feed otherwise)
   function tally(I, what) { if (!I) return; const k = GW.kills.get(I) || { striders: 0, kia: 0, wia: 0, t: 0 }; k[what]++; GW.kills.set(I, k); }
@@ -278,11 +286,14 @@ export function createGroundWar(ctx) {
   function contested(I, side) { for (const u of GS.units) if (u.alive && u.side !== side && (u.kind !== 'marine' || u.able) && Math.hypot(u.x - I.pad.x, u.z - I.pad.z) < 70) return true; return false; }
   GW.contested = I => { const s1 = GS.units.some(u => u.alive && u.side === 1 && u.able && u.B?.I === I), s2 = GS.units.some(u => u.alive && u.side === 2 && u.B?.I === I); return s1 && s2; };
   GW.presence = (I, side) => GS.units.filter(u => u.alive && u.side === side && (u.kind !== 'marine' || u.able) && u.B?.I === I).length;
+  // PARITY (ngc/parity): the armour of a side on island I (MBTs, RW-7s; ours: the M60A3s) - GW.presence counts them too, one each
+  GW.presenceArmour = (I, side) => GS.units.filter(u => u.alive && u.side === side && u.vehicle && u.B?.I === I).length;
+  const ARMOUR_W = 3;   // a tank weighs like three riflemen when the commanders read an island's ground forces
   function updateProxies() {
     for (let i = GW.proxies.length - 1; i >= 0; i--) {
       const P = GW.proxies[i], I = P.home;
       const up = P.members.filter(u => u.alive && (u.kind !== 'marine' || u.able));
-      if (P.formed && !up.length) { P.wiped = true; GW.proxies.splice(i, 1); if (P.side === 1) note(I, 'MARINE SQUAD WIPED OUT'); else { feed(`${I.name}: ENEMY LANDING PARTY DESTROYED`, 'good'); ctx.addScore(300); } continue; }
+      if (P.formed && !up.length) { P.wiped = true; GW.proxies.splice(i, 1); if (P.side === 1) note(I, P.members.every(u => u.vehicle) ? 'TASK FORCE ARMOUR LOST' : 'MARINE SQUAD WIPED OUT'); else { feed(`${I.name}: ENEMY LANDING PARTY DESTROYED`, 'good'); ctx.addScore(300); } continue; }
       if (up.length) { let x = 0, z = 0, y = 0; for (const u of up) { x += u.x; y += u.y; z += u.z; } P.p.set(x / up.length, y / up.length + 1, z / up.length); }
       P.hp = P.hpMax = Math.max(1, up.length);
       // capture: two men (machines) able on the pad, nobody of the other side near it, the island not ours yet
@@ -391,7 +402,14 @@ export function createGroundWar(ctx) {
   };
 
   // ------------------------------------------------------------------------------------------- the commander's ground plans
-  function launchPoint() { const c = W.enemyCarrier; if (c && c.sinking === undefined && !(c.sky && c.sky.up)) return [c.p.x + Math.cos(c.yaw) * 30, c.p.z - Math.sin(c.yaw) * 30]; const I = W.islands.find(I => I.name === 'IRONHOLD'); return nav.nearestWater(I.x - 160, I.z + 160); }
+  // where a side's landing craft put out from: its carrier (the KRAKEN; PARITY: the ALBATROSS for side 1) alongside, or
+  // the water off its HQ island when the carrier is gone or flying
+  function launchPoint(side = 2) {
+    const c = side === 2 ? W.enemyCarrier : W.carrier;
+    if (c && c.sinking === undefined && !(c.sky && c.sky.up)) return [c.p.x + Math.cos(c.yaw) * 30, c.p.z - Math.sin(c.yaw) * 30];
+    const I = side === 2 ? W.islands.find(I => I.name === 'IRONHOLD') : W.islands.find(I => I.kind === 'hq' && (I.owner0 ?? I.owner) === 1) || W.islands.find(I => I.kind === 'hq');
+    return side === 2 ? nav.nearestWater(I.x - 160, I.z + 160) : nav.nearestWater(I.x + 160, I.z - 160);
+  }
   // a beach on island I facing (fx, fz): { land: [x, z] just above the waterline, sea: [x, z] off it, a }
   function beachOf(I, fx, fz) {
     // a real beach: the sea shelving gently up to the waterline and low ground behind it (cliffs and banks are no
@@ -423,13 +441,13 @@ export function createGroundWar(ctx) {
     let best = null, bs = -1e9;
     for (const I of W.islands) {
       if (I.cave && I.owner !== 2) continue;
-      const rw = GW.presence(I, 2), mar = GW.presence(I, 1);
+      const rw = GW.presence(I, 2), mar = GW.presence(I, 1) + (ARMOUR_W - 1) * GW.presenceArmour(I, 1);   // (PARITY: our tanks draw the machines' armour as theirs draw our attention)
       let s = -1e9;
       if (rw && mar) s = 100 + mar * 3 - rw;
       else if (mar && I.owner === 2) s = 80 + mar * 3;
       else if (rw && I.owner !== 2) s = 40 - rw;
       else if (armour && I.owner === 1 && !I.cave && mar && W.aliveAA(I) === 0) s = 30 - mar;   // (an island of theirs held only by Marines: armour goes in)
-      else if (armour && I.owner === 2 && !I.cave) { let dmin = 1e9; for (const J of W.islands) if (J.owner === 1) dmin = Math.min(dmin, Math.hypot(J.x - I.x, J.z - I.z)); s = 10 - dmin / 100 - (GS.units.some(u => u.alive && u.vehicle && u.B?.I === I) ? 30 : 0); }
+      else if (armour && I.owner === 2 && !I.cave) { let dmin = 1e9; for (const J of W.islands) if (J.owner === 1) dmin = Math.min(dmin, Math.hypot(J.x - I.x, J.z - I.z)); s = 10 - dmin / 100 - (GS.units.some(u => u.alive && u.vehicle && u.side === 2 && u.B?.I === I) ? 30 : 0); }
       if (s > bs) { bs = s; best = I; }
     }
     return bs > -1e8 ? best : null;
@@ -440,28 +458,63 @@ export function createGroundWar(ctx) {
     GS.transit(u, R.route, GS.battle(I), I.owner === 2 ? { type: 'defend', x: I.pad.x, z: I.pad.z, r: 30 } : { type: 'take', x: I.pad.x, z: I.pad.z, r: 30 });
     u.goal = I; return u;
   };
-  GW.launchMBT = (I, type) => {
-    const [x0, z0] = launchPoint(), R = seaRoute(x0, z0, I); if (!R) return null;
-    const view = buildLCAC({ tag: 'ᚱ⟟⋔ 04' }); root.add(view.group);
-    const cargo = buildMBT(type, { tag: type === 'm1a2' ? `RW-A1 ${GS.nextId}` : `RW-T9 ${GS.nextId}` }); cargo.group.position.set(0, LCAC.DECK + 0.05, 1.5); view.group.add(cargo.group);
-    const L = { x: x0, z: z0, yaw: Math.atan2(-(R.route[0][0] - x0), -(R.route[0][1] - z0)), v: 0, route: R.route.slice(0, -2), beach: R.beach, I, type, view, cargo, phase: 'run', t: 0, ramp: 0, lift: 1, prop: 1, i: 0 };
+  // a landing craft with one tank for island I (GW.lcacs holds both sides' craft; updateLCACs runs them):
+  //   side 2: the KRAKEN's seized LCAC (a hovercraft: 40 kt, runs up the beach, a seized M1A2 / T-90M drives off)
+  //   side 1 (PARITY, ngc/parity): the ALBATROSS's LCM-8 (a displacement boat, 9 kt loaded: it grounds its bow at the
+  //   waterline, drops the bow ramp and the M60A3 rolls off through the shallows - the player's armordelivery.js boat)
+  function launchCraft(I, type, side, o = {}) {
+    const [x0, z0] = o.from || launchPoint(side), R = seaRoute(x0, z0, I); if (!R) return null;
+    let view, cargo;
+    if (side === 2) { view = buildLCAC({ tag: 'ᚱ⟟⋔ 04' }); cargo = buildMBT(type, { tag: type === 'm1a2' ? `RW-A1 ${GS.nextId}` : `RW-T9 ${GS.nextId}` }); cargo.group.position.set(0, LCAC.DECK + 0.05, 1.5); view.group.add(cargo.group); }
+    else { view = buildLCM8Mesh({ num: o.num || `8-${41 + (GW.lcmN = (GW.lcmN || 0) + 1)}` }); cargo = buildM60View(); cargo.pose(0, LCM8.WELL.y, CARGO_Z, 0, 0, 0, 0); view.group.add(cargo.group); }
+    root.add(view.group);
+    const L = { side, craft: side === 2 ? 'lcac' : 'lcm8', x: x0, z: z0, yaw: Math.atan2(-(R.route[0][0] - x0), -(R.route[0][1] - z0)), v: 0, route: R.route.slice(0, -2), beach: R.beach, I, type, view, cargo, phase: 'run', t: 0, ramp: 0, rampA: LCM8.RAMP.up, lift: 1, prop: 1, i: 0, order: o.order };
     GW.lcacs.push(L); return L;
-  };
+  }
+  const CARGO_Z = -3.6;   // (the M60's hull origin in the LCM-8's well: its 6.95 m hull between the ramp hinge and the forward bulkhead)
+  GW.launchMBT = (I, type) => launchCraft(I, type, 2);
+  // PARITY (ngc/parity): the Task Force's armour for island I. Returns the landing craft L (L.mbt = the tank once it is
+  // ashore; L.phase 'run' | 'beach' | 'ramp' | 'unload' | 'back' | 'home'), or null when no beach / route.
+  //   o.from [x, z]: put out from there (tests, scenes); o.order: the tank's ground order (default: 'take' an island not
+  //   ours, 'defend' one of ours)
+  GW.launchArmour = (I, type = 'm60a3', side = 1, o = {}) => side === 1 ? launchCraft(I, type, 1, o) : launchCraft(I, type === 'm60a3' ? 't90m' : type, 2, o);
+  // the M60's roll-off: its hull origin's height along the boat's centre line (lz: boat frame, -z forward), on the well
+  // floor, down the ramp, then on the bottom / the beach
+  function rollY(L, lz, wx, wz) {
+    const W0 = LCM8.WELL.z0, RL = LCM8.RAMP.len, a = L.rampA, toeZ = W0 - Math.cos(a) * RL;
+    if (lz >= W0) return L.gy + LCM8.WELL.y;
+    if (lz >= toeZ) return L.gy + LCM8.WELL.y + Math.tan(a) * (W0 - lz);
+    return Math.max(terrainH(wx, wz), L.gy + LCM8.WELL.y + Math.sin(a) * RL - 0.6);
+  }
   function updateLCACs(dt) {
     for (let i = GW.lcacs.length - 1; i >= 0; i--) {
       const L = GW.lcacs[i]; L.t += dt;
+      const lcm = L.craft === 'lcm8', fx0 = -Math.sin(L.yaw), fz0 = -Math.cos(L.yaw);
       let tx, tz, want = 0;
+      const vRun = lcm ? GW_T.LCM_SPEED : 20, vHome = lcm ? GW_T.LCM_SPEED_LIGHT : 20;
       if (L.phase === 'run' || L.phase === 'home') {
         const rt = L.route; while (L.i < rt.length - 1 && Math.hypot(rt[L.i][0] - L.x, rt[L.i][1] - L.z) < 30) L.i++;
-        [tx, tz] = rt[L.i]; const d = Math.hypot(tx - L.x, tz - L.z), last = L.i === rt.length - 1;
-        want = last ? Math.min(20, 3 + d * 0.25) : 20;   // ~40 kt (C)
+        [tx, tz] = rt[L.i]; const d = Math.hypot(tx - L.x, tz - L.z), last = L.i === rt.length - 1, vmax = L.phase === 'home' ? vHome : vRun;
+        want = last ? Math.min(vmax, 3 + d * 0.25) : vmax;   // ~40 kt (C) the LCAC; 9 / 12 kt the LCM-8 (lcm8.js, U)
         if (L.phase === 'run' && last && d < 10) { L.phase = 'beach'; L.t = 0; }
-        if (L.phase === 'home' && last && d < 30) { root.remove(L.view.group); GW.lcacs.splice(i, 1); continue; }
-      } else if (L.phase === 'beach') {   // run up the beach until the bow is on dry land
-        [tx, tz] = L.beach.land; want = 6;
-        const bx = L.x - Math.sin(L.yaw) * 12, bz = L.z - Math.cos(L.yaw) * 12;
-        if ((terrainH(L.x, L.z) > -0.3 && terrainH(bx, bz) > 1.0) || terrainH(bx, bz) > 4 || L.t > 40) { L.phase = 'ramp'; L.t = 0; }   // (the hull up on the sand, or the bow against a bank)
-      } else if (L.phase === 'ramp') {
+        if (L.phase === 'home' && last && d < 30) { root.remove(L.view.group); if (L.snd) L.snd.stop(); GW.lcacs.splice(i, 1); continue; }
+      } else if (L.phase === 'beach') {
+        [tx, tz] = L.beach.land;
+        if (!lcm) {   // the hovercraft runs up the beach until the bow is on dry land
+          want = 6;
+          const bx = L.x - Math.sin(L.yaw) * 12, bz = L.z - Math.cos(L.yaw) * 12;
+          if ((terrainH(L.x, L.z) > -0.3 && terrainH(bx, bz) > 1.0) || terrainH(bx, bz) > 4 || L.t > 40) { L.phase = 'ramp'; L.t = 0; }   // (the hull up on the sand, or the bow against a bank)
+        } else {      // PARITY: the boat comes in slow and grounds its forefoot in ~0.8 m of water (armordelivery.js's rule)
+          want = 1.6;
+          const fb = -LCM8.BOW + 0.5, h = terrainH(L.x + fx0 * fb, L.z + fz0 * fb);
+          if (h > -0.85 || L.t > 60) {
+            L.phase = 'ramp'; L.t = 0;
+            const tip = -LCM8.BOW + LCM8.RAMP.len * 0.97, toeY = terrainH(L.x + fx0 * tip, L.z + fz0 * tip);
+            L.down = -Math.asin(clamp((LCM8.WELL.y - toeY) / LCM8.RAMP.len, 0.04, 0.45));
+            if (near(L.x, L.z, 400)) fx.splash(L.x + fx0 * 11, L.z + fz0 * 11, 0.6);
+          }
+        }
+      } else if (L.phase === 'ramp' && !lcm) {
         want = 0; L.ramp = Math.min(1, L.ramp + dt / 4);
         if (L.ramp >= 1 && !L.mbt) {
           // the MBT drives off: the model leaves the deck and becomes the unit
@@ -469,29 +522,61 @@ export function createGroundWar(ctx) {
           const x = L.x + fx * (sd + 4), z = L.z + fz * (sd + 4);
           L.view.group.remove(L.cargo.group);
           const u = GS.addMBT(L.type, null, x, z, L.yaw, { tag: '' }); u.adoptView = L.cargo; u.goal = L.I;
-          GS.join(GS.battle(L.I), u, L.I.owner === 2 ? { type: 'defend', x: L.I.pad.x, z: L.I.pad.z, r: 30 } : { type: 'take', x: L.I.pad.x, z: L.I.pad.z, r: 30 });
+          GS.join(GS.battle(L.I), u, L.order || (L.I.owner === 2 ? { type: 'defend', x: L.I.pad.x, z: L.I.pad.z, r: 30 } : { type: 'take', x: L.I.pad.x, z: L.I.pad.z, r: 30 }));
           L.mbt = u; attachProxy(u, L.I); note(L.I, `SEIZED ${L.type === 'm1a2' ? 'M1A2' : 'T-90M'} COMING ASHORE`);
         }
         if (L.mbt && (L.t > 14 || Math.hypot(L.mbt.x - L.x, L.mbt.z - L.z) > 30)) { L.phase = 'back'; L.t = 0; }
+      } else if (L.phase === 'ramp') {   // PARITY: the LCM-8's bow ramp comes down (~7 s, armordelivery.js), the tank starts up
+        want = 0; L.rampA = Math.max(L.down, L.rampA - dt * (LCM8.RAMP.up - L.down) / 7);
+        if (L.rampA <= L.down + 1e-3 && L.t > 7.5) { L.phase = 'unload'; L.t = 0; L.s = 0; L.view.group.remove(L.cargo.group); root.add(L.cargo.group); }
+      } else if (L.phase === 'unload') {
+        // the M60 rolls off: forward along the boat's centre line at a walk, down the ramp, through the shallows and up
+        // the beach; where the ground is dry it becomes the fighting unit (the same model)
+        want = 0; L.s += dt * Math.min(2.4, 0.6 + L.t * 0.6);
+        const along = (s) => { const lz = CARGO_Z - s, wx = L.x + fx0 * -lz, wz = L.z + fz0 * -lz; return [lz, wx, wz, rollY(L, lz, wx, wz)]; };
+        const [, x, z, y] = along(L.s), [, , , yF] = along(L.s + 2.1), [, , , yB] = along(L.s - 2.1);
+        L.cargo.pose(x, y, z, L.yaw, Math.atan2(yF - yB, 4.2), 0, L.s);
+        if (near(x, z, 300) && y < 0.3 && Math.random() < 0.5) { const a = rnd(6.283); fx.mix.spawn(x + Math.cos(a) * 2, 0.3, z + Math.sin(a) * 2, Math.cos(a) * rnd(1, 3), rnd(0.5, 1.5), Math.sin(a) * rnd(1, 3), rnd(0.8, 1.6), 0.8, 2.5, .86, .92, .97, 0.4, 1.2, 1.2, 0.3); }   // the bow wave through the shallows
+        if ((L.s > 12 && terrainH(x, z) > 0.45) || L.s > 70) {
+          const u = GS.addMBT(L.type, null, x, z, L.yaw, { side: 1, tag: '' }); u.adoptView = L.cargo; u.goal = L.I;
+          GS.join(GS.battle(L.I), u, L.order || (L.I.owner === 1 ? { type: 'defend', x: L.I.pad.x, z: L.I.pad.z, r: 30 } : { type: 'take', x: L.I.pad.x, z: L.I.pad.z, r: 30 }));
+          L.mbt = u; attachProxy(u, L.I); note(L.I, 'M60A3 ASHORE  -  THE TANK IS WITH THE MARINES', 'good');
+          L.phase = 'back'; L.t = 0;
+        }
       } else if (L.phase === 'back') {
-        L.ramp = Math.max(0, L.ramp - dt / 4); want = -5;
-        if (L.t > 7) { const [hx, hz] = launchPoint(); L.route = nav.path(L.x, L.z, hx, hz).map(p => [p[0], p[1]]); L.i = 0; L.phase = 'home'; }
+        if (lcm) { L.rampA = Math.min(LCM8.RAMP.up, L.rampA + dt * (LCM8.RAMP.up - (L.down ?? 0)) / 6); want = L.t > 6 ? -1.5 : 0; }
+        else { L.ramp = Math.max(0, L.ramp - dt / 4); want = -5; }
+        if (L.t > (lcm ? 14 : 7)) { const [hx, hz] = launchPoint(L.side); L.route = nav.path(L.x, L.z, hx, hz).map(p => [p[0], p[1]]); L.i = 0; L.phase = 'home'; }
       }
-      // a hovercraft: heading turns toward the target, speed follows; it slides a little (no grip)
-      if (tx !== undefined && want > 0) { let da = Math.atan2(-(tx - L.x), -(tz - L.z)) - L.yaw; da = Math.atan2(Math.sin(da), Math.cos(da)); L.yaw += clamp(da, -0.35 * dt, 0.35 * dt); }
-      L.v += clamp(want - L.v, -3 * dt, 1.5 * dt);
+      // heading turns toward the target, speed follows: the hovercraft slides a little (no grip); the boat turns slower
+      if (tx !== undefined && want > 0) { let da = Math.atan2(-(tx - L.x), -(tz - L.z)) - L.yaw; da = Math.atan2(Math.sin(da), Math.cos(da)); const tr = lcm ? 0.2 : 0.35; L.yaw += clamp(da, -tr * dt, tr * dt); }
+      L.v += clamp(want - L.v, -(lcm ? 0.8 : 3) * dt, (lcm ? 0.35 : 1.5) * dt);
+      if (L.phase === 'ramp' || L.phase === 'unload') L.v *= Math.max(0, 1 - dt * 2);   // (aground)
       L.x += -Math.sin(L.yaw) * L.v * dt; L.z += -Math.cos(L.yaw) * L.v * dt;
-      const hfx = -Math.sin(L.yaw), hfz = -Math.cos(L.yaw), hb = Math.max(terrainH(L.x + hfx * 11, L.z + hfz * 11), 0), hs = Math.max(terrainH(L.x - hfx * 11, L.z - hfz * 11), 0);
-      const gy = Math.max(Math.max(terrainH(L.x, L.z), 0), (hb + hs) / 2), g = L.view.group, pitch = Math.atan2(hb - hs, 22);   // (the skirt rides the beach: the hull pitches up it)
-      g.position.set(L.x, gy + 0.05 + Math.sin(W.time * 1.7 + i) * 0.04, L.z); g.rotation.set(pitch + Math.sin(W.time * 1.1) * 0.01 - (L.v - 5) * 0.002, L.yaw, Math.sin(W.time * 0.9) * 0.012, 'YXZ');
-      L.view.animate({ ramp: L.ramp, prop: L.v > 0.5 ? 1 : L.v < -0.5 ? -1 : 0.2, lift: 1 }, dt);
-      if (near(L.x, L.z, 500) && Math.random() < 0.6) { const wet = terrainH(L.x, L.z) < 0, a = rnd(6.283); if (wet) fx.mix.spawn(L.x + Math.cos(a) * 9, 0.4, L.z + Math.sin(a) * 9, Math.cos(a) * rnd(6, 12), rnd(0.5, 2), Math.sin(a) * rnd(6, 12), rnd(1, 2), 1, 4, .86, .92, .97, 0.4, 1.5, 1.2, 0.3); else fx.mix.spawn(L.x + Math.cos(a) * 9, gy + 0.4, L.z + Math.sin(a) * 9, Math.cos(a) * rnd(6, 12), rnd(0.5, 2), Math.sin(a) * rnd(6, 12), rnd(1, 2), 1, 4, .58, .52, .42, 0.4, 1.5, 1.2, 0.3); }
+      const g = L.view.group;
+      if (lcm) {   // PARITY: a displacement hull: rides the swell at the waterline, squats a little under way, the bow lifts aground
+        const aground = L.phase === 'ramp' || L.phase === 'unload' || (L.phase === 'back' && L.t < 6), roll = Math.sin(W.time * 0.8 + i) * (aground ? 0.004 : 0.02);
+        L.gy = aground ? 0.12 : Math.sin(W.time * 1.3 + i) * 0.08;
+        g.position.set(L.x, L.gy, L.z); g.rotation.set((aground ? 0.012 : 0) - L.v * 0.004 + Math.sin(W.time * 0.7 + i) * (aground ? 0.002 : 0.012), L.yaw, roll, 'YXZ');
+        L.view.animate({ ramp: L.rampA });
+        if (near(L.x, L.z, 500) && Math.abs(L.v) > 0.6 && Math.random() < 0.5) { fx.wake(L.x - fx0 * 11.5, L.z - fz0 * 11.5, 1.4); if (Math.random() < 0.3) fx.wake(L.x + fx0 * 10, L.z + fz0 * 10, 0.9); }
+        if (sfx && sfx.ctx && near(L.x, L.z, 700)) { if (!L.snd) L.snd = lcmSoundSafe(); if (L.snd) L.snd.update(aground ? 900 : 1300 + 900 * Math.abs(L.v) / GW_T.LCM_SPEED_LIGHT, aground ? 0.3 : 0.75, Math.hypot(L.x - ear.x, L.z - ear.z)); }
+        else if (L.snd) { L.snd.stop(); L.snd = null; }
+      } else {
+        const hfx = -Math.sin(L.yaw), hfz = -Math.cos(L.yaw), hb = Math.max(terrainH(L.x + hfx * 11, L.z + hfz * 11), 0), hs = Math.max(terrainH(L.x - hfx * 11, L.z - hfz * 11), 0);
+        const gy = Math.max(Math.max(terrainH(L.x, L.z), 0), (hb + hs) / 2), pitch = Math.atan2(hb - hs, 22);   // (the skirt rides the beach: the hull pitches up it)
+        g.position.set(L.x, gy + 0.05 + Math.sin(W.time * 1.7 + i) * 0.04, L.z); g.rotation.set(pitch + Math.sin(W.time * 1.1) * 0.01 - (L.v - 5) * 0.002, L.yaw, Math.sin(W.time * 0.9) * 0.012, 'YXZ');
+        L.view.animate({ ramp: L.ramp, prop: L.v > 0.5 ? 1 : L.v < -0.5 ? -1 : 0.2, lift: 1 }, dt);
+        if (near(L.x, L.z, 500) && Math.random() < 0.6) { const wet = terrainH(L.x, L.z) < 0, a = rnd(6.283); if (wet) fx.mix.spawn(L.x + Math.cos(a) * 9, 0.4, L.z + Math.sin(a) * 9, Math.cos(a) * rnd(6, 12), rnd(0.5, 2), Math.sin(a) * rnd(6, 12), rnd(1, 2), 1, 4, .86, .92, .97, 0.4, 1.5, 1.2, 0.3); else fx.mix.spawn(L.x + Math.cos(a) * 9, gy + 0.4, L.z + Math.sin(a) * 9, Math.cos(a) * rnd(6, 12), rnd(0.5, 2), Math.sin(a) * rnd(6, 12), rnd(1, 2), 1, 4, .58, .52, .42, 0.4, 1.5, 1.2, 0.3); }
+      }
       L.view.group.visible = L.fogVis !== false;
     }
   }
+  let lcmSoundOk = true;
+  function lcmSoundSafe() { if (!lcmSoundOk) return null; try { return lcmSound(sfx); } catch (e) { lcmSoundOk = false; return null; } }
   GW.think = P => {
     const E = W.E, t = W.time;
-    const hovers = GS.units.filter(u => u.kind === 'hovertank' && u.alive).length, mbts = GS.units.filter(u => u.kind === 'mbt' && u.alive).length + GW.lcacs.filter(L => !L.mbt).length;
+    const hovers = GS.units.filter(u => u.kind === 'hovertank' && u.alive).length, mbts = GS.units.filter(u => u.kind === 'mbt' && u.side === 2 && u.alive).length + GW.lcacs.filter(L => L.side === 2 && !L.mbt).length;   // (PARITY: theirs only)
     GW.hoverT -= 2; GW.mbtT -= 2;
     // the ground arm saves up: when armour is due it takes a share of the materiel as it comes in (the air arm would
     // otherwise spend every point on WASPs), and pays for the launch out of that
@@ -587,7 +672,7 @@ export function createGroundWar(ctx) {
   };
   GW.reset = () => {
     for (const id of [...GW.views.keys()]) dropView(id);
-    for (const L of GW.lcacs) root.remove(L.view.group); GW.lcacs.length = 0;
+    for (const L of GW.lcacs) { root.remove(L.view.group); if (L.cargo && !L.mbt) root.remove(L.cargo.group); if (L.snd) L.snd.stop(); } GW.lcacs.length = 0;   // (PARITY: an M60 mid roll-off, the LCM-8's engines)
     for (const L of GW.landings) L.Q.dispose(); GW.landings.length = 0;
     GW.proxies.length = 0; GW.kills.clear(); GS.reset(); CV.reset(); GW.hoverT = GW_T.HOVER_AT; GW.mbtT = GW_T.MBT_AT; GW.bank = 0; GW.silence();
   };

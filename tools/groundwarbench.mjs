@@ -29,12 +29,15 @@ export function fight(o = {}) {
   for (let k = 0; k < nR; k++) rw.push(GS.addStrider(B, -40 + (k % 4) * 4, -130 + Math.floor(k / 4) * 4, Math.PI, { weapon: k % 4 === 0 ? 'coil' : 'xm7' }));
   for (let k = 0; k < nR; k += 4) GS.squadRW(B, rw.slice(k, k + 4), o.rwOrder || { type: 'take', x: 0, z: 30, r: 30 });
   for (const v of o.vehicles || []) { const u = v.kind === 'hovertank' ? GS.addHover(B, v.x, v.z, Math.PI) : GS.addMBT(v.kind, B, v.x, v.z, Math.PI); GS.join(B, u, { type: 'take', x: 0, z: 30, r: 30 }); rw.push(u); }
+  // PARITY (ngc/parity): the Task Force's own AI tanks (side 1) with the Marines
+  const tf = []; for (const v of o.tf || []) { const u = GS.addMBT(v.kind || 'm60a3', B, v.x, v.z, v.yaw ?? 0, { side: 1 }); GS.join(B, u, o.tfOrder || o.marOrder || { type: 'defend', x: 0, z: 30, r: 25 }); tf.push(u); }
+  let ffHits = 0;   // side 1's rounds landing on side 1's tanks (must stay 0)
   const ev = {}, T = o.secs ?? 300, dt = 1 / 30, heli = o.heli;
   let heliT = 0, heliShots = 0, heliHits = 0, ended = null, rocketT = 5;
   const t0 = performance.now();
   for (let i = 0; i < T / dt; i++) {
     const cam = o.far ? { x: 3000, y: 50, z: 3000 } : { x: 0, y: 60, z: 0 };
-    for (const e of GS.step(dt, { cam })) { ev[e.e] = (ev[e.e] || 0) + 1; if (e.e === 'kia' || e.e === 'wia') { const k = e.e + '_' + e.part; ev[k] = (ev[k] || 0) + 1; } if (e.e === 'hit' && e.side === 1 && e.kind === 'strider') { const k = 'h_' + e.ammo + '_' + e.part + (e.pen ? '+' : ''); ev[k] = (ev[k] || 0) + 1; } }
+    for (const e of GS.step(dt, { cam })) { ev[e.e] = (ev[e.e] || 0) + 1; if (e.e === 'hit' && e.side === 1 && tf.some(u => u.id === e.id)) ffHits++; if (e.e === 'kia' || e.e === 'wia') { const k = e.e + '_' + e.part; ev[k] = (ev[k] || 0) + 1; } if (e.e === 'hit' && e.side === 1 && e.kind === 'strider') { const k = 'h_' + e.ammo + '_' + e.part + (e.pen ? '+' : ''); ev[k] = (ev[k] || 0) + 1; } }
     // the helicopter: a slow orbit 220 m round the pad, 55 m up; the door gun fires ~6 rounds/s in bursts at the
     // nearest STRIDER in sight within 350 m (game rounds: 75 m/s tracer as war.js, swept against the units)
     if (heli && GS.time > (heli.from ?? 60)) {
@@ -80,7 +83,7 @@ export function fight(o = {}) {
   }
   const cost = (performance.now() - t0) / GS.time;
   const onPad = rw.filter(u => u.alive && Math.hypot(u.x - 0, u.z - 30) < 25).length;
-  return { GS, B, mar, rw, ev, ended, cost, marines: mar.filter(m => m.alive && m.able).length, kia: GS.stats.kia, wia: GS.stats.wia, machines: rw.filter(u => u.alive).length, crippled: rw.filter(u => u.alive && (!u.sim.armed || u.sim.blind || u.sim.mode === 'disabled')).length, onPad, heliHits, heliShots, time: GS.time };
+  return { GS, B, mar, rw, tf, ffHits, tanks: tf.filter(u => u.alive).length, ev, ended, cost, marines: mar.filter(m => m.alive && m.able).length, kia: GS.stats.kia, wia: GS.stats.wia, machines: rw.filter(u => u.alive).length, crippled: rw.filter(u => u.alive && (!u.sim.armed || u.sim.blind || u.sim.mode === 'disabled')).length, onPad, heliHits, heliShots, time: GS.time };
 }
 
 if (process.argv[2] === 'fight') {
@@ -94,6 +97,87 @@ if (process.argv[2] === 'fight') {
   console.log(r.B.mar.log.map(l => `${l.t.toFixed(0)} ${l.st} ${l.note || ''}`).join(' | '));
   process.exit(0);
 }
+
+// ------------------------------------------------------------------------------------------------- PARITY: tank duels
+// (ngc/parity) a Task Force M60A3 (side 1, B.tf's squad AI) and a seized tank (side 2, the machines' squad AI) start on
+// opposite corners of the sandbox island, both ordered to take the pad, and fight it out (both ends swapped by `swap`)
+export function duel(o = {}) {
+  const I = { id: 0, name: 'TEST', x: 0, z: 0, r: 215, pad: { x: 0, z: 30, r: 8.5, h: isl.height(0, 30) }, structs: [], owner: 0 };
+  const GS = createGroundSim({ terrainH: isl.heightExact, islands: [I], seed: o.seed ?? 1, hooks: {} });
+  GS.maps.bakeAll(); GS.maps.setObstacles(I, isl.obstacles.map(q => ({ ...q })));
+  // (four meetings on the low ground round the island's central hill - the pad's hilltop is too steep for a fair duel: both drives bog on its 40 % sides)
+  const LAY = [[[-110, -100], [110, -100], [0, -110]], [[-100, 110], [100, 100], [0, 115]], [[-150, 0], [-30, -140], [-90, -80]], [[150, -20], [40, 140], [110, 70]]], L = LAY[(o.layout ?? 0) % 4], G = L[2];
+  const jit = (p, k) => { const s = Math.sin((o.seed ?? 1) * 91.7 + k * 37.3) * 43758.5, r = s - Math.floor(s), q = Math.sin((o.seed ?? 1) * 51.3 + k * 17.9) * 24634.6, r2 = q - Math.floor(q); let x = p[0] + (r - 0.5) * 50, z = p[1] + (r2 - 0.5) * 50; while (isl.height(x, z) < 1) { x *= 0.92; z *= 0.92; } return [x, z]; };   // (each seed moves both start points up to 25 m)
+  const B = GS.battle(I), [pa, pb] = o.swap ? [jit(L[1], 1), jit(L[0], 2)] : [jit(L[0], 1), jit(L[1], 2)];
+  const yawTo = (p, q) => Math.atan2(-(q[0] - p[0]), -(q[1] - p[1]));
+  const a = GS.addMBT('m60a3', B, pa[0], pa[1], yawTo(pa, G), { side: 1 }); GS.join(B, a, { type: 'take', x: G[0], z: G[1], r: 30 });
+  const b = GS.addMBT(o.enemy || 't90m', B, pb[0], pb[1], yawTo(pb, G)); GS.join(B, b, { type: 'take', x: G[0], z: G[1], r: 30 });
+  const dt = 1 / 30, T = o.secs ?? 420; let first = null;
+  const main = { 1: 0, 2: 0 }, mhit = { 1: 0, 2: 0 }, MAIN = { mbt105: 1, mbt120: 1, mbt125: 1 };
+  for (let i = 0; i < T / dt && a.alive && b.alive; i++) for (const e of GS.step(dt, { cam: { x: 0, y: 60, z: 0 } })) {
+    if (e.e === 'shot' && MAIN[e.ammo]) { main[e.side]++; if (!first) first = e.side; }
+    if (e.e === 'hit' && MAIN[e.ammo]) mhit[e.side]++;
+  }
+  return { m60: a.alive, foe: b.alive, t: GS.time, first, shots: GS.stats.shots, main, mhit, a, b };
+}
+if (process.argv[2] === 'duels') {   // node tools/groundwarbench.mjs duels [t90m|m1a2]: every duel, one line each
+  for (const seed of [1, 2, 3, 4, 5]) for (const swap of [false, true]) for (const layout of [0, 1, 2, 3]) {
+    const r = duel({ seed, swap, layout, enemy: process.argv[3] });
+    console.log(`seed ${seed} swap ${+swap} layout ${layout}: ${r.m60 && !r.foe ? 'M60 WON  ' : !r.m60 && r.foe ? 'FOE WON  ' : r.m60 ? 'no result' : 'both dead'} ${r.t.toFixed(0)} s | main gun hits/rounds: M60 ${r.mhit[1]}/${r.main[1]}, foe ${r.mhit[2]}/${r.main[2]} | first round: side ${r.first}`);
+  }
+  process.exit(0);
+}
+function parityChecks() {
+  console.log('  PARITY (ngc/parity): the Task Force\'s AI armour');
+  // 1. friendly fire: side 1's rounds and blasts pass our M60; side 2's hit it
+  {
+    const I = { id: 0, name: 'TEST', x: 0, z: 0, r: 215, pad: { x: 0, z: 30, r: 8.5, h: isl.height(0, 30) }, structs: [], owner: 1 };
+    const GS = createGroundSim({ terrainH: isl.heightExact, islands: [I], seed: 3, hooks: {} });
+    GS.maps.bakeAll(); GS.maps.setObstacles(I, isl.obstacles.map(q => ({ ...q })));
+    const B = GS.battle(I), t = GS.addMBT('m60a3', B, -40, 90, 0, { side: 1 }); GS.join(B, t, { type: 'defend', x: 0, z: 30, r: 25 });
+    const hp0 = t.sim.hp.hull + t.sim.hp.turret, y = t.y + 1.4;
+    const r1 = GS.segHit(1, 'ffar', t.x - 20, y, t.z, t.x + 20, y, t.z, 300);          // the war's side-1 rocket straight through it
+    const r1b = GS.segHit(1, 'm60', t.x, y, t.z - 20, t.x, y, t.z + 20, 60);
+    GS.blast(t.x, t.y + 1, t.z + 2, 6, 3, 1);                                          // a side-1 bomb next to it
+    const hp1 = t.sim.hp.hull + t.sim.hp.turret;
+    // a Marine's LAW fired through it (the ground war's own projectile, side 1)
+    const m = GS.addMarine(B, 'tl', t.x, t.z + 40, Math.PI, { seed: 1 }); GS.squadMarines(B, [m], { type: 'hold' });
+    GS.shoot(1, m, 'law', [t.x, t.y + 1.5, t.z + 30], [t.x, t.y + 1.2, t.z - 30], 0, 145);
+    let lawHit = false; for (let i = 0; i < 60; i++) for (const e of GS.step(1 / 30, { cam: { x: 0, y: 60, z: 0 }, peace: true })) if (e.e === 'hit' && e.id === t.id) lawHit = true;
+    const hp2 = t.sim.hp.hull + t.sim.hp.turret;
+    check(!r1 && !r1b && hp1 === hp0 && !lawHit && hp2 === hp0, 'PARITY: no friendly fire - side 1\'s rounds, blasts and a Marine\'s LAW pass our own M60A3', `hp ${hp0} -> ${hp2}`);
+    const r2 = GS.segHit(2, 'mbt125', t.x - 30, y, t.z, t.x + 30, y, t.z, 600);
+    check(!!r2 && r2.unit === t && !t.alive, 'PARITY: a side-2 round (a T-90M\'s 125 mm in the side) knocks the M60A3 out', r2 ? `hit ${r2.unit.kind}, alive ${t.alive}` : 'missed');
+    const t2 = GS.addMBT('m60a3', B, 40, 90, 0, { side: 1 }); GS.join(B, t2, { type: 'defend', x: 0, z: 30, r: 25 });
+    const q0 = t2.sim.hp.hull; GS.blast(t2.x, t2.y + 1, t2.z + 2, 6, 3, 2);
+    check(t2.sim.hp.hull < q0, 'PARITY: a side-2 blast hurts it', `${q0} -> ${t2.sim.hp.hull.toFixed(0)}`);
+  }
+  // 2. the duel: M60A3 vs T-90M, both ends, two layouts (rough parity: each side wins its share)
+  {
+    const res = [];
+    for (const seed of [1, 2, 3, 4, 5]) for (const swap of [false, true]) for (const layout of [0, 1, 2, 3]) res.push(duel({ seed, swap, layout }));
+    const w60 = res.filter(r => r.m60 && !r.foe).length, wT = res.filter(r => !r.m60 && r.foe).length, both = res.filter(r => !r.m60 && !r.foe).length, none = res.filter(r => r.m60 && r.foe).length;
+    console.log(`  M60A3 vs T-90M duels (${res.length}, 4 meetings x 5 seeds x both ends): M60 won ${w60}, T-90M won ${wT}, both dead ${both}, no result ${none} | first shot by side 1 in ${res.filter(r => r.first === 1).length} | mean ${(res.reduce((s, r) => s + r.t, 0) / res.length).toFixed(0)} s`);
+    const decided = res.length - none;
+    check(w60 >= decided * 0.2 && wT >= decided * 0.2 && none <= res.length * 0.25, 'PARITY: M60A3 vs T-90M resolves both ways over seeds and layouts (each side wins at least a fifth of the decided duels; a quarter at most undecided in 7 min)', `M60 ${w60} / T-90M ${wT} / both ${both} / undecided ${none} of ${res.length}`);
+    globalThis.__duel = { w60, wT, both, none, n: res.length };
+  }
+  // 3. Marines + an M60A3 vs the MV-22 load: better than the Marines alone (section 4: 0/8 there)
+  {
+    const seeds = [1, 2, 3, 4, 5, 6];
+    const alone = seeds.map(seed => fight({ seed, secs: 360 })), withTank = seeds.map(seed => fight({ seed, secs: 360, tf: [{ x: 10, z: 70, yaw: 0 }] }));
+    const win = r => r.machines === 0 || (r.marines > 0 && r.onPad === 0 && r.machines <= 2);
+    const wa = alone.filter(win).length, wt = withTank.filter(win).length, ff = withTank.reduce((s, r) => s + r.ffHits, 0);
+    const sa = alone.reduce((s, r) => s + r.marines, 0), st = withTank.reduce((s, r) => s + r.marines, 0);
+    console.log('  Marines + M60A3 vs 8 STRIDERs:', withTank.map(r => `[M ${r.marines} (${r.kia}k ${r.wia}w) | tank ${r.tanks ? 'up' : 'lost'} | R ${r.machines} ${r.ended ? Math.round(r.ended) + 's' : ''}]`).join(' '));
+    check(wt > wa && st > sa, 'PARITY: Marines with an M60A3 in support beat the STRIDERs more often than alone, and more of them live', `won ${wt}/${seeds.length} (alone ${wa}), ${st} vs ${sa} standing`);
+    check(ff === 0, 'PARITY: the Marines never shoot their own tank (no side-1 round lands on it in the fights)', `${ff} friendly hits`);
+    const tankShots = withTank.reduce((s, r) => s + (r.ev.mainGun || 0), 0);
+    check(tankShots > seeds.length, 'PARITY: the tank fights (main gun rounds at the machines)', `${tankShots} main-gun rounds in ${seeds.length} fights`);
+    globalThis.__support = { wt, wa, st, sa };
+  }
+}
+if (process.argv[2] === 'parity') { parityChecks(); console.log(`\n${pass}/${pass + fail} checks pass`); process.exit(fail ? 1 : 0); }
 
 // ------------------------------------------------------------------------------------------------- 1. the Marine's body
 {
@@ -125,13 +209,14 @@ if (process.argv[2] === 'fight') {
 // ------------------------------------------------------------------------------------------------- 2. the seized MBTs on trackfm
 {
   const env = { height: () => 0, surface: () => 'paved', water: () => -Infinity };
-  for (const [id, vmax] of [['m1a2', 67], ['t90m', 60]]) {
+  for (const [id, vmax] of [['m1a2', 67], ['t90m', 60], ['m60a3', 48]]) {
     const T = createMBT(MBT[id], { drive: createTrackDrive }); T.place(0, 0, 0, env);
     let t32 = null; const t0 = performance.now();
     for (let i = 0; i < 3600; i++) { T.step(1 / 60, { throttle: 1, steer: 0 }, env); if (t32 === null && T.speed > 32 / 3.6) t32 = i / 60; }
     const ms = (performance.now() - t0) / 3600, top = T.speed * 3.6;
     check(Math.abs(top - vmax) / vmax < 0.08, `${MBT[id].name}: top speed on the road ${top.toFixed(1)} km/h (published ${vmax}, C)`);
-    check(t32 > 4 && t32 < 10, `${MBT[id].name}: 0-32 km/h in ${t32.toFixed(1)} s (M1A1 quoted 7.2 s, C; INFERRED band 4-10)`);
+    if (id === 'm60a3') check(t32 > 9 && t32 < 20, `${MBT[id].name} (PARITY: the Task Force's AI tank): 0-32 km/h in ${t32.toFixed(1)} s (tankbench's band 9-20, U)`);
+    else check(t32 > 4 && t32 < 10, `${MBT[id].name}: 0-32 km/h in ${t32.toFixed(1)} s (M1A1 quoted 7.2 s, C; INFERRED band 4-10)`);
     for (let i = 0; i < 600; i++) T.step(1 / 60, { throttle: 0, steer: 0, brake: 1 }, env);
     check(Math.abs(T.speed) < 0.2, `${MBT[id].name}: brakes to a stop`, T.speed.toFixed(2));
     const y0 = T.yaw; for (let i = 0; i < 300; i++) T.step(1 / 60, { throttle: 0, steer: 1 }, env);
@@ -190,5 +275,6 @@ if (process.argv[2] === 'fight') {
   check(rf.cost < cost * 0.6, `a battle far from the camera runs cheap (5 Hz AI, kinematic STRIDERs)`, `${rf.cost.toFixed(1)} vs ${cost.toFixed(1)} ms per simulated s`);
 }
 
+parityChecks();   // PARITY (ngc/parity)
 console.log(`\n${pass}/${pass + fail} checks pass`);
 process.exit(fail ? 1 : 0);

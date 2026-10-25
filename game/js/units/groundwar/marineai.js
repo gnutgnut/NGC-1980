@@ -167,6 +167,7 @@ export function createMarineAI(world, opt = {}) {
     const near = en.filter(k => d2(k.px, k.pz, cx, cz) < 380);
     let own = 0, theirs = 0;
     for (const m of ms) own += MAR_T.POWER[m.role] * (m.laws > 0 ? 1.25 : 1) * (1 - 0.4 * Math.min(1, m.ai.supp));
+    own += S.allyPower || 0;   // PARITY (ngc/parity): a Task Force tank in support (set by the host, groundsim.js supportStep)
     for (const k of near) theirs += (MAR_T.THREAT[k.kind] ?? 1) * (k.kind === 'hovertank' || k.kind === 'mbt' ? (ms.some(m => m.laws > 0) ? 0.7 : 1.4) : 1);
     S.ratio = theirs ? own / theirs : 99;
     let tx = 0, tz = 0, tw = 0; for (const k of near) { const w = threatOf(k, cx, cz); tx += k.px * w; tz += k.pz * w; tw += w; }

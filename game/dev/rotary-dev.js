@@ -1,6 +1,6 @@
 // Rotary AI preview: watch each AI aircraft fly its mission over the test island (devworld.js) with a chase camera and
 // telemetry, or turn the model on a turntable.
-// Query: ?ac=ch46|mv22|wasp  &cam=chase|lz|orbit|side|deck  &skip=<s> (fly ahead before drawing)  &speed=<x>  &ui=0
+// Query: ?ac=ch46|mv22|wasp|cobra  &cam=chase|lz|orbit|side|deck  &skip=<s> (fly ahead before drawing)  &speed=<x>  &ui=0
 //        &view=model (turntable) &s={json animation state for the turntable}  &paused
 import * as THREE from 'three';
 import { createDevWorld } from '../js/units/air/rotary/devworld.js';

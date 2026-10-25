@@ -133,6 +133,14 @@ export const TRACK_PARAMS = {};
   P.WATER = { ...P.WATER, SWIMS: false };   // fords 1.2 m unprepared (C)
 }
 
+// ---- M60A3 TTS (PARITY, ngc/parity: the Task Force's AI tank in the ground war): the TANK agent's own set, unchanged
+{
+  const P = TRACK_PARAMS.m60a3 = clone(M60A3);
+  // the AI crew's driver works the CD-850's two ranges as tankbench's driver does (L -> H at ~11 km/h, back to L below
+  // ~9 km/h): a 'D' selector over L / H stands in for him (createTrackDrive drives in 'D')
+  P.TRANS.ranges.D = { auto: 2 }; P.TRANS.AUTO = ['L', 'H']; P.TRANS.UP_RPM = 2100; P.TRANS.DOWN_RPM = 430;   // turbine rpm in L at 11 km/h; in H at ~9 km/h (I)
+}
+
 // ---- the drive factory for mbt.js: createMBT(MBT.m1a2, { drive: createTrackDrive })
 // interface (mbt.js): place(x, z, yaw, env), step(dt, { throttle -1..1, steer -1..1, brake 0..1 }, env), p [x, y, z]
 // (hull origin on the ground), yaw, pitch (+ nose up), roll (+ right side down), speed (m/s + forward), yawRate,
@@ -177,6 +185,12 @@ export function createTrackDrive(Pm, opt = {}) {
     else if (thr < -0.02) { if (v > 0.6) { ctl.brake = 1; ctl.throttle = 0; } else { ctl.range = 'R'; ctl.throttle = Math.min(1, -thr); ctl.brake = c.brake || 0; } }
     else if (Math.abs(c.steer || 0) > 0.1 && Math.abs(v) < 0.8) { ctl.range = 'N'; ctl.throttle = 0.35 + 0.45 * Math.abs(c.steer); ctl.brake = Math.abs(D.pitch) > 0.03 ? 0.5 : 0; }   // neutral steer (on a slope the brakes stay half on, or it would roll away): pivot in place on the engine
     else { ctl.throttle = 0; ctl.brake = Math.max(c.brake || 0, Math.abs(v) < 0.3 ? 1 : 0.35); }
+    // (PARITY fixes, ngc/parity, found with the M60A3's geared cross-drive and half the power to weight: a hard turn from a
+    // crawl in gear needs revs - it stalled at full lock on the autopilot's ~0.2 throttle and sat there; and a turn the
+    // autopilot brakes for (the way wanted is behind it) is a neutral pivot, not a fight between gear, brakes and steer)
+    const hard = Math.abs(c.steer || 0) > 0.6 && Math.abs(v) < 1;
+    if (hard && thr > 0.02 && (c.brake || 0) > 0.3 && Math.abs(v) < 0.8) { ctl.range = 'N'; ctl.throttle = 0.35 + 0.45 * Math.abs(c.steer); ctl.brake = Math.abs(D.pitch) > 0.03 ? 0.5 : 0; }
+    else if (hard && thr > 0.02 && ctl.range !== 'N') ctl.throttle = Math.max(ctl.throttle, 0.3 + 0.5 * Math.abs(c.steer));
     ctl.steer = c.steer || 0;
     const ev = sim.step(dt, env); for (const e of ev) D.events.push(e);
     const y0 = sync();

@@ -101,7 +101,8 @@ export class RwAudio {
         else if (a === 'rifle') { this.burst(2000, 500, 0.1, 0.3 * v, 'bandpass', 0.8); }
         else if (a === 'mg') { this.burst(1600, 300, 0.1, 0.32 * v, 'bandpass', 0.7); this.burst(140, 50, 0.12, 0.2 * v, 'lowpass'); }
         else if (a === 'law') { this.burst(900, 120, 0.7, 0.4 * v, 'bandpass', 0.6); this.burst(3000, 600, 0.4, 0.15 * v, 'highpass', 0.5); }
-        else if (a === 'tankgun' || a === 'mbt120' || a === 'mbt125') { this.burst(600, 40, 1.2, 0.8 * v, 'lowpass', 0.5); this.burst(2500, 300, 0.3, 0.3 * v, 'bandpass', 0.5); }
+        else if (a === 'tankgun' || a === 'mbt120' || a === 'mbt125' || a === 'mbt105') {   // (PARITY: mbt105 = the Task Force's M60A3)
+          this.burst(600, 40, 1.2, 0.8 * v, 'lowpass', 0.5); this.burst(2500, 300, 0.3, 0.3 * v, 'bandpass', 0.5); }
         else if (a === 'coil120') { this.burst(9000, 1200, 0.08, 0.6 * v, 'highpass', 0.6); this.tone(3600, 140, 0.35, 0.18 * v, 'sawtooth'); this.burst(120, 30, 0.6, 0.6 * v, 'lowpass', 0.8); this.tone(55, 30, 0.4, 0.25 * v, 'sine'); }
         break;
       }

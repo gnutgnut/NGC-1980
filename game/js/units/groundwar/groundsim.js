@@ -46,7 +46,11 @@ export const GW_AMMO = {
   cannon20: { calibre: 20, mass: 0.1, velocity: 1030, type: 'ap', pen: 40 },  // the Hornet's M61
   ffar: { calibre: 70, mass: 6.2, velocity: 700, type: 'heat', pen: 220 },    // 2.75 in rockets
   m67: { calibre: 64, mass: 0.4, velocity: 15, type: 'frag', pen: 0 },       // M67 hand grenade, thrown (4-5 s fuse; ngc/infdepth-fix)
+  mbt105: { calibre: 105, mass: 4.5, velocity: 1500, type: 'ap', pen: 560 },  // PARITY: the Task Force's AI M60A3, 105 mm M68 (game value)
 };
+// PARITY (ngc/parity): the Task Force's AI tank's coax (M240 7.62 mm: the Marines' M60 round)
+const TF_COAX = { ...WPN.mbtmg, ammo: 'm60' };
+const BIG = { coil120: 1, mbt120: 1, mbt125: 1, mbt105: 1 };   // the big rounds (tank guns, the coilgun)
 // Marine weapons (game): rate (rounds / min of aimed or burst fire), spread (rad, 1 sigma), ammo, sound radius
 export const MAR_WPN = {
   rifle: { rpm: 50, spread: 0.0045, ammo: 'm16', loud: 330, v: 900 },
@@ -57,7 +61,7 @@ export const MAR_WPN = {
 };
 // damage a RUNAWAY round does to a Marine (HP on foot.js's body-part scale) and to the outside world (war.js units)
 // (hp: on a Marine; war: on an AA site or a vehicle; air: on an aircraft (a CH-46 on its LZ, a helicopter low over the fight); heli: the player's helicopter)
-export const RW_HURT = { xm7: { hp: 60, war: 0.15, air: 0.008, heli: 0.08 }, needle: { hp: 48, war: 0.12, air: 0.006, heli: 0.07 }, mg: { hp: 62, war: 0.15, air: 0.012, heli: 0.09 }, coil120: { hp: 600, war: 3.2, air: 2.5, heli: 0.7 }, mbt120: { hp: 600, war: 3.5, air: 3, heli: 0.8 }, mbt125: { hp: 600, war: 3.5, air: 3, heli: 0.8 }, pd: { hp: 30, war: 0.05, air: 0.03, heli: 0.05 } };
+export const RW_HURT = { xm7: { hp: 60, war: 0.15, air: 0.008, heli: 0.08 }, needle: { hp: 48, war: 0.12, air: 0.006, heli: 0.07 }, mg: { hp: 62, war: 0.15, air: 0.012, heli: 0.09 }, coil120: { hp: 600, war: 3.2, air: 2.5, heli: 0.7 }, mbt120: { hp: 600, war: 3.5, air: 3, heli: 0.8 }, mbt125: { hp: 600, war: 3.5, air: 3, heli: 0.8 }, mbt105: { hp: 600, war: 3.5, air: 3, heli: 0.8 }, pd: { hp: 30, war: 0.05, air: 0.03, heli: 0.05 } };
 const HEIGHT = { strider: 2.1, hovertank: 2.6, mbt: 2.4, marine: 1.8 };
 // ngc/infdepth: what a round does to a Marine on the medical sim (MEDINV hit-info, GAME: the same damage scale as
 // RW_HURT.hp; pen against the 1980 M1955 / M69 vests, armour class 2 in MEDINV's table)
@@ -110,6 +114,9 @@ export function createGroundSim(o) {
     let B = GS.battles.find(b => b.I === I); if (B) return B;
     const M = maps.get(I);
     B = { I, M, rw: createSquadAI(M.world, { seed: 7 + I.id }), mar: createMarineAI(M.world, { seed: 1980 + I.id }), units: [], near: true, acc: 0, tmap: new Map(), sq: 0 };
+    // PARITY (ngc/parity): the Task Force's armour on the island gets its own instance of the squad AI (side 1: its
+    // perception, threat and hearing are side-keyed), fed side 1's targets; each armour squad supports a Marine squad
+    B.tf = createSquadAI(M.world, { seed: 31 + I.id });
     GS.battles.push(B); return B;
   };
   const inBattle = (B, u) => { u.B = B; if (B && !B.units.includes(u)) B.units.push(u); };
@@ -127,9 +134,11 @@ export function createGroundSim(o) {
     const u = unit({ side: 2, kind: 'hovertank', sim: T, eye: 2.6, gun: 1.6, vehicle: true, weapon: { range: 900, antiArmor: true, rpm: 11 }, mag: 1, coax: { mag: 60, cd: 0, rl: 0 }, h: 2.6, tag: o.tag });
     sync(u); inBattle(B, u); return u;
   };
+  // (PARITY: o.side = 1 puts a Task Force tank in the fight - an M60A3 - on B.tf's squad AI; default the seized ones, side 2)
   GS.addMBT = (type, B, x, z, yaw, o = {}) => {
-    const T = createMBT(MBT[type], { id: GS.nextId, drive: o.placeholder ? undefined : createTrackDrive }); T.place(x, z, yaw, armorEnv);
-    const u = unit({ side: 2, kind: 'mbt', mbtType: type, sim: T, eye: 2.6, gun: 2.0, vehicle: true, weapon: { range: 1200, antiArmor: true, rpm: 9 }, mag: 1, coax: { mag: 100, cd: 0, rl: 0 }, h: MBT[type].H, tag: o.tag });
+    const side = o.side ?? 2;
+    const T = createMBT(MBT[type], { id: GS.nextId, side, drive: o.placeholder ? undefined : createTrackDrive }); T.place(x, z, yaw, armorEnv);
+    const u = unit({ side, kind: 'mbt', mbtType: type, sim: T, eye: MBT[type].eye ?? 2.6, spotK: MBT[type].spotK, maxGrade: MBT[type].maxGrade, gun: MBT[type].gunH ?? 2.0, vehicle: true, weapon: { range: 1200, antiArmor: true, rpm: 9 }, mag: 1, coax: { mag: 100, cd: 0, rl: 0 }, h: MBT[type].H, tag: o.tag });
     sync(u); inBattle(B, u); return u;
   };
   GS.addMarine = (B, role, x, z, yaw, o = {}) => {
@@ -158,10 +167,18 @@ export function createGroundSim(o) {
   // ------------------------------------------------------------------------------------------------- squads
   GS.squadRW = (B, members, order) => { const S = B.rw.addSquad({ id: `R${B.I.id}-${++B.sq}`, side: 2, members, order }); S.B = B; for (const m of members) m.squad = S; return S; };
   GS.squadMarines = (B, members, order) => { const S = B.mar.addSquad({ id: `M${B.I.id}-${++B.sq}`, side: 1, members, order }); S.B = B; S.marines = true; for (const m of members) m.squad = S; return S; };
-  GS.order = (S, order) => { if (S.marines) S.B.mar.order(S.id, order); else S.B.rw.order(S.id, order); S.order = order; };
+  // PARITY (ngc/parity): a Task Force armour squad (side 1) on the battle's B.tf squad AI. S.cmd = the commander's order;
+  // S.order is what the squad AI works to (supportStep keeps it on a Marine squad while there is one to support)
+  GS.squadArmour = (B, members, order) => { const S = B.tf.addSquad({ id: `A${B.I.id}-${++B.sq}`, side: 1, members, order }); S.B = B; S.tf = true; S.cmd = order; for (const m of members) m.squad = S; return S; };
+  GS.order = (S, order) => { if (S.marines) S.B.mar.order(S.id, order); else if (S.tf) { S.cmd = order; S.B.tf.order(S.id, order); } else S.B.rw.order(S.id, order); S.order = order; };
   // a machine arriving (a hover tank off the sea, an MBT off a landing craft) joins the island's machines, or leads its own
   GS.join = (B, u, order) => {
     inBattle(B, u); u.transit = null;
+    if (u.side === 1) {   // PARITY: our armour joins the island's Task Force armour squad, or forms one
+      const S = B.tf.squads.find(s => s.state !== 'dead' && s.members.some(m => m.alive));
+      if (S) { B.tf.addMember(S.id, u); u.squad = S; return S; }
+      return GS.squadArmour(B, [u], order || { type: 'defend', x: B.I.pad.x, z: B.I.pad.z, r: 30 });
+    }
     const S = B.rw.squads.find(s => s.members.some(m => m.alive && !m.vehicle) && s.state !== 'dead');
     if (S) { B.rw.addMember(S.id, u); u.squad = S; return S; }
     return GS.squadRW(B, [u], order || { type: 'defend', x: B.I.pad.x, z: B.I.pad.z, r: 30 });
@@ -184,11 +201,11 @@ export function createGroundSim(o) {
     const ex = gauss() * spread, ey = gauss() * spread, px = -uz, pz = ux, pl = Math.hypot(px, pz) || 1;
     ux += px / pl * ex; uz += pz / pl * ex; uy += ey;
     const l = Math.hypot(ux, uy, uz);
-    const p = { side, src: src.id, ammo, x: from[0], y: from[1], z: from[2], vx: ux / l * v, vy: uy / l * v, vz: uz / l * v, life: o.life ?? Math.min(6, 1400 / v + 0.5), heat: A.type === 'heat', gl: ammo === 'm203', big: ammo === 'coil120' || ammo === 'mbt120' || ammo === 'mbt125', B: src.B, near: null, fuse: o.fuse ?? 0, frag: ammo === 'm67' };
+    const p = { side, src: src.id, ammo, x: from[0], y: from[1], z: from[2], vx: ux / l * v, vy: uy / l * v, vz: uz / l * v, life: o.life ?? Math.min(6, 1400 / v + 0.5), heat: A.type === 'heat', gl: ammo === 'm203', big: !!BIG[ammo], B: src.B, near: null, fuse: o.fuse ?? 0, frag: ammo === 'm67' };
     GS.proj.push(p); GS.stats.shots[side]++; src.firedT = 0;
     const loud = o.loud ?? 330, kind = A.type === 'heat' || p.big ? 'blast' : 'shot';
     const snd = { x: from[0], y: from[1], z: from[2], loud, side, kind, src: src.id };
-    if (src.B) { src.B.rw.hear(snd); src.B.mar.hear(snd); }
+    if (src.B) hearAll(src.B, snd);
     ev('shot', { side, src: src.id, ammo, x: from[0], y: from[1], z: from[2], dx: ux / l, dy: uy / l, dz: uz / l, kind: src.kind });
     return p;
   }
@@ -202,11 +219,15 @@ export function createGroundSim(o) {
   }
 
   // ------------------------------------------------------------------------------------------------- RUNAWAY units
+  // PARITY (ngc/parity): which AI runs a unit (Marines; the Task Force's armour; the machines) and every AI hears a sound
+  const aiOf = (B, u) => u.kind === 'marine' ? B.mar : u.side === 1 ? B.tf : B.rw;
+  const hearAll = (B, snd) => { B.rw.hear(snd); B.mar.hear(snd); B.tf.hear(snd); };
+  // the machines, and (PARITY) the Task Force's tanks: the same vehicle host loop, side-keyed
   function driveRW(B, u, dt, peace, tmap) {
     const a = u.ai, s = u.sim; if (!a) return;
-    if (peace) { a.fire = false; }
+    if (u.side === 1 ? GS.peaceMar : peace) { a.fire = false; }   // (our tanks hold fire when the Marines do)
     if (u.kind === 'strider') {
-      const sp = a.run ? 4.2 : 1.6, [vx, vz] = dry(u, B.rw.steerVel(u, sp), 2.5);
+      const sp = a.run ? 4.2 : 1.6, [vx, vz] = dry(u, aiOf(B, u).steerVel(u, sp), 2.5);
       if (u.lite) {   // far: kinematic, the AI's velocity over the ground (the body sim waits where it is)
         if (s.alive) { const v = Math.hypot(vx, vz), k = Math.min(1, dt * 3); u.vx += (vx - u.vx) * k; u.vz += (vz - u.vz) * k; u.x += u.vx * dt; u.z += u.vz * dt; u.y = hAt(u.x, u.z); if (v > 0.2) u.yaw = Math.atan2(-u.vx, -u.vz); }
       } else {
@@ -241,19 +262,26 @@ export function createGroundSim(o) {
       }
     } else {
       if (a.move && u.kind !== 'hovertank' && hAt(a.move[0], a.move[1]) < 0.6) a.move = landward(B, a.move);   // never a firing position in the sea
-      const vehSp = a.run ? 12 : 7, [vx, vz] = u.kind === 'mbt' ? dry(u, B.rw.steerVel(u, vehSp), 7) : B.rw.steerVel(u, vehSp);
+      const vehSp = a.run ? 12 : 7, [vx, vz] = u.kind === 'mbt' ? dry(u, aiOf(B, u).steerVel(u, vehSp), 7) : B.rw.steerVel(u, vehSp);
       const cmd = { vx, vz };
       if (a.face !== undefined && Math.hypot(vx, vz) < 1) cmd.face = a.face;
       if (a.aim) { const mz = s.muzzle(), dx = a.aim[0] - mz[0], dz = a.aim[2] - mz[2]; cmd.turret = Math.atan2(-dx, -dz); cmd.gun = Math.atan2(a.aim[1] - mz[1], Math.hypot(dx, dz)); if (u.kind === 'hovertank') cmd.aimAt = a.aim; }
+      // (PARITY fix, ngc/parity: a tank that wants to move and has not for 6 s - circling between field walls, or a turn
+      // it can't make on a slope - backs off 4-5 s on a new line and tries again; the slower M60A3 found these spots)
+      if (u.kind === 'mbt') {
+        if (Math.hypot(vx, vz) > 1 && Math.abs(s.speed) < 0.7 && !u.unstick) u.stuckT = (u.stuckT || 0) + dt; else u.stuckT = Math.max(0, (u.stuckT || 0) - dt);
+        if (u.stuckT > 6) { const a0 = Math.atan2(vz, vx) + Math.PI + (R() - 0.5) * 2.2; u.unstick = { t: 4 + R(), vx: Math.cos(a0) * 3.5, vz: Math.sin(a0) * 3.5 }; u.stuckT = 0; }
+        if (u.unstick) { cmd.vx = u.unstick.vx; cmd.vz = u.unstick.vz; delete cmd.face; if ((u.unstick.t -= dt) <= 0) u.unstick = null; }
+      }
       if (u.kind === 'mbt' && hAt(u.x, u.z) < 0.3) { const dx = B.I.x - u.x, dz = B.I.z - u.z, d = Math.hypot(dx, dz) || 1; cmd.vx = dx / d * 4; cmd.vz = dz / d * 4; delete cmd.face; }   // wet tracks: drive up out of the water first
       vehicleStep(u, dt, cmd);
       if (!s.alive) return;
       const tg = a.aimId != null ? tmap.get(a.aimId) : null, gd = s.gunDir(), mz = s.muzzle();
       const onTgt = a.aim && (() => { const tx = a.aim[0] - mz[0], ty = a.aim[1] - mz[1], tz = a.aim[2] - mz[2], tl = Math.hypot(tx, ty, tz) || 1; return (gd[0] * tx + gd[1] * ty + gd[2] * tz) / tl > 0.9985; })();
-      const main = u.kind === 'hovertank' ? WPN.coilgun : WPN.mbtgun, coax = u.kind === 'hovertank' ? WPN.coax : WPN.mbtmg;
+      const main = u.kind === 'hovertank' ? WPN.coilgun : WPN.mbtgun, coax = u.kind === 'hovertank' ? WPN.coax : u.side === 1 ? TF_COAX : WPN.mbtmg;
       const bigTarget = tg && (tg.kind === 'vehicle' || tg.kind === 'at' || tg.kind === 'mg');
-      if (a.fire && onTgt && bigTarget && s.fire()) { const am = u.kind === 'hovertank' ? 'coil120' : (u.mbtType === 't90m' ? 'mbt125' : 'mbt120'); shoot(2, u, am, mz, a.aim, 0.0005 + 0.003 * Math.min(1, Math.abs(s.speed || 0) / 10), undefined, { loud: main.loud }); ev('mainGun', { id: u.id, kind: u.kind, x: mz[0], y: mz[1], z: mz[2], dx: gd[0], dy: gd[1], dz: gd[2] }); }
-      if (cadence(u.coax, coax, dt, a.fire && onTgt && tg && tg.kind !== 'vehicle' && !(tg.kind === 'air' && Math.hypot(tg.x - u.x, tg.z - u.z) > AIR_RANGE * 1.5))) shoot(2, u, coax.ammo, mz, a.aim, 0.002 + (tg.kind === 'air' ? 0.004 : 0), undefined, { loud: coax.loud });
+      if (a.fire && onTgt && bigTarget && s.fire()) { const am = u.kind === 'hovertank' ? 'coil120' : (s.P.ammo || 'mbt120'); shoot(u.side, u, am, mz, a.aim, 0.0005 + 0.003 * Math.min(1, Math.abs(s.speed || 0) / 10), undefined, { loud: main.loud }); ev('mainGun', { id: u.id, kind: u.kind, side: u.side, x: mz[0], y: mz[1], z: mz[2], dx: gd[0], dy: gd[1], dz: gd[2] }); }
+      if (cadence(u.coax, coax, dt, a.fire && onTgt && tg && tg.kind !== 'vehicle' && !(tg.kind === 'air' && Math.hypot(tg.x - u.x, tg.z - u.z) > AIR_RANGE * 1.5))) shoot(u.side, u, coax.ammo, mz, a.aim, 0.002 + (tg.kind === 'air' ? 0.004 : 0), undefined, { loud: coax.loud });
     }
   }
   // walkers and tracks keep out of the sea: a commanded velocity that would take them into water within `look` m stops
@@ -437,9 +465,51 @@ export function createGroundSim(o) {
         if (!u.alive || !u.able) { out.push({ id: u.id, side: 1, kind: 'inf', x: u.x, y: u.y, z: u.z, h: 0.4, alive: false }); continue; }
         const lawUp = u.wantLaw || u.firedT < 3 && u.lastFire === 'law';
         out.push({ id: u.id, side: 1, kind: lawUp ? 'at' : u.role === 'ar' && u.firedT < 2 ? 'mg' : 'inf', x: u.x, y: u.y, z: u.z, vx: u.vx, vz: u.vz, h: u.h, alive: true, firing: u.firedT, cover: u.body.stanceTo === 'prone' ? 0.5 : u.body.stanceTo === 'crouch' ? 0.3 : 0 });
-      } else out.push({ id: u.id, side: 2, kind: u.kind, x: u.x, y: u.y, z: u.z, vx: u.vx, vz: u.vz, h: HEIGHT[u.kind], alive: u.alive, firing: u.firedT, cover: 0 });
+      } else if (u.side === 1) out.push({ id: u.id, side: 1, kind: 'vehicle', x: u.x, y: u.y, z: u.z, vx: u.vx, vz: u.vz, h: u.h, alive: u.alive, firing: u.firedT, cover: 0, armour: true });   // PARITY: our tank, as the machines' squad AI sees armour
+      else out.push({ id: u.id, side: 2, kind: u.kind, x: u.x, y: u.y, z: u.z, vx: u.vx, vz: u.vz, h: u.h ?? HEIGHT[u.kind], alive: u.alive, firing: u.firedT, cover: 0, coil: u.weaponName === 'coil' });
     }
     if (hooks.targetsFor) for (const t of hooks.targetsFor(B, side)) out.push(t);
+    return out;
+  }
+  // PARITY (ngc/parity): combined arms for the Task Force. An armour squad with a 'take' order keeps station ~30 m
+  // behind the Marine squad nearest it, on the line from the Marines to the objective: the riflemen lead onto the pad
+  // and clear the ground, the tank overwatches and kills the machines (in contact the squad AI's armour logic takes
+  // over: stand-off, hull-down, front to the AT threat). No Marines left on the island: the tank works to the order.
+  function supportStep(B, dt) {
+    if ((B.supT = (B.supT || 0) - dt) > 0) return; B.supT = 1;
+    // the Marines count our tanks within 250 m in their force ratio (a tank ~ four riflemen, by its hit points)
+    for (const M of B.mar.squads) {
+      const up = M.members.filter(m => m.alive && m.able); M.allyPower = 0; if (!up.length) continue;
+      const x = up.reduce((s, m) => s + m.x, 0) / up.length, z = up.reduce((s, m) => s + m.z, 0) / up.length;
+      for (const u of B.units) if (u.side === 1 && u.kind === 'mbt' && u.alive && Math.hypot(u.x - x, u.z - z) < 250) M.allyPower += 4 * (0.3 + 0.7 * u.hp);
+    }
+    for (const S of B.tf.squads) {
+      const C = S.cmd || S.order, tanks = S.members.filter(m => m.alive); if (!tanks.length) continue;
+      const tx = tanks.reduce((s, m) => s + m.x, 0) / tanks.length, tz = tanks.reduce((s, m) => s + m.z, 0) / tanks.length;
+      // the Marines within 200 m count in the tank squad's force ratio (as a machine's data link counts its neighbours)
+      let ally = 0; for (const u of B.units) if (u.kind === 'marine' && u.alive && u.able && Math.hypot(u.x - tx, u.z - tz) < 200) ally += 0.7 * (u.role === 'ar' || u.laws > 0 ? 1.5 : 1);
+      S.allyPower = ally;
+      if (C.type !== 'take') { if (S.order !== C) S.order = C; continue; }
+      let best = null, bd = 1e9;
+      for (const M of B.mar.squads) { const up = M.members.filter(m => m.alive && m.able); if (!up.length) continue; const x = up.reduce((s, m) => s + m.x, 0) / up.length, z = up.reduce((s, m) => s + m.z, 0) / up.length, d = Math.hypot(x - tx, z - tz); if (d < bd) { bd = d; best = { x, z, S: M }; } }
+      S.supports = best ? best.S.id : null;
+      if (!best) { if (S.order !== C) S.order = C; continue; }
+      let fx = C.x - best.x, fz = C.z - best.z, fl = Math.hypot(fx, fz);
+      if (fl < 10) { fx = C.x - tx; fz = C.z - tz; fl = Math.hypot(fx, fz); }
+      fl = fl || 1;
+      let sx = best.x - fx / fl * 30, sz = best.z - fz / fl * 30;
+      if (hAt(sx, sz) < 0.6) [sx, sz] = landward(B, [sx, sz]);
+      if (S.order === C || S.order.type !== 'take' || !S.order.support) S.order = { type: 'take', x: sx, z: sz, r: 20, support: true };
+      else { S.order.x = sx; S.order.z = sz; }
+    }
+  }
+  // PARITY (ngc/parity): side 1's targets in the squad AI's words, for the Task Force's tanks (B.tf): enemy armour is a
+  // 'vehicle'; a STRIDER with the coil rifle (an anti-armour weapon) is 'at', the rest 'mg' (an armoured walker: the
+  // tank answers it with the main gun and the coax, not the coax alone); an AA site 'mg'
+  const TF_KIND = { hovertank: 'vehicle', mbt: 'vehicle', aa: 'mg', vehicle: 'vehicle', air: 'air', inf: 'inf', mg: 'mg', at: 'at' };
+  function tfTargets(tM) {
+    const out = [];
+    for (const t of tM) out.push(t.kind === 'strider' ? { ...t, kind: t.coil ? 'at' : 'mg' } : TF_KIND[t.kind] === t.kind ? t : { ...t, kind: TF_KIND[t.kind] || 'inf' });
     return out;
   }
 
@@ -449,10 +519,14 @@ export function createGroundSim(o) {
     const tR = peace ? [] : targetsFor(B, 2), tM = targetsFor(B, 1), tmapR = new Map(), tmapM = new Map();
     for (const t of tR) tmapR.set(t.id, t); for (const t of tM) tmapM.set(t.id, t);
     B.rw.update(dt, tR); B.mar.update(dt, tM);
+    // PARITY: the Task Force's tanks (their own squad AI, side 1), kept on the Marines they support
+    let tmapA = tmapM;
+    if (B.tf.squads.length) { supportStep(B, dt); const tA = tfTargets(tM); tmapA = new Map(); for (const t of tA) tmapA.set(t.id, t); B.tf.update(dt, tA); }
+    else B.tf.sounds.length = 0;
     if (FC) FC.step(B, dt);   // ngc/infdepth: casualty care takes medics and draggers off the squad's plan
     for (const u of B.units) {
       if (u.kind === 'marine') { driveMarine(B, u, dt, tmapM); if (u.ai) u.lastFire = u.ai.fire || u.lastFire; }
-      else if (!u.dead || u.kind === 'strider') driveRW(B, u, dt, peace, tmapR);
+      else if (!u.dead || u.kind === 'strider') driveRW(B, u, dt, peace, u.side === 1 ? tmapA : tmapR);
       u.firedT += u.kind === 'marine' ? 0 : dt;
       sync(u);
     }
@@ -540,7 +614,7 @@ export function createGroundSim(o) {
     if (dd > (u.kind === 'marine' ? 3 : 2.5)) return;
     if (!p.near) p.near = new Set(); if (p.near.has(u.id)) return; p.near.add(u.id);
     if (u.kind === 'marine') u.B.mar.nearMiss(u.id, p.big ? 0.6 : p.ammo === 'mg' || p.ammo === 'needle' ? 0.14 : 0.1);
-    else u.B.rw.nearMiss(u.id, p.big ? 0.4 : 0.12);
+    else aiOf(u.B, u).nearMiss(u.id, p.big ? 0.4 : 0.12);
   }
   // the terrain (and on a battle map its obstacles) along a segment: t or -1
   function groundT(ax, ay, az, bx, by, bz) {
@@ -613,7 +687,7 @@ export function createGroundSim(o) {
           const r = applyHit(u, h, (RW_HURT[p.ammo] || { hp: 60 }).hp);
           GS.stats.hits[p.side]++;
           ev('hit', { x: hx, y: hy, z: hz, id: u.id, kind: u.kind, part: r.part, pen: r.pen, ammo: p.ammo, side: p.side });
-          if (u.B && u.kind !== 'marine') u.B.rw.nearMiss(u.id, 0.3);
+          if (u.B && u.kind !== 'marine') aiOf(u.B, u).nearMiss(u.id, 0.3);
         } else if (what.ext) what.ext.apply(hx, hy, hz);
         if (p.heat || p.big || p.gl) explode(p, hx, hy, hz, what.unit);
         else ev('impact', { x: hx, y: hy, z: hz, ammo: p.ammo, unit: !!what.unit, ground: !!what.ground, side: p.side });
@@ -650,12 +724,12 @@ export function createGroundSim(o) {
       if (u.kind === 'marine') applyHit(u, { point: null, type: 'blast' }, 260 * power * k);
       else if (u.kind === 'strider') applyHit(u, normalizeHit({ type: 'blast', energy: 9000 * k * power, impulse: 260 * k * power, dir: [dx, 0.3, dz], part: 'stomach', side }), 0);
       else applyHit(u, normalizeHit({ type: 'blast', energy: 30000 * k * power, impulse: 400 * k * power, dir: [dx, -0.5, dz], part: 'top', side }), 0);
-      if (u.B) { if (u.kind === 'marine') u.B.mar.nearMiss(u.id, 0.6 * k + 0.2); else u.B.rw.nearMiss(u.id, 0.5 * k); }
+      if (u.B) { if (u.kind === 'marine') u.B.mar.nearMiss(u.id, 0.6 * k + 0.2); else aiOf(u.B, u).nearMiss(u.id, 0.5 * k); }
     }
     // suppression a bit further out
     for (const B of GS.battles) if (Math.hypot(B.I.x - x, B.I.z - z) < B.I.r + 80) {
-      B.rw.hear({ x, y, z, loud: 600, side, kind: 'blast' }); B.mar.hear({ x, y, z, loud: 600, side, kind: 'blast' });
-      for (const u of B.units) if (u.alive && u.side !== side) { const dd = Math.hypot(u.x - x, u.z - z); if (dd < r * 2.5 && dd > r) { if (u.kind === 'marine') B.mar.nearMiss(u.id, 0.25); else B.rw.nearMiss(u.id, 0.15); } }
+      hearAll(B, { x, y, z, loud: 600, side, kind: 'blast' });
+      for (const u of B.units) if (u.alive && u.side !== side) { const dd = Math.hypot(u.x - x, u.z - z); if (dd < r * 2.5 && dd > r) { if (u.kind === 'marine') B.mar.nearMiss(u.id, 0.25); else aiOf(B, u).nearMiss(u.id, 0.15); } }
     }
   };
   // ------------------------------------------------------------------------------------------------- the war's rounds
@@ -676,7 +750,7 @@ export function createGroundSim(o) {
     return { t: bt, unit: best, x, y, z };
   };
   // the war's projectiles are heard by the battles they pass near (the door gun draws the machines' attention)
-  GS.hearWar = (x, y, z, side, loud = 350, src = 'player') => { for (const B of GS.battles) if (B.units.length && Math.hypot(B.I.x - x, B.I.z - z) < B.I.r + loud) { const s = { x, y, z, loud, side, kind: 'shot', src }; B.rw.hear(s); B.mar.hear(s); } };
+  GS.hearWar = (x, y, z, side, loud = 350, src = 'player') => { for (const B of GS.battles) if (B.units.length && Math.hypot(B.I.x - x, B.I.z - z) < B.I.r + loud) { const s = { x, y, z, loud, side, kind: 'shot', src }; hearAll(B, s); } };
   // ngc/infdepth: the player's own rounds (marine.js's rifleman, game level like the rest): a segment against one unit,
   // and a hit on it (the M16's M193 = 'm16', the M60's M80 = 'm60', the .45 = 'm16' at 0.6)
   GS.unitT = unitT;
@@ -684,7 +758,7 @@ export function createGroundSim(o) {
     const A = GW_AMMO[ammo] || GW_AMMO.m16, h = normalizeHit({ ...A, velocity: A.velocity, vel: [dir[0] * A.velocity, dir[1] * A.velocity, dir[2] * A.velocity], point: [x, y, z], side, weapon: ammo, src: 'player' });
     const r = applyHit(u, h, hp ?? 60); GS.stats.warHits[side]++;
     ev('hit', { x, y, z, id: u.id, kind: u.kind, part: r.part, pen: r.pen, ammo, side, war: true });
-    if (u.B && u.kind !== 'marine') u.B.rw.nearMiss(u.id, 0.3);
+    if (u.B && u.kind !== 'marine') aiOf(u.B, u).nearMiss(u.id, 0.3);
     return r;
   };
   // ngc/infdepth: casualty evacuation. The wounded (alive, out of the fight) of side 1 within r of (x, z); evacuate(u)

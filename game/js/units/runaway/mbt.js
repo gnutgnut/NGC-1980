@@ -42,6 +42,29 @@ export const MBT = {
     armour: { front: 550, side: 110, rear: 50, turret: 600, top: 35 },
     hp: { hull: 460, turret: 260, engine: 110, tracks: 150, gun: 90 },
   },
+  // PARITY (ngc/parity): the Task Force's own AI armour in the ground war - the M60A3 TTS, side 1 (GS.addMBT(..., { side: 1 })).
+  // General published figures, the TANK agent's numbers in armor/m60a3.js as the reference (mbttrack.js runs it on
+  // m60a3.js's trackfm parameter set unchanged). An older tank than the two seized ones: game armour a step below the
+  // T-90M's, hit points about the same.
+  m60a3: {
+    name: 'M60A3 TTS', id: 'm60a3',
+    mass: 52617,                    // kg combat weight (m60a3.js, C)
+    hullL: 6.95, lenGun: 9.44, W: 3.63, H: 2.95,   // m (C); H to the turret roof (3.28 m over the cupola periscope, C)
+    clearance: 0.463, trackW: 0.711, gauge: 2.921, contactL: 4.235, wheels: 6, wheelR: 0.33, sprocketAft: true,
+    // power, matched the way the M1A2 / T-90M entries are: the GROSS rated figure (750 hp AVDS-1790-2C, C) is the far
+    // level of detail's traction-power cap (the placeholder drive only). Near the camera trackfm runs m60a3.js's real
+    // AVDS-1790 torque curve (643 hp net) through the CD-850 cross-drive, so the bench checks the 48 km/h top speed on that.
+    power: 559000,                  // W (750 hp)
+    vmax: 48 / 3.6, vrev: 16 / 3.6, // m/s: 48 km/h road (C), 16 km/h reverse (FAS, C)
+    turretRing: [0, -0.25], turretH: 0.95, gunL: 4.65, gunY: 2.36, gunZ: -1.05,   // m60a3.js TURRET: ring, trunnion 1.05 m ahead of it, muzzle 4.65 m on
+    traverse: 22.5 * Math.PI / 180, elev: [-10 * Math.PI / 180, 20 * Math.PI / 180],   // 22.5 deg/s, -10 / +20 deg (C)
+    ammo: 'mbt105', reload: 7.0,    // 105 mm M68, hand loaded (game value)
+    eye: 3.05, gunH: 2.36,          // the AI's eye: the commander up in the M19 cupola (a tall tank sees, and is seen, over more ground); the gun's trunnion height
+    spotK: 1.0,                     // the TTS (tank thermal sight) and the laser rangefinder: the crew's spotting rate (game: squadai.js x spotK; 1 = the machines' sensors)
+    maxGrade: 0.3,                  // the AI driver keeps to grades it can climb turning (half the seized tanks' power to weight: 12 hp/t net vs 23 for the T-90M)
+    armour: { front: 480, side: 100, rear: 45, turret: 520, top: 30 },   // game armour points (T-90M: 550 / 110 / 50 / 600 / 35)
+    hp: { hull: 450, turret: 255, engine: 110, tracks: 150, gun: 90 },
+  },
 };
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -92,7 +115,7 @@ export function createPlaceholderDrive(P) {
 export function createMBT(P, opt = {}) {
   const drive = (opt.drive || createPlaceholderDrive)(P);
   const T = {
-    id: opt.id ?? 0, side: 2, kind: 'mbt', P, drive,
+    id: opt.id ?? 0, side: opt.side ?? 2, kind: 'mbt', P, drive,
     turretYaw: 0, gunPitch: 0, reload: 0, hp: JSON.parse(JSON.stringify(P.hp)), alive: true, events: [],
     get p() { return drive.p; }, get yaw() { return drive.yaw; }, get speed() { return drive.speed; },
     place(x, z, yaw, env) { drive.place(x, z, yaw, env); return T; },
