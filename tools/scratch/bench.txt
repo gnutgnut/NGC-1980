@@ -1,0 +1,91 @@
+
+--- static ride: settles on the springs at the model ride height ---
+PASS  m151: at rest, ride height and level                       y 0.0 mm, pitch 0.00°, creep 0.0 mm/s   (want 0 +- 10 mm)  [INFERRED (model frame)]
+PASS  m35: at rest, ride height and level                        y 0.0 mm, pitch 0.00°, creep 0.0 mm/s   (want 0 +- 10 mm)  [INFERRED (model frame)]
+PASS  landrover: at rest, ride height and level                  y 0.0 mm, pitch -0.00°, creep -0.0 mm/s   (want 0 +- 10 mm)  [INFERRED (model frame)]
+PASS  hilux: at rest, ride height and level                      y 0.0 mm, pitch -0.00°, creep -0.0 mm/s   (want 0 +- 10 mm)  [INFERRED (model frame)]
+PASS  beetle: at rest, ride height and level                     y -0.1 mm, pitch -0.00°, creep -0.0 mm/s   (want 0 +- 10 mm)  [INFERRED (model frame)]
+PASS  lada: at rest, ride height and level                       y 0.0 mm, pitch 0.00°, creep 0.0 mm/s   (want 0 +- 10 mm)  [INFERRED (model frame)]
+
+--- top speed and acceleration (level dry tarmac, full throttle, automatic shifts) ---
+PASS  m151: top speed                                            106.6 km/h (rpm 3667, gear 4)   (want 106 km/h, TM151 66 mph)  [CONFIRMED]
+      m151: 0-60 km/h 8.0 s, 0-100 km/h 30.4 s
+PASS  m35: top speed                                             85.4 km/h (rpm 2188, gear 5)   (want 90 km/h, TM35 56 mph)  [CONFIRMED]
+      m35: 0-60 km/h 27.8 s, 0-100 km/h -
+PASS  landrover: top speed                                       109.1 km/h (rpm 3946, gear 4)   (want 105 km/h, LR ~65 mph)  [CONFIRMED ~]
+      landrover: 0-60 km/h 10.1 s, 0-100 km/h 38.6 s
+PASS  hilux: top speed                                           142.5 km/h (rpm 4538, gear 4)   (want 145 km/h, HX ~90 mph)  [UNVERIFIED]
+      hilux: 0-60 km/h 6.7 s, 0-100 km/h 16.4 s
+PASS  beetle: top speed                                          116.9 km/h (rpm 3831, gear 4)   (want 115 km/h, VW 115 km/h)  [CONFIRMED]
+      beetle: 0-60 km/h 9.4 s, 0-100 km/h 28.1 s
+PASS  beetle: 0-100 km/h                                         28.1 s   (want 32 s, VW 1200 ~30-33 s (period tests))  [UNVERIFIED]
+PASS  lada: top speed                                            146.2 km/h (rpm 5872, gear 4)   (want 142 km/h, LD 142 km/h)  [CONFIRMED]
+      lada: 0-60 km/h 7.0 s, 0-100 km/h 18.4 s
+PASS  lada: 0-100 km/h                                           18.4 s   (want 20 s, LD 20 s)  [CONFIRMED]
+PASS  m151: 0-60 km/h (jeep class: 7-11 s)                       8.0 s   (want ~ 8-10 s (period tests of 70 hp 1-tonne 4x4s; no TM figure))  [INFERRED]
+PASS  m35: 0-60 km/h empty (deuce class: 25-40 s)                27.8 s   (want ~ 30 s (134 hp / 5.9 t))  [INFERRED]
+
+--- gradeability: climb from a standing start on dry concrete, lowest gear / low range ---
+PASS  m151: climbs 60%                                           175.3 m up the slope, 19.2 km/h, gear 1H, stalled false   (want TM151 60% grade)  [CONFIRMED]
+PASS  m35: climbs 60% loaded                                     45.6 m up the slope, 6.4 km/h, gear 1L, stalled false   (want TM35 60% grade with 5,000 lb)  [CONFIRMED]
+PASS  landrover: climbs 45%                                      214.6 m up the slope, 23.8 km/h, gear 2L, stalled false   (want LR ~45° approach / 45% climbing (low range))  [UNVERIFIED]
+PASS  m151: steepest grade (traction / power limit)              90%   (want 60% rated, ~70-80% traction limit on concrete (mu ~0.85 bias NDT))  [INFERRED]
+
+--- braking: full service brake, clutch down, dry tarmac ---
+PASS  m151: stop from 32 km/h                                    5.6 m (0.72 g), wheels lock   (want 4.5-7.5 m: 20 mph stop in < 25 ft (MIL "service brake" class, ~0.65 g); dry concrete)  [INFERRED]
+PASS  m151: stop from 80 km/h                                    32.4 m (0.78 g), wheels lock   (want 30-48 m: 0.6-0.75 g from 50 mph)  [INFERRED]
+PASS  m35: stop from 32 km/h                                     7.0 m (0.58 g), wheels lock   (want 5-10 m: 20 mph within ~ 30 ft (air-hydraulic drums, MIL-STD class))  [INFERRED]
+PASS  lada: stop from 80 km/h                                    30.2 m (0.83 g), wheels lock   (want 30-45 m: period tests ~ 38 m from 80 km/h (0.65 g))  [UNVERIFIED]
+
+--- rollover: static stability factor, tilt table, dynamic J-turn ---
+PASS  m151: static stability factor T / 2h                       1.12 (track 1.346 m, CG 0.60 m)   (want ~1.1: SUV / CJ-class, NHTSA 1-2 star band (cars 1.3-1.5))  [INFERRED (CG height not published)]
+      comparison SSF: M35 0.87, Land Rover 0.84, Hilux 1.02, Beetle 1.26, Lada 1.25
+PASS  m151: tilt-table angle (uphill wheels lift)                43° (tan = 0.93 = tilt-table ratio vs SSF 1.12)   (want below atan(SSF) = 48° (suspension roll, TTR ~0.9 SSF), above the TM's 40% (22°) side-slope limit)  [INFERRED]
+PASS  m35: tilt-table angle, empty / 2.3 t on the bed            37.5° / 33.5°   (want below atan(SSF) = 41°, above the TM 30% side-slope limit (17°))  [INFERRED]
+PASS  m151: roll gradient (steady circle)                        5.3°/g   (want soft-sprung utility 4x4: ~4-7°/g)  [INFERRED]
+PASS  m151: J-turn on dry tarmac: slides / spins, peak lateral g near the tyre limit 40: 0.89 g 4.9°, 60: 0.89 g 4.9°, 80: 0.95 g 5.6°   (want untripped rollover needs a_y > ~SSF; tyre mu 0.85 < 1.12)  [CONFIRMED (physics) / INFERRED (mu)]
+      m151 fishhook on tarmac: no rollover to 100 km/h
+      m151 J-turn on grass: rolls at 50 km/h
+      sideways trip speed km/h (grass / dirt / sand): m151 45 / 40 / 40, landrover 35 / 30 / 30, m35 35 / 30 / 35, hilux 50 / 40 / 45, beetle 50 / 40 / 50, lada 50 / 50 / 50
+PASS  m151: trips sliding sideways onto soft ground              45 / 40 / 40 km/h   (want tripped at moderate lateral speed (NHTSA soil-trip class for SSF ~1.1))  [INFERRED]
+PASS  trip order follows stability: LR, M35 < M151 < Lada        means LR 32, M35 33, M151 42, Hilux 45, Beetle 47, Lada 50   (want SSF 0.84 / 0.87 / 1.12 / 1.25; the M151's jacking rear costs it vs. its SSF)  [INFERRED]
+PASS  m151: lift-off in a hard turn tightens the line (tuck-in)  curvature 0.058 /m at 35.0 km/h (0.63 g, gear 3) -> 0.069 /m after lifting (+18%)   (want lift-off oversteer of the semi-trailing-arm rear (Army M151 handling / driver-training notes))  [INFERRED]
+
+--- turning circle (full lock, walking pace; outer front tyre path, kerb to kerb) ---
+PASS  m151: turning circle                                       11.0 m   (want 10.9 m)  [UNVERIFIED (AMG 35 ft 9 in)]
+PASS  m35: turning circle                                        23.4 m   (want 21.9 m)  [CONFIRMED ~ (TM35 ~72 ft)]
+PASS  landrover: turning circle                                  15.1 m   (want 14.3 m)  [CONFIRMED ~ (LR 47 ft)]
+
+--- fuel economy: steady speed on level tarmac -> range vs published ---
+PASS  m151: 55 km/h steady                                       9.2 l/100 km (gear 4, 1836 rpm) -> range 697 km   (want 13.3 l/100 km: TM151: 17 gal for 300 mi -> 13.3 l/100 km (mixed military use))  [CONFIRMED (range)]
+PASS  m35: 50 km/h steady                                        20.4 l/100 km (gear 4, 1562 rpm) -> range 928 km   (want 33.6 l/100 km: TM35: 50 gal for ~350 mi -> 34 l/100 km (mixed, partly loaded))  [CONFIRMED (range)]
+PASS  beetle: 80 km/h steady                                     6.6 l/100 km (gear 4, 2550 rpm) -> range 606 km   (want 8.0 l/100 km: VW 1200: ~7.5-8.5 l/100 km at 80-90 km/h (DIN 70030))  [UNVERIFIED]
+PASS  lada: 80 km/h steady                                       6.9 l/100 km (gear 4, 3138 rpm) -> range 566 km   (want 7.0 l/100 km: VAZ-2101: 7.0 l/100 km at 80 km/h (factory))  [UNVERIFIED]
+
+--- fording and water: wading depth, hydrolock, the deep-water kit ---
+PASS  m151: fords 0.53 m                                         ran 30.0 m through 0.53 m deep water, engine running   (want TM151 21 in (0.53 m) / 60 in with kit (1.52 m))  [CONFIRMED]
+PASS  m151: drowns above the air intake (0.95 m)                 events: deepWater hydrolock seized   (want hydrolock)  [INFERRED (intake height)]
+PASS  m151: with the fording kit at 1.45 m                       events: none, reached 30.0 m   (want TM151 21 in (0.53 m) / 60 in with kit (1.52 m))  [CONFIRMED]
+PASS  m35: fords 0.76 m                                          ran 30.0 m through 0.76 m deep water, engine running   (want TM35 30 in (0.76 m) / 72 in with kit (1.83 m))  [CONFIRMED]
+PASS  m35: drowns above the air intake (1.62 m)                  events: deepWater hydrolock seized   (want hydrolock)  [INFERRED (intake height)]
+PASS  m35: with the fording kit at 1.74 m                        events: none, reached 30.0 m   (want TM35 30 in (0.76 m) / 72 in with kit (1.83 m))  [CONFIRMED]
+PASS  beetle: wet ignition stalls in 0.6 m water                 events: deepWater drowned   (want distributor low on the engine: civilian cars drown their ignition)  [INFERRED]
+
+--- soft ground and drivetrain: 4WD, sprag, open differentials, the bogie ---
+PASS  m151: 12% muddy slope: 4WD gets up, 2WD digs in            2WD -1.1 m (sink 32 cm), 4WD 89.4 m   (want TM151: engage front drive for mud / sand)  [CONFIRMED (procedure)]
+PASS  m35: sprag drives the front axle when the rear slips       sprag torque peak 1720 N m, 11.0 km/h after 3 s   (want TM35: front axle engages automatically through the sprag unit)  [CONFIRMED (behaviour)]
+PASS  m35: sprag overruns cruising on a good surface (front not driven) sprag torque 0 N m at 27.9 km/h   (want freewheels while the rear grips)  [CONFIRMED (behaviour)]
+PASS  lada: open differential on split-mu: the low-grip wheel spins rear L -0.0 km/h, R 83.2 km/h, car 0.0 km/h   (want equal torque split)  [CONFIRMED (physics)]
+PASS  m35: walking bogie keeps both rear axles loaded over a 0.3 m step min right-rear wheel load 1000000.0 kN (static 8.4 kN)   (want trunnion equalises the tandem)  [CONFIRMED (behaviour)]
+
+--- engine: start, idle, stall, fuel at idle ---
+PASS  m151: starts and idles                                     catches after 0.4 s cranking, idles 633 rpm, 0.43 l/h   (want 650 rpm, ~0.6-1.5 l/h idle)  [CONFIRMED (idle rpm) / INFERRED (idle burn)]
+PASS  m151: clutch dumped in top gear from rest stalls           engine stalled   (want stall)  [CONFIRMED (physics)]
+PASS  m35: starts and idles                                      catches after 1.2 s cranking, idles 620 rpm, 0.85 l/h   (want 650 rpm, ~0.6-1.5 l/h idle)  [CONFIRMED (idle rpm) / INFERRED (idle burn)]
+PASS  m35: clutch dumped in top gear from rest stalls            engine stalled   (want stall)  [CONFIRMED (physics)]
+
+--- damage: flat tyre pull, fuel leak, overheating, fire ---
+PASS  m151: right front flat pulls right                         heading 9.3° in 3 s hands-off   (want pulls towards the flat)  [CONFIRMED (physics)]
+PASS  m151: radiator drained: overheats and seizes               temp 106 °C, engine 0%, events overheat seized   (want overheat warning then engine damage)  [INFERRED]
+
+57 passed, 0 failed
