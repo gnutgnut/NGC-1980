@@ -13,7 +13,7 @@ import { structAngle } from './world/net.js';   // WORLD: the HQ / production sl
 import { createDefence } from './units/defence/brain.js';   // NGC-1980 DEFENCE: AA unit models + engagement logic
 import { createRotary } from './units/air/rotary/rotary.js';   // NGC-1980: CH-46 + Marines, MV-22, RW-3 WASP (physical AI rotorcraft)
 import { createGroundWar } from './units/groundwar/groundwar.js';   // NGC-1980 GROUND WAR: STRIDERs, RW-7s, seized MBTs and Marines fighting on the islands
-const addLiftFansRW = addLiftFans;   // PARITY-TODO: the RUNAWAY's own fans (units/naval/skyfans.js) when the model lands
+import { addLiftFansRW } from './units/naval/skyfans.js';   // PARITY: the KRAKEN's lift fans (RUNAWAY style)
 import { buildCarrier, buildBattleship, buildFreighter, buildDrone, buildTransport, buildGunship, buildTomcat, buildGun, buildStructure, buildRubble, CARRIER, BSHIP, FREIGHTER, TEAM } from './ships.js';
 // NAVAL: ship motion in a seaway (heave / pitch / roll by sea state and speed) and the naval effects
 import { SHIPS as SHIP_MOTION, makeSea, createShipMotion, shipPointY, shipPointVY, retuneSea, advanceSea, seaElevation } from './units/naval/seamotion.js';

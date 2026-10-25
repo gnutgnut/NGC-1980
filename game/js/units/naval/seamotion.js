@@ -48,6 +48,16 @@ export const SHIPS = {
   // Container ship: Yara Birkeland, the autonomous electric feeder: 79.5 m LOA, 14.8 m beam, 6 m draft, 120 TEU,
   // 13 kn max (CONFIRMED, Kongsberg / Yara). Roll ~11 s (INFERRED, container feeders run low GM).
   container: { L: 76, B: 14.8, T: 6, TnH: 5.0, TnP: 4.8, TnR: 11, zH: 0.3, zP: 0.3, zR: 0.07, kh: 1.4, scale: 1 },
+  // PARITY - MSC freighter (mscfreighter.js): a C4-S-1a "Mariner": 171.8 m LOA, ~160 m LWL, 23.2 m beam, 8.9 m draft
+  // (CONFIRMED as recalled, offline: MARAD C4-S-1a design data). Built at 80 m in the game: scale 80 / 171.8. Roll
+  // ~15 s (INFERRED: a loaded break-bulk ship, GM ~1.2-1.5 m, k_xx ~0.38 B), heave / pitch ~6 s (INFERRED, same
+  // T_heave formula as the carriers), bilge-keel roll damping 0.07 (INFERRED).
+  msc: { L: 160, B: 23.2, T: 8.9, TnH: 6.2, TnP: 6.0, TnR: 15, zH: 0.32, zP: 0.3, zR: 0.07, kh: 1.6, scale: 80 / 171.8 },
+  // PARITY - Iowa-class battleship (iowa.js): 270.4 m LOA, 262 m LWL, 33.0 m beam, ~11 m draft at full load
+  // (CONFIRMED, DANFS / NAVSEA BB-61 class data). Built at 104 m: scale 104 / 270.4. Roll ~15.5 s (INFERRED: GM
+  // ~2.8-3 m, k_xx ~0.39 B), heave / pitch ~7 s (INFERRED), bilge keels: roll damping 0.08 (INFERRED). A long, fine,
+  // heavy hull: she pitches less than a carrier her length would suggest and rolls slowly.
+  iowa: { L: 262, B: 33, T: 11, TnH: 7.0, TnP: 6.8, TnR: 15.5, zH: 0.34, zP: 0.32, zR: 0.08, kh: 1.8, scale: 104 / 270.4 },
 };
 
 const sinc = x => Math.abs(x) < 1e-4 ? 1 - x * x / 6 : Math.sin(x) / x;

@@ -85,7 +85,7 @@ export function createDefence(env) {
     const g = parts.group, mounts = Array.isArray(parts.mounts) ? parts.mounts : g.userData && Array.isArray(g.userData.mounts) ? g.userData.mounts : null;   // NAVAL keeps them on parts.mounts
     let list = null;
     if (mounts && mounts.length) {
-      list = mounts.filter(m => /ciws|phalanx|gun|close|sam|missile|sparrow|launch|bpdms/i.test(m.kind || '')).map(m => ({
+      list = mounts.filter(m => /ciws|phalanx|gun|close|sam|missile|sparrow|launch|bpdms/i.test(m.kind || '') && !(m.kind === 'gun' && m.gun === undefined)).map(m => ({   // (PARITY: the IOWA's 5-inch mounts are scenery, not AA units)
         type: /sam|missile|sparrow|launch|bpdms/i.test(m.kind) ? 'sparrow' : 'ciws',
         pos: m.pos.isVector3 ? m.pos.clone() : new THREE.Vector3(...m.pos),
         yaw: typeof m.dir === 'number' ? m.dir : m.dir ? Math.atan2(-(m.dir.x ?? m.dir[0]), -(m.dir.z ?? m.dir[2])) : 0,

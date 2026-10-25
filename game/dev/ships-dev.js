@@ -1,8 +1,11 @@
 // Naval preview: orbit and inspect each ship on a sea, with the sea state, speed and heading driving the same motion
-// model the game uses (seamotion.js). Query: ?ship=albatross|kraken|leviathan|container &sea=N &speed=m/s &ui=0
+// model the game uses (seamotion.js). Query: ?ship=albatross|kraken|leviathan|container|msc|iowa|krakensky|albsky &sea=N &speed=m/s &ui=0
 // &cam=yaw,pitch,dist,tx,ty,tz &auto=1 (turntable) &freeze=1 (no motion)
 import * as THREE from 'three';
-import { buildCarrier, buildBattleship, buildFreighter } from '../js/ships.js';
+import { buildCarrier, buildBattleship, buildFreighter, addLiftFans } from '../js/ships.js';
+import { buildMSCFreighter } from '../js/units/naval/mscfreighter.js';   // PARITY: the task force's supply ship
+import { buildIowa } from '../js/units/naval/iowa.js';                    // PARITY: the task force's battleship
+import { addLiftFansRW } from '../js/units/naval/skyfans.js';            // PARITY: the KRAKEN's sky-carrier fans
 import { SEA_STATES, SHIPS, makeSea, createShipMotion } from '../js/units/naval/seamotion.js';
 
 const Q = new URLSearchParams(location.search);
@@ -27,7 +30,13 @@ const BUILD = {
   kraken: () => ({ parts: buildCarrier(2), motion: 'kraken' }),
   leviathan: () => ({ parts: buildBattleship(), motion: 'leviathan' }),
   container: () => ({ parts: buildFreighter(), motion: 'container' }),
+  msc: () => ({ parts: buildMSCFreighter(), motion: 'msc' }),
+  iowa: () => ({ parts: buildIowa(), motion: 'iowa' }),
+  krakensky: () => ({ parts: unfold(buildCarrier(2), addLiftFansRW), motion: 'kraken', sky: true }),
+  albsky: () => ({ parts: unfold(buildCarrier(1), addLiftFans), motion: 'albatross', sky: true }),
 };
+// the sky-carrier refit shown unfolded and running (war.js skyRefit / skyVisuals set the same fields)
+function unfold(parts, add) { add(parts); for (const f of parts.fans) { f.arm.visible = true; f.arm.scale.set(1, 1, 1); f.glow.material.opacity = 0.8; f.disc.material.opacity = 0.1; } return parts; }
 const S = { ship: Q.get('ship') || 'albatross', sea: +(Q.get('sea') ?? 4), speed: +(Q.get('speed') ?? 4), waveDir: Math.PI, freeze: Q.get('freeze') === '1', yawRate: 0 };
 let cur = null, mo = null, yaw = 0, t = 0;
 function load(name) {
@@ -76,6 +85,7 @@ function step(dt) {
   if (cur.parts.dish) cur.parts.dish.rotation.y += dt * 1.6;
   if (cur.parts.lamp) cur.parts.lamp.visible = (t % 1.4) < 0.15;
   cur.parts.tick?.(dt, t, camera.position.distanceTo(g.position));
+  if (cur.sky) for (const f of cur.parts.fans) f.rotor.rotation.y += dt * 9 * f.sd;
 }
 let last = performance.now();
 function frame(now) {

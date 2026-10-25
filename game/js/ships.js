@@ -7,6 +7,8 @@ import { buildAlbatross } from './units/naval/albatross.js';
 import { buildKraken } from './units/naval/kraken.js';
 import { buildLeviathan, LEV } from './units/naval/leviathan.js';
 import { buildContainerShip, BOX } from './units/naval/containership.js';
+import { buildMSCFreighter, MSC } from './units/naval/mscfreighter.js';   // PARITY: the TASK FORCE's supply ship
+import { buildIowa, IOWA } from './units/naval/iowa.js';   // PARITY: the TASK FORCE's capital ship
 import { buildCH46Mesh } from './units/air/rotary/ch46model.js';
 import { buildMV22Mesh } from './units/air/rotary/mv22model.js';
 import { buildWaspMesh } from './units/air/rotary/waspmodel.js';
@@ -54,11 +56,11 @@ export function addLiftFans(parts) {
 
 // ------------------------------------------------------------------------------------------- battleship
 export const BSHIP = LEV;   // RW-9 LEVIATHAN (units/naval/leviathan.js): { group, turrets, guns } + mounts, tick, localDeck
-export function buildBattleship() { return buildLeviathan(); }
+export function buildBattleship(side = 2) { return side === 1 ? buildIowa() : buildLeviathan(); }   // PARITY: side 1 = USS IOWA (units/naval/iowa.js)
 // ------------------------------------------------------------------------------------------- freighter
 // enemy supply ship (an autonomous container ship): carries its islands' output to the KRAKEN
 export const FREIGHTER = BOX;   // the autonomous container ship (units/naval/containership.js): { group, guns } + mounts, tick, localDeck
-export function buildFreighter() { return buildContainerShip(); }
+export function buildFreighter(side = 2) { return side === 1 ? buildMSCFreighter() : buildContainerShip(); }   // PARITY: side 1 = the MSC freighter (units/naval/mscfreighter.js)
 // ------------------------------------------------------------------------------------------- aircraft
 // NGC-1980: the capture drone, the twin-rotor transport and the saucer gunship are replaced by the rotary units
 // (game/js/units/air/rotary/): these names stay as wrappers for anything that still builds them. The blue "escort"

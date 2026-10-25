@@ -103,5 +103,75 @@ console.log('--- deck height maths (war.js deckY) ---');
   check('SS4 (game default 3): deck at the wires stays within 1 game m', maxAft < 1, `${maxAft.toFixed(2)} m peak`, '< 1 m', 'gameplay');
 }
 
+// ------------------------------------------------------------------------------------------------- PARITY models
+// The task force's MSC freighter and Iowa, and the KRAKEN's RUNAWAY lift fans, built in node (three.js from
+// game/vendor through a resolve hook, a no-op canvas for the decal sheets): dimensions, the localDeck contract, the
+// mount lists the defence brain reads, the sky-fan contract war.js drives, and their motion in a seaway.
+console.log('--- parity models: MSC freighter, Iowa, KRAKEN RW lift fans ---');
+{
+  const { register } = await import('node:module'), { pathToFileURL, fileURLToPath } = await import('node:url'), path = await import('node:path'), fs = await import('node:fs');
+  const GAME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'game'), three = pathToFileURL(GAME + '/vendor/three.module.min.js').href;
+  register('data:text/javascript,' + encodeURIComponent(`export async function resolve(s, c, n) { if (s === 'three') return { url: ${JSON.stringify(three)}, shortCircuit: true }; return n(s, c); }`));
+  const ctx2d = new Proxy({}, { get: (t, k) => k === 'measureText' ? () => ({ width: 10 }) : /create(Linear|Radial)Gradient/.test(k) ? () => ({ addColorStop() {} }) : () => {}, set: () => true });
+  globalThis.document ??= { createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }) };
+  const naval = f => import(pathToFileURL(`${GAME}/js/units/naval/${f}`).href);
+  const THREE = await import(three);
+  const bbox = o => new THREE.Box3().setFromObject(o);
+  const tris = g => { let n = 0; g.traverse(o => { if (o.isMesh && o.visible) n += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1); }); return Math.round(n); };
+  const meshes = g => { let n = 0; g.traverse(o => { if (o.isMesh && o.visible) n++; }); return n; };
+
+  // MSC freighter (counterpart: the container ship, 80 x 15, deck 4)
+  const { buildMSCFreighter, MSC } = await naval('mscfreighter.js'), M = buildMSCFreighter(), mb = bbox(M.hull);
+  console.log(`  MSC hull ${(mb.max.z - mb.min.z).toFixed(1)} x ${(mb.max.x - mb.min.x).toFixed(1)} m, keel ${mb.min.y.toFixed(1)}  |  ${meshes(M.group)} meshes, ${tris(M.group)} tris`);
+  check('MSC: dims L 80 W 14 DECK 4 (= container ship size)', MSC.L === 80 && MSC.W === 14 && MSC.DECK === 4, JSON.stringify(MSC), '{L:80,W:14,DECK:4}');
+  { let w = 0; for (let z = -42; z < 42; z += 0.25) w = Math.max(w, M.deckHalf(z), M.waterHalf(z));
+    check('MSC: hull 79-84 m long, beam 14 m (working booms may swing outboard)', mb.max.z - mb.min.z > 79 && mb.max.z - mb.min.z < 84 && Math.abs(2 * w - 14) < 0.05, `${(mb.max.z - mb.min.z).toFixed(1)} x ${(2 * w).toFixed(1)} (gear ${(mb.max.x - mb.min.x).toFixed(1)})`, ''); }
+  check('MSC: localDeck main deck / forecastle / poop / hatch / bridge roof / off the side', M.localDeck(5.5, 0.5) === 4 && M.localDeck(0, -36) > 5.7 && M.localDeck(0, 37) > 5.5 && M.localDeck(0, -15) > 5 && M.localDeck(0, 4) > 10.7 && M.localDeck(9, 0) < -1e8,
+    [M.localDeck(5.5, 0.5), M.localDeck(0, -36), M.localDeck(0, 37), M.localDeck(0, -15), M.localDeck(0, 4), M.localDeck(9, 0)].map(v => v < -1e8 ? 'off' : v.toFixed(2)).join(' / '), '4 / 5.8 / 5.6 / 5.12 / 10.8 / off');
+  check('MSC: one ciws mount, gun 0 = guns[0] (refitCarrier / refitShip read it)', M.mounts.length === 1 && M.mounts[0].kind === 'ciws' && M.mounts[0].gun === 0 && M.guns[0] === M.mounts[0].node && M.guns[0].userData.yaw, M.mounts.map(m => m.kind).join(','), 'ciws');
+  check('MSC: funnel smoke on (fx.smoke > 0, parts.funnel set), motion entry', M.fx.smoke > 0 && M.funnel && SHIPS[M.motion], `smoke ${M.fx.smoke}, motion ${M.motion}`, '');
+
+  // Iowa (counterpart: the LEVIATHAN, 96 x 16, deck 5)
+  const { buildIowa, IOWA, TURRETS } = await naval('iowa.js'), I = buildIowa(), ib = bbox(I.hull);
+  console.log(`  Iowa hull ${(ib.max.z - ib.min.z).toFixed(1)} x ${(ib.max.x - ib.min.x).toFixed(1)} m, keel ${ib.min.y.toFixed(1)}, L/B ${((ib.max.z - ib.min.z) / (ib.max.x - ib.min.x)).toFixed(2)} (Iowa 270.4 / 33.0 = 8.2)  |  ${meshes(I.group)} meshes, ${tris(I.group)} tris`);
+  check('Iowa: dims L 104 W 13 DECK 3.4', IOWA.L === 104 && IOWA.W === 13 && IOWA.DECK === 3.4, JSON.stringify(IOWA), '');
+  { let w = 0; for (let z = -53; z < 53; z += 0.25) w = Math.max(w, I.deckHalf(z)); const Lh = ib.max.z - ib.min.z;
+    check('Iowa: hull length 103-106 m, beam 13 m, L/B 7.6-8.6 (the Iowa\'s own 8.2)', Lh > 103 && Lh < 106 && Math.abs(2 * w - 13) < 0.05 && Lh / (2 * w) > 7.6 && Lh / (2 * w) < 8.6, `${Lh.toFixed(1)} / ${(2 * w).toFixed(1)} = ${(Lh / (2 * w)).toFixed(2)}`, '', 'CONFIRMED proportions (DANFS)'); }
+  const tOK = I.turrets.length === 3 && I.turrets.every(t => t.userData.barrels && typeof t.userData.fire === 'function' && Math.abs(I.localDeck(0, t.position.z) - (t.position.y + 1.6)) < 0.01);
+  check('Iowa: three turrets (2 fwd, 1 aft) with barrels + fire(), roofs in localDeck', tOK && I.turrets.filter(t => t.position.z < 0).length === 2 && I.turrets[2].userData.aft, I.turrets.map(t => `z ${t.position.z} y ${t.position.y.toFixed(2)}`).join(', '), '');
+  { const t = I.turrets[1]; t.userData.barrels.rotation.x = 0.6; t.updateMatrixWorld(true); const v = new THREE.Vector3(); let hi = -1e9; t.userData.barrels.children[0].geometry.computeBoundingBox(); const bb = t.userData.barrels.children[0].geometry.boundingBox; v.set(0, 0, bb.min.z).applyMatrix4(t.userData.barrels.matrixWorld); hi = v.y; t.userData.barrels.rotation.x = 0;
+    check('Iowa: barrels elevate up (rotation.x > 0 raises the muzzles, war.js atan2(vy0, v))', hi > t.position.y + 4, `muzzle y ${hi.toFixed(1)} at 0.6 rad`, `> ${(t.position.y + 4).toFixed(1)}`); }
+  check('Iowa: superfiring turret 2 clears turret 1 (barrel axis above T1 roof)', TURRETS[1].y + 0.74 > TURRETS[0].y + 1.6, `${(TURRETS[1].y + 0.74).toFixed(2)} > ${(TURRETS[0].y + 1.6).toFixed(2)}`, '');
+  const kinds = k => I.mounts.filter(m => m.kind === k);
+  check('Iowa: defence mounts 2 ciws + 2 sam with gun indices; 6 x 5"/38 (kind gun, no gun index)', kinds('ciws').length === 2 && kinds('sam').length === 2 && [...kinds('ciws'), ...kinds('sam')].every(m => I.guns[m.gun] === m.node) && kinds('gun').length === 6 && kinds('gun').every(m => m.gun === undefined) && I.guns.length === 4,
+    I.mounts.map(m => m.kind).join(','), '');
+  check('Iowa: localDeck sheer (bow > midships > stern), tower roof, off the side', I.localDeck(0, -48) > I.localDeck(0, 0) - 1.2 && I.localDeck(5.5, 0) === 3.4 && I.localDeck(3, 45) < 3.4 && I.localDeck(0, -11) > 8.5 && I.localDeck(7.5, 0) < -1e8,
+    [I.localDeck(0, -48), I.localDeck(5.5, 0), I.localDeck(3, 45), I.localDeck(0, -11)].map(v => v.toFixed(2)).join(' / '), '');
+  check('Iowa: funnel smoke on, motion entry', I.fx.smoke > 0 && I.funnel && SHIPS[I.motion], `smoke ${I.fx.smoke}, motion ${I.motion}`, '');
+
+  // RUNAWAY lift fans on the KRAKEN: the same contract as ships.js addLiftFans
+  const { addLiftFansRW, FAN_POS_RW } = await naval('skyfans.js'), { buildKraken } = await naval('kraken.js'), K = buildKraken();
+  const shipsSrc = fs.readFileSync(GAME + '/js/ships.js', 'utf8'), fp = shipsSrc.match(/export const FAN_POS = (\[.*?\]);/);
+  check('RW fans: FAN_POS identical to ships.js FAN_POS', fp && JSON.stringify(JSON.parse(fp[1])) === JSON.stringify(FAN_POS_RW), fp ? fp[1] : 'not found', JSON.stringify(FAN_POS_RW));
+  const fans = addLiftFansRW(K);
+  check('RW fans: 4 x { arm, rotor, glow, disc, sd, z }, arm hidden at scale 0.001', fans.length === 4 && fans.every(f => f.arm && f.rotor && f.glow.material && f.disc.material && !f.arm.visible && f.arm.scale.x === 0.001 && f.glow.material.transparent && f.disc.material.transparent) && K.fans === fans, fans.map(f => `${f.sd},${f.z}`).join(' '), '');
+  for (const f of fans) { f.arm.visible = true; f.arm.scale.set(1, 1, 1); }
+  K.group.updateMatrixWorld(true);
+  let worst = 0; const c = new THREE.Vector3();
+  for (const f of fans) { f.rotor.getWorldPosition(c); worst = Math.max(worst, Math.abs(c.x - f.sd * (28 * 0.42 + 17)), Math.abs(c.z - f.z)); }
+  check('RW fans: rotor centres where war.js puts the downwash (x = sd (W 0.42 + 17), z)', worst < 0.05, `max err ${worst.toFixed(3)} m`, '< 0.05 m');
+  // every fan vertex outside the hull that lies under the flight deck's overhang stays below its underside (7.1)
+  let top = -1e9; const vv = new THREE.Vector3();
+  for (const f of fans) f.arm.traverse(o => { if (!o.isMesh || o === f.disc) return; const pa = o.geometry.attributes.position; for (let i = 0; i < pa.count; i++) { vv.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld); if (Math.abs(vv.x) > 13.7 && K.localDeck(vv.x, vv.z) > -1e8) top = Math.max(top, vv.y); } });
+  check('RW fans: nothing pokes through the KRAKEN flight deck overhang', top < 8 - 0.9, `highest under the deck ${top.toFixed(2)}`, `< ${(8 - 0.9).toFixed(1)} (deck underside)`);
+
+  // motion: the battleship is steadier than the LEVIATHAN, the freighter rolls like a feeder
+  const iw = stats('iowa', 5, HEAD, 15 * KN), lv = stats('leviathan', 5, HEAD, 15 * KN), ms = stats('msc', 5, BEAM, 10 * KN), mh = stats('msc', 5, HEAD, 12 * KN);
+  row('iowa', 5, HEAD, 15, iw); row('msc', 5, BEAM, 10, ms); row('msc', 5, HEAD, 12, mh);
+  check('Iowa: SS5 head-sea pitch 0.6-2.5° SA, less than the 96 m LEVIATHAN', iw.pitch > 0.6 && iw.pitch < 2.5 && iw.pitch < lv.pitch, `${iw.pitch.toFixed(2)}° (LEVIATHAN ${lv.pitch.toFixed(2)}°)`, '0.6-2.5°', 'INFERRED (cruiser / battleship trials)');
+  check('MSC: SS5 beam-sea roll 3-12° SA', ms.roll > 3 && ms.roll < 12, `${ms.roll.toFixed(2)}°`, '3-12°', 'INFERRED (loaded break-bulk ships)');
+  check('MSC: SS5 head-sea pitch 1-4° SA', mh.pitch > 1 && mh.pitch < 4, `${mh.pitch.toFixed(2)}°`, '1-4°', 'INFERRED');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
