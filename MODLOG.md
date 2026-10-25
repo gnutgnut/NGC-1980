@@ -2700,3 +2700,159 @@ stays game-level (no weapon figures changed). New files: `units/runaway/rwlod.js
   commanderbench: the wingman recalled over the real islands (world.js islandH) from 10 carrier positions / headings:
   10/10 trapped, no crash, 26 m least height over land (the old pilot: 8 m). The player's Hornet is untouched:
   jetfingerprint SAME (bit-identical), airbench 28/28, tomcatbench 32/32.
+
+## 2026-10-24 — NGC-1980 air defence polish: towed guns, crews, revetments, tracers, wrecks, LOD (branch ngc/defence-polish)
+
+**What.** The air defence units brought towards the Hornet / Huey bar on presentation and feel. Weapons stay game-level
+(tune.js: headline magazine sizes only; damage, rates and the missile / beam rules unchanged).
+- **Towed guns** (`models.js`): the **M167 VADS** (`vadst`: the M163's Vulcan, range-only radar and open mount on the
+  two-wheel M42 carriage, emplaced on three jacks with the wheels raised and the drawbar folded) and the **ZU-23-2**
+  (`zu23`: twin 23 mm in their cradle, 50-round box magazines outboard, two seats, the sight on the left, the base on
+  three pads with the wheels swung up). `pick()` alternates them with the tracked mounts, keyed on the island and its
+  gun count: our starting guns are Shilka / ZU-23-2, command 2 builds M163 / M167. Tune: towed hp 6 (tracked 7).
+- **Crews** (`crew.js`, new): 1980 US (OG-107, M1 helmet), Soviet AA gunner (khaki, SSh-68) and Soviet SPAAG crew
+  (black overalls, shlemofon); 8 meshes a man on one shared vertex-colour material, geometry shared per kit. Gunners
+  sit on the mounts and look where the gun looks (scan the sky while searching), the Shilka's commander and the
+  drivers stand in their hatches (the commander ducks while it fires), the M167's squad leader turns to the target and
+  points it out, then braces; the **loaders** keep the guns fed: walk to the ready-use boxes behind the gun, kneel,
+  carry a box back, heave it up (`mag.trip` rounds), and go again while there is room. The RUNAWAY don't crew guns:
+  the TALON's **TICK** (six legs, manipulator arm, cyan eye) climbs from the ground onto the truck's deck to feed the
+  belts and the missile packs after a launch (a rack of spare canisters on the deck), and comes down again. LANCE:
+  its sensor head sweeps while searching. Crews are drawn within 170 m only.
+- **Magazines** (`tune.js mag`, game level): M163 1,100 ready rounds, M167 500, Shilka 2,000, ZU-23-2 2 x 50, TALON
+  400 (an airburst round counts 4-6). A gun only runs dry under long heavy fire and then waits for the next box;
+  ship mounts are deck-fed (no `mag`).
+- **In the revetments**: `brain.js seat()` parks every island unit the way it drove into world/life.js's emplacement
+  (its way in faces the pad): nose to the pad, the turret ring (`userData.slotZ`) on the slot, so the TALON's cab sticks
+  out through the gap. Slot positions are war.js's own (the struct's x / z and the island's pad), no formula repeated.
+  defencewar.mjs checks every island gun: facing the pad (cos > 0.97, measured 0.999-1) and the turret < 1.2 m off
+  the slot (0.01-0.42 m).
+- **Effects**: tracer streaks (one InstancedMesh for every unit, every other gun round and every airburst round, on
+  the round's own ballistic path; war.js's colours), a flame tongue ahead of the muzzle flash, brass / link flecks
+  out of the ejection port (`userData.eject`), dust kicked up by the muzzle blast when the barrels are low, gun smoke
+  hanging round the mount after a burst. All gated by camera distance.
+- **Damage and wrecks**: below half hp a unit is DAMAGED (smoke from the deck, the odd spark). Killed, war.js calls
+  `userData.setState('destroyed')` (the hook WORLD's structures use), so the wreck stays on its slot instead of the
+  generic rubble: a burnt-out material (rust-brown and soot over the old paint, per-face variation), the turret
+  lifted / knocked askew on its ring, barrels drooping, the radar mast bent, crew, lamps, IFF and team panels gone; the
+  ready rounds cook off for 4-12 s (pops, sparks, the odd tracer whizzing out). A gun built on that slot later hauls the
+  wreck away (attach()).
+- **Performance**: every type / side is modelled and baked ONCE (prototype) and each unit is a clone sharing its
+  geometry and materials (only the LANCE's glow / radiator materials are per unit); 5.7 ms a unit including first
+  builds (was a full rebuild + bake each). Each unit is a `THREE.LOD`: the full model near, a 4-mesh box stand-in in
+  the same weathered colours beyond 220 m (170-190 m for ship mounts) whose turret mirrors the real one.
+
+**Shared-file hooks**: none (war.js untouched: it already calls `setState` when present). Dev page: `&revet=1` digs
+the game's emplacement (world/structures.js `buildAASite`) round the unit; `__D.hurt(n)`, `__D.kill()`, `__D.build()`.
+
+**Tests.** `scenes/defencepolish.mjs` 20/20 (look: six units fighting in their revetments; crew: the ZU-23-2 runs low
+and is fed, tracers, the TICK on deck; wreck: damaged -> destroyed for Shilka / M167 / TALON; war: PELICAN's gun
+knocked out in game, wreck on the slot, a new gun ordered on the same slot hauls it away; lod: far / near levels,
+build cost). `defcrewposes.mjs` (pose sheet). defence.mjs 11/11, defencewar.mjs 6/6 (+ the revetment seating check),
+defbalance.mjs 4/4 at BAL_RUNS=10 (kills/min of hp-12 stand-ins: legacy 3.5, M163 3.05, M167 3.05, Shilka 2.85,
+ZU-23-2 3.05; TALON / LANCE vs the player unchanged), smoke 5/5, worlddamage 4/4. `node --check` on game/js/*.js.
+
+**Known / next.** The loaders walk on the unit's plane (fine on the gentle pad slopes, would float on a steep one);
+the TICK can clip the TALON's combat module when the module traverses to the rear while it works; the hands-over-ears
+pose is a brace (rigid forearms); M167 / ZU-23-2 have no prime mover parked nearby; crews do not bail out or die as
+figures (they vanish with the wreck); no per-unit sounds for the towed guns' crews (box changes, shouts).
+
+## 2026-10-24 — NGC-1980 integration fixes after TERRAIN + RUNAWAY ground polish + defence polish (branch ngc/integ)
+
+- **STRIDERs never reacted to the helicopter** (`scenes/rwpolish.mjs` "air: to cover / disperse"). There were two
+  causes. (1) Perception was purely visual inside the STRIDER's 126-degree cone. On the new SANDBAR the walkers end
+  the fight facing the Marines' axis (west), and the scene's Huey works them from the east, behind them (line of
+  sight was clear for all 8). So the helicopter at 120 m was unseen, and its contact stayed a stale 'vehicle' from
+  when it sat on the pad. (2) From the terrain: once they did see it, a walker reacted only with 'to cover' (cover
+  from the aircraft within 20 m) or 'disperse' (a squad mate within 7 m). SANDBAR is now a flat sandy cay with no
+  cover from above, and the squad stands more than 7 m apart, so it did nothing (1 run in 2).
+  Fix (`units/runaway/squadai.js`):
+  - An aircraft low over the island is heard all round (`AI_T.ROTOR` 180 m: within it, sight needs only line of
+    sight, not the cone).
+  - A heard contact takes the kind of the live target with that id.
+  - With no cover from the aircraft, a walker breaks 12 m sideways off its line of fire, alternating each 5 s ('air:
+    disperse').
+  - After a failed cover search, the next one waits 2 s (it used to run every step).
+- **The Marine stopped 1.19 m inside the house door** (`scenes/interiors.mjs` waited for 1.2). The village re-fit
+  picked a different two-storey house nearest the pad, whose living-room sofa stood end-on 1.4 m in front of the
+  front door. Fix (`interiors/rooms.js`): `Plan.clearEntry` keeps the first 1.9 m inside a front door (1.3 m in a
+  shop) clear of furniture. A piece there moves back into the room, else sideways, else it goes. This covers houses,
+  cottages and terrace homes / shops.
+- **Doors on the new slopes** (found by the new check): the front steps down a slope ended in the air where the
+  ground kept falling, because the flight's length came from one sample 1.4 m out. Now the flight is lengthened
+  until its foot meets the ground (to 4.2 m down). A zone cottage's door opened into the bank (the ground in front
+  was above the floor and the lintel lower than a man), so in the zone `layout.footing` also lifts the floor over
+  the ground 1.4 m in front of the building.
+- **Check**: `tools/worldsolidbench.mjs` #4 walks in through every outside door of the zone's enterable buildings
+  (82), door open (r 0.3 m, 1.8 m tall, 0.45 m steps, walls and furniture push). Before the fixes, 10+ failed (the
+  interiors house among them); now 82/82. The bench's push now treats a door leaf as a box, as ground.js does.
+  Wild-land towns are not held to it: a town house on its platform can stand 4 m over its street (4079,-1187).
+- **Tests**: rwpolish 6/6 (x3), interiors 20/20, terrain 13/13, worlddamage 4/4, defencepolish 20/20, smoke 5/5.
+  groundwar 9-10/10: 'both sides fire' fails about 1 run in 2, the same on the unpatched merge (1 of 2 baseline runs
+  failed). 'Hover tank came ashore' failed once in 4 runs under load. Benches: runaway 50/50, groundwar 33/33, world
+  pass, worldsolid 10/10.
+
+## 2026-10-24 — NGC-1980 MARINE polish batch 2: the 1980 Marine and his medical / inventory kit (branch ngc/marine-polish)
+- **Known issues fixed.** (1) *A Marine carrying a casualty walked at full pace*: soldier.js takes a host ground-speed cap
+  (`mods.vCap`, after the direction factor); richmarine.js sets it from fieldcare.js's `a.paceV` (MEDINV
+  `BUDDY.carrySpeed` 1.21 m/s, `dragSpeed` 0.97 m/s), marinesim.js from `MS.burden` (the player). (2) *A grenade in flight
+  was not drawn*: the AI's M67s (groundsim projectiles with `p.frag`) are one instanced draw in groundwar.js, tumbling in
+  the air, on their side where they come to rest. (3) *A Marine hit before throwing kept the grenade*: groundsim.js
+  `dropDrill` - a man who goes down (or dies) with the pin out (late 'pin', 'ready', 'cook', 'throw' before release)
+  drops it LIVE at his feet with the fuse left (4.5 s less his cook), a 'fragDropped' event ("GRENADE! - HE DROPPED IT
+  LIVE"); before the pin is out it stays on him. The player the same (marine.js `throwDrop`): killed, knocked out, his
+  throwing arm out (MEDINV `weaponUse 'none'` or the right arm blacked) with the pin out -> live at his feet; a cooked one
+  can no longer vanish (walking into the sea or onto a ladder mid-cook drops it too: the spoon is gone).
+- **The M67 and M18 as objects** (`units/infantry/grenademodel.js`, Kit geometry): the M67's 64 mm olive body with its
+  yellow band, the M213 fuze, spoon, pull ring and pin; the M18 canister with its smoke-coloured top (green / red /
+  yellow / violet) - the player's thrown grenades, the AI's, the one in a figure's hand, and `m67Into` for the kit.
+- **1980 USMC kit on the model** (soldiermodel.js): an M67 on the side of each ammo pouch (FM 21-75), the M7 bayonet in
+  its M8A1 scabbard on the left hip, the folding e-tool in its LC-1 carrier at the back, the butt pack; the ALICE medium
+  pack with three outer pockets, flap straps and the poncho / liner roll under it (the M1 / Mitchell cover, M1955 flak
+  vest, LC-2 belt and suspenders, canteens and the first-aid case were there).
+- **Poses.** New `stancePose` states in poseSkeleton: `sit` (pose.seat: on a troop seat, knees apart, the M16 standing
+  upright between the knees, butt on the floor, both hands on it - the CH-46's seated squad now uses it through
+  marinefigure.js's 'seated'), `climb` (pose.climb = metres climbed: a knee up per rung), `swim` (breaststroke, head up,
+  frog kick). carepose.js `climbHands` (hand over hand: a hand holds the rail while the body climbs past it, then reaches
+  up), `swimHands`, `selfAidHands` (both hands on his own wound; one hand on the other arm). marine.js uses them in third
+  person (the rifle on its sling); swimming was the prone pose 1.2 m under the water before.
+- **First person** (`units/infantry/bodyvm.js`, after throwvm.js): on a ladder the rifle is slung and both hands are on
+  the rails (they stay put on the rail as you climb past them: they move down the view exactly as fast as you climb);
+  swimming, a breaststroke (sculling when treading water); self aid, the rifle lowered and both hands on the wound with
+  the OD field dressing in the right hand. Body frame turned by the view pitch (the hands stay on the rails when you look
+  up). The viewmodel now draws on ladders and in the water (it was switched off).
+- **Self aid (K)**: the next step FM 21-11 calls for, from your own kit, by fieldcare.js `pickAid` (the corpsman's
+  chooser: bleeding worst first - a field dressing with pressure, a tourniquet for a spurting artery or a limb bleeding
+  through its dressing, the best one for that limb by MEDINV's odds; a tourniquet that didn't hold tightened; then the
+  chest, splints, morphine never in shock). MEDINV's own self-aid times; you go down on one knee, the rifle on its sling,
+  fire blocked; K again: time left; sprinting off stops it. HUD: "YOU ARE BLEEDING - K: SELF AID", the count down. (K was
+  the global keyboard-only toggle; on foot it is first aid, elsewhere it still toggles.)
+- **HEALTH screen clarity** (medui.js `opt.advise`): a NEXT STEP panel over CONDITIONS (the item, the part, the time),
+  the item's tile glows in the list and the body part is outlined on the figure ("DRAG THE GLOWING ITEM ONTO THE OUTLINED
+  PART · OR K"); also on a casualty's screen (buddy aid with your kit) and in the medinv sandbox.
+- **Sound** (infantryaudio.js): the kit on every step - LC-2 metal ticks even at a walk, canteen slosh, pack / e-tool
+  knock on the run, nylon and vest rustle crouched, a crawl's drag; first aid you hear (the dressing wrapper torn and the
+  tails tied, the strap drawn and the windlass turned, the syrette's cap and squeeze, the wire splint bent, the chest
+  seal's wrapper, the ammonia ampule); a hand on each ladder rung; the pull of each swimming stroke. Footsteps: dirt tracks
+  are 'dirt' now (SURF_MAP), a floor above the ground that is not a ship (houses, shops, church, quonsets, porches,
+  stairs) sounds of boards.
+- **Shared-file lines**: soldier.js (vCap, 3 lines), marinesim.js (SURF_MAP dirt, vCap), richmarine.js (vCap),
+  groundsim.js (dropDrill, AI_COOK_S), groundwar.js (grenade instances, the fragDropped shout), marinefigure.js (seat),
+  soldiermodel.js (kit, sit / climb / swim, seated rifle), carepose.js, medui.js (advise), marinecare.js (advise),
+  marine.js (all of the above on the player), infantryaudio.js; dev/infantry.html (four more poses), dev/medinv.js
+  (advise); README (K, tests).
+- **Tests**: buddyaidbench 28/28 (new: a rich Marine in a fireman's carry walks 1.21 m/s = BUDDY.carrySpeed, his walk
+  1.52; hit mid-cook he drops the M67 live 0.1 m from him, it bursts 3.9 s later; hit while still drawing it, nothing goes
+  off); medinvbench 109/109, infantrybench 90/90, marinebench and footbench all. Scenes: new `marinepolish.mjs` 9/9 (kit
+  close-ups, K self aid - first and third person, the HUD count, the leg dressed; the ladder in first and third person;
+  swimming; a cooked M67 dropped live when the throwing arm is hit, and its burst), `carepose.mjs` 15/15 (+ carry speed
+  1.21 m/s on the rich carrier, the AI's M67 drawn in flight, knocked down mid-cook he drops it live and it goes off by
+  him), `infantrymodels.mjs` (kit, seated, ladder, swim, self aid), marine 15/15, foot 12/12, buddyaid 23/23, ladder 9/9,
+  smoke 5/5, medinv_ui 11/11. groundwar 9/10 and interiors 19/20 fail the same checks on the untouched experimental tree:
+  groundwar's "both sides fire" (the door gun and the war kill the last STRIDERs before the Sea Knight lands, so nobody is
+  left to shoot), interiors' "squad seated aboard" (the stick now walks up the ramp while the rotors spool: the scene
+  waits for them now).
+- **Untested / next**: the K binding on real hardware next to the global keyboard-only toggle; a gamepad button for self
+  aid; AI Marines don't react to a dropped live grenade (no dive for cover: they take the fragments); the first-person
+  fists stay fists when swimming (no open-hand mesh); hands on the rails are placed for the island ladders' width, not
+  each ladder's real rails; the AI's grenades are drawn within 260 m only.

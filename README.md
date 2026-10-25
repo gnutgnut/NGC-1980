@@ -203,6 +203,7 @@ Compressor stall (a bang, the RPM rolls back, TIT climbs, L / R INLET on the cau
 | Shift+G (or ; / ') | throw an M18 smoke grenade: after ~1.5 s it pours coloured smoke for a minute; thick smoke hides you from the RUNAWAY guns' lock and stops the LANCE beam |
 | N | bipod (M60) |
 | Tab (or I), H | GEAR screen, HEALTH screen (the mouse is released; Esc closes) |
+| K | self aid: the next first-aid step from your own kit (FM 21-11: a dressing or a tourniquet on the worst bleed, then the rest); you kneel and both hands go to the wound; K again: time left; sprinting stops it. The HEALTH screen shows the same NEXT STEP (the item glows, the body part is outlined) |
 | F | search a crate, a pile of dropped kit or a body (a dead Marine: his kit); by a wounded Marine: his HEALTH screen to treat him with your kit (buddy aid); dragging: lift him into a fireman's carry; carrying at the Huey door: load him; on a friendly pad or the carrier deck: rearm and resupply |
 | Shift+F | drag a casualty by his drag strap (MEDINV drag speed) / put him down |
 | (aim at a wall) | the rifle rests on a ledge, a wall top or a sill under the handguard, or against a wall or window frame beside it: less sway (HUD: RESTED) |
@@ -352,7 +353,9 @@ the cupola fires the .50, H hatches; M113: R ramp, Y trim vane, J bilge pumps.
 
 **The ground war** (`game/js/units/groundwar/`): `node tools/groundwarbench.mjs` (33 checks: the Marine's paces, stances, wounds and hit volume; the M1A2 / T-90M on trackfm against their published speeds; road routes; whole fights of 13 Marines against 8 STRIDERs with and without a helicopter overhead; the cost of a far battle; `node tools/groundwarbench.mjs fight 3 [heli]` prints one fight in detail). Scenes `groundwar.mjs` (an Osprey lands STRIDERs who take SANDBAR, the Huey's guns thin them, a Sea Knight's Marines take it back, an RW-7 and an LCAC with an M1A2 come ashore) and `groundaisim.json` (twenty minutes of the war fast-forwarded, the ground forces counted).
 
-**Infantry depth** (ngc/infdepth): `node tools/buddyaidbench.mjs` (23 checks: the treatment chooser, the rich AI Marine on the rifleman sim (inertia, reloads, SPORTS), self aid, the corpsman, buddy aid, drags, the player as a patient, a fight with rich men, evacuation, the cost per Marine); `node tools/buddyaidbench.mjs cmp 4` (cheap vs rich balance); scene `buddyaid.mjs`.
+**Marine polish** (ngc/marine-polish): scenes `marinepolish.mjs` (the kit close up, self aid with K, first-person hands on a ladder and swimming, a cooked grenade dropped live) and `carepose.mjs` (the carry speed, the AI's M67 drawn in flight, a man hit mid-cook drops it live); `infantrymodels.mjs` shoots the kit, seated, ladder, swim and self-aid poses on `dev/infantry.html?view=model`.
+
+**Infantry depth** (ngc/infdepth): `node tools/buddyaidbench.mjs` (28 checks: the treatment chooser, the rich AI Marine on the rifleman sim (inertia, reloads, SPORTS), self aid, the corpsman, buddy aid, drags, the player as a patient, a fight with rich men, evacuation, the cost per Marine); `node tools/buddyaidbench.mjs cmp 4` (cheap vs rich balance); scene `buddyaid.mjs`.
 
 **RUNAWAY ground forces (NGC-1980; in the game through the ground war).** The enemy's land army as standalone sims and models in
 `game/js/units/runaway/`: the RW-1 STRIDER (a balancing biped that stumbles when hit, falls and gets back up), the

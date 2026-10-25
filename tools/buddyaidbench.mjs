@@ -207,5 +207,33 @@ if (process.argv[2] === 'care') {   // the corpsman scenario, verbose
   check(at20 > 20 && F.mar.filter(m => m.richOn).length > 0, 'attacking a held pad, the rich Marines fire (> 20 rounds in the first 20 s: the groundwar scene\'s check)', `${at20} by 20 s, ${F.GS.stats.shots[1]} by 40 s (machines ${F.GS.stats.shots[2]})`);
 }
 
+// ------------------------------------------------------------------------------------------------- 7. ngc/marine-polish fixes
+{
+  // (a) a rich Marine carrying a casualty walks at MEDINV's carry speed, not his rifleman's walk (fieldcare a.paceV)
+  const env = { height: () => 0 };
+  const u = { id: 9, role: 'tl', seed: 5, body: createMarine({ role: 'tl', env }) };
+  const RM = createRichMarine(u, {}); RM.place(0, 0, 0, env);
+  const carry = BUDDY.carrySpeed({ weaponUse: 'both', speedMul: 1, sprint: true }, 95, 25), drag = BUDDY.dragSpeed({ weaponUse: 'both', speedMul: 1 }, 95, 25);
+  for (let i = 0; i < 300; i++) RM.step(1 / 30, { move: [0, -60], pace: 'walk', paceV: carry, stance: 'stand' }, env, [0, -carry], null);
+  const vC = RM.S.speed;
+  for (let i = 0; i < 300; i++) RM.step(1 / 30, { move: [0, -60], pace: 'walk', stance: 'stand' }, env, [0, -1.5], null);
+  const vW = RM.S.speed;
+  check(Math.abs(vC - carry) < 0.08 && vW > carry + 0.2, 'a rich Marine in a fireman\'s carry walks at MEDINV BUDDY.carrySpeed, not his walk', `carry ${vC.toFixed(2)} m/s (BUDDY ${carry.toFixed(2)}), walk ${vW.toFixed(2)} m/s, drag ${drag.toFixed(2)}`);
+  // (b) a Marine hit with the pin out drops the M67 LIVE: it lies at his feet and goes off with the fuse left
+  const F = battle({ seed: 4, rich: false }), m = F.mar[2];
+  run(F, 2, { peace: true });
+  m.thrT = 2.4; m.thr = { phase: 'cook', p: 0.6, gone: false }; m.thrAim = [m.x, m.y, m.z - 20]; const f0 = m.body.frags;
+  m.body.able = false;
+  let tBoom = null, at = null;
+  const r = run(F, 6, { peace: true, each: (F, t) => { if (!at) { const p = F.GS.proj.find(p => p.frag); if (p) at = { fuse: p.fuse, d: Math.hypot(p.x - m.x, p.z - m.z) }; } if (tBoom === null && !F.GS.proj.some(p => p.frag) && at) tBoom = t; } });
+  check(F.GS.stats.fragsDropped === 1 && r.ev.fragDropped === 1 && at && m.body.frags === f0 - 1 && m.thrT == null, 'hit with the pin out and the spoon gone (cooking), he drops the M67 live at his feet', `fuse ${at ? at.fuse.toFixed(2) : '-'} s left, ${at ? at.d.toFixed(1) : '-'} m from him, frags ${f0} -> ${m.body.frags}`);
+  check(tBoom !== null && tBoom > 3.0 && tBoom < 4.5 && r.ev.blast >= 1, 'it goes off with what was left of its fuse (4.5 s less the 0.6 s cook)', `burst at +${tBoom === null ? '-' : tBoom.toFixed(2)} s, blast events ${r.ev.blast || 0}`);
+  // (c) before the pin is out it just falls (safe): no grenade in the world
+  const G = battle({ seed: 5, rich: false }), m2 = G.mar[2]; run(G, 1, { peace: true });
+  m2.thrT = 0.2; m2.thr = { phase: 'draw', p: 0.4, gone: false }; m2.thrAim = [m2.x, m2.y, m2.z - 20]; m2.body.able = false;
+  run(G, 1, { peace: true });
+  check(!G.GS.proj.some(p => p.frag) && !(G.GS.stats.fragsDropped > 0), 'hit while still drawing it (pin in): nothing goes off', `frags in the world ${G.GS.proj.filter(p => p.frag).length}`);
+}
+
 console.log(`\n${pass}/${pass + fail} checks pass`);
 process.exit(fail ? 1 : 0);

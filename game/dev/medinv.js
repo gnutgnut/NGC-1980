@@ -6,6 +6,7 @@ import * as MED from '../js/units/infantry/medical.js';
 import * as I from '../js/units/infantry/inventory.js';
 import { createInvUI } from '../js/units/infantry/invui.js';
 import { createMedUI, createMedHud, createVisionFX, FEEDTXT, CLASS_COL } from '../js/units/infantry/medui.js';
+import { pickAid } from '../js/units/groundwar/fieldcare.js';   // ngc/marine-polish: the NEXT STEP on the HEALTH screen
 
 const Q = new URLSearchParams(location.search);
 const $ = s => document.querySelector(s);
@@ -22,7 +23,7 @@ function build(loadout = 'rifleman') {
   if (invUI) invUI.destroy(); if (medUI) medUI.destroy();
   const tabs = ['GEAR', 'HEALTH'];
   invUI = createInvUI({ inv, med: M, parent: view, tabs, onTab: t => setView(t === 'HEALTH' ? 'health' : 'gear'), onClose: () => W.view === 'gear' && setView('sandbox') });
-  medUI = createMedUI({ med: M, inv, parent: view, tabs, title: 'PFC J. RIVERA, 2/4 MARINES', onTab: t => setView(t === 'GEAR' ? 'gear' : 'health'), onClose: () => W.view === 'health' && setView('sandbox') });
+  medUI = createMedUI({ med: M, inv, parent: view, tabs, title: 'PFC J. RIVERA, 2/4 MARINES', advise: (m, b) => pickAid(m, [inv], b), onTab: t => setView(t === 'GEAR' ? 'gear' : 'health'), onClose: () => W.view === 'health' && setView('sandbox') });
   if (W.view !== 'sandbox') setView(W.view);
 }
 function setView(v) {

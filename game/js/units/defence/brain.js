@@ -36,8 +36,15 @@ export function createDefence(env) {
   // ------------------------------------------------------------------ which unit goes where
   // side 1: our starting guns are the Soviet contingent's ZSU-23-4s; everything command 2 builds is an M163.
   // side 2: a LANCE on hq and fortress islands (two on IRONHOLD), seized TALON trucks everywhere else.
+  // defence polish: each kind alternates with its towed counterpart (ZU-23-2 / M167), keyed on the island and how many
+  // guns it already has, so a two-gun island usually shows one of each
   function pick(side, I, initial) {
-    if (side === 1) return initial ? 'shilka' : 'vads';
+    if (side === 1) {
+      const n = I && I.structs ? I.structs.filter(s => s.kind === 'aa' && !s.dead).length : 0;
+      let h = 0; for (const ch of (I && I.name) || '') h = (h * 31 + ch.charCodeAt(0)) | 0;
+      const odd = ((h >>> 3) + n) % 2 === 1;
+      return initial ? (odd ? 'zu23' : 'shilka') : (odd ? 'vadst' : 'vads');
+    }
     if (!I) return 'talon';
     const lances = I.structs ? I.structs.filter(s => !s.dead && s.def && s.def.type === 'lance').length : 0;
     const want = I.name === 'IRONHOLD' ? 2 : (I.kind === 'hq' || I.kind === 'fortress') ? 1 : 0;
@@ -55,25 +62,30 @@ export function createDefence(env) {
       type, T, mode: 'search', tgt: null, key: null, lockT: 0, scanT: rnd(T.scan), losT: 0, los: false, lostT: 0, d: 1e9,
       yaw: 0, pitch: 0.15, burstT: 0, pauseT: 0, roundT: 0, flakT: rnd(0.5), mslCd: rnd(1, 3), salvo: 0, salvoT: 0, cell: 0,
       spin: 0, spinWas: 0, radarA: rnd(6.28), blink: 0, flashT: 0, heat: 0, beam: null, sndT: 0, side: o.side ?? o.ship?.side,
+      ammo: T.mag ? T.mag.rounds : Infinity, inbound: 0, dryT: 0, crewShown: true, smokeT: 0, wreckT: -1,
     };
     if (o.ship) { o.hp = o.max = T.hp; }
     else {
       o.hp = o.max = T.hp; o.r = T.r; o.h = T.h;
       if (terrain && env.terrainH) seat(o);
+      // a gun built on a slot where a wreck still stands: the wreck is hauled away
+      for (const u of units) if (u !== o && u.dead && !u.ship && Math.hypot(u.x - o.x, u.z - o.z) < 3) { u.mesh.parent && u.mesh.parent.remove(u.mesh); units.delete(u); }
     }
     if (T.beam) o.def.beam = makeBeam();
     units.add(o);
     return o.def;
   }
-  // park a vehicle on the island: along the ring of gun slots round the pad (so a long truck doesn't poke into the
-  // buildings nearer the pad), tilted to the slope it sits on
+  // park a unit in its AA emplacement. world/life.js digs a revetment on each of war.js's pad slots with its way in
+  // facing the pad, so the vehicle drove in nose first: it faces the pad, its turret (userData.slotZ along the hull)
+  // over the slot (a long truck's cab sticks out through the gap), tilted to the slope it sits on
   function seat(o) {
-    const m = o.mesh, I = o.I, h = env.terrainH;
-    const yaw = I && I.pad ? Math.atan2(-(o.x - I.pad.x), -(o.z - I.pad.z)) + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2 + rnd(-0.25, 0.25) : rnd(6.28);
+    const m = o.mesh, I = o.I, h = env.terrainH, sz = m.userData.slotZ || 0;
+    const yaw = I && I.pad ? Math.atan2(o.x - I.pad.x, o.z - I.pad.z) + rnd(-0.06, 0.06) : rnd(6.28);
     const dx = (h(o.x + 2, o.z) - h(o.x - 2, o.z)) / 4, dz = (h(o.x, o.z + 2) - h(o.x, o.z - 2)) / 4;
     const tx = clamp(Math.atan(dz), -0.25, 0.25), tz = clamp(-Math.atan(dx), -0.25, 0.25);
     m.rotation.set(0, 0, 0); m.quaternion.setFromEuler(new THREE.Euler(tx, 0, tz, 'XYZ')).multiply(_q.setFromAxisAngle(_a.set(0, 1, 0), yaw));
-    o.mesh.position.y = Math.max(h(o.x, o.z), 0) - 0.05;
+    m.position.x = o.x - sz * Math.sin(yaw); m.position.z = o.z - sz * Math.cos(yaw);
+    m.position.y = Math.max(h(m.position.x, m.position.z), 0) - 0.05;
   }
   // replace the ALBATROSS's generic gun mounts with its 1980 fit. Uses the NAVAL model's userData.mounts
   // ({ kind, pos, dir }) when the carrier has them, else the four deck-edge spots the old guns stood on.
@@ -172,6 +184,8 @@ export function createDefence(env) {
     const D = o.def, T = D.T, ud = o.mesh.userData, t = env.time();
     o.mesh.updateMatrixWorld();
     const eye = eyeOf(o, _a);
+    D.camD = env.hear ? (1 - env.hear(eye.x, eye.y, eye.z, 1000)) * 1000 : 0;   // how far the camera is (detail, crews, effects)
+    if (!o.ship && o.max && o.hp < o.max * 0.5 && ud.state === 'intact' && ud.setState) ud.setState('damaged');
     // ---- search: pick the nearest foe we can see (keep the current one unless another is much closer)
     D.scanT -= dt;
     if (D.scanT <= 0) {
@@ -240,34 +254,41 @@ export function createDefence(env) {
   function gun(o, D, T, f, locked, err, dt, t) {
     const G = T.gun, ud = o.mesh.userData;
     D.pauseT -= dt; D.flakT -= dt;
-    if (!locked || D.d > G.range || err > T.tol || D.mode === 'cool') { D.burstT = 0; return false; }
+    if (!locked || D.d > G.range || err > T.tol || D.mode === 'cool') { if (D.burstT > 0) burstEnd(o, D); D.burstT = 0; return false; }
+    if (D.ammo <= 0) { if (D.burstT > 0) burstEnd(o, D); D.burstT = 0; D.dryT += dt; return false; }   // dry: waits for the loaders
     const fl = G.flakRate && D.d > G.near;
     if (!fl) {   // tracer stream in bursts
       if (D.pauseT > 0) return false;
       if (T.spin && D.spin < 0.7) return false;   // rotary guns fire once the barrels are up to speed
-      if (D.burstT <= 0) { D.burstT = G.burst; D.roundT = 0; burstSound(o, D, G); }
+      if (D.burstT <= 0) { D.burstT = G.burst; D.roundT = 0; burstSound(o, D, G); blastDust(o, D); }
       D.burstT -= dt; D.roundT -= dt;
       let shots = 0;
-      while (D.roundT <= 0 && shots < 6) {
-        D.roundT += G.rate; shots++;
+      while (D.roundT <= 0 && shots < 6 && D.ammo > 0) {
+        D.roundT += G.rate; shots++; D.ammo--;
         const mz = ud.muzzles[(D.cell++) % ud.muzzles.length]; ud.pitch.localToWorld(_m.copy(mz));
         barrelDir(o, _n); const e = G.spread;
         _n.x += rnd(-e, e); _n.y += rnd(-e, e); _n.z += rnd(-e, e); _n.normalize();
-        env.shoot('ciws', o.def.side, _m.x, _m.y, _m.z, _n.x * G.speed, _n.y * G.speed, _n.z * G.speed, Math.min(G.range + 15, D.d + 25) / G.speed);
+        const life = Math.min(G.range + 15, D.d + 25) / G.speed;
+        env.shoot('ciws', o.def.side, _m.x, _m.y, _m.z, _n.x * G.speed, _n.y * G.speed, _n.z * G.speed, life);
+        if (D.cell % 2 === 0) tracer(_m, _n, G.speed, life + 0.25, o.def.side);   // every other round shows a streak
         muzzleFx(_m, _n, 0.6);
+        if (D.cell % 3 === 0) ejectFx(o, D);
       }
-      if (D.burstT <= 0) D.pauseT = G.pause;
+      if (D.burstT <= 0) { D.pauseT = G.pause; burstEnd(o, D); }
       D.flashT = 0.05;
       return true;
     }
     // airburst rounds at range
     if (D.flakT > 0) return false;
     D.flakT = G.flakRate + rnd(G.flakJit || 0) - Math.min(G.ramp || 0, t / 900);
+    if (T.mag) D.ammo = Math.max(0, D.ammo - T.mag.flak);
+    ejectFx(o, D);
     const err2 = (f.player ? (G.flakErrPlayer ?? G.flakErr) : G.flakErr) * (D.d / 100);
     const mz = ud.muzzles[(D.cell++) % ud.muzzles.length]; ud.pitch.localToWorld(_m.copy(mz));
     const bx = D.aim.x + rnd(-err2, err2), by = D.aim.y + rnd(-err2, err2), bz = D.aim.z + rnd(-err2, err2), d2 = Math.hypot(bx - _m.x, by - _m.y, bz - _m.z) || 1;
     const sp = 90;   // airburst rounds keep the old flak's flight
     env.shoot('flak', o.def.side, _m.x, _m.y, _m.z, (bx - _m.x) / d2 * sp, (by - _m.y) / d2 * sp, (bz - _m.z) / d2 * sp, d2 / sp);
+    _d.set(bx - _m.x, by - _m.y, bz - _m.z).divideScalar(d2); tracer(_m, _d, sp, d2 / sp, o.def.side, 0);   // the airburst round is a tracer too
     barrelDir(o, _n); muzzleFx(_m, _n, 1);
     snd.thud(env.hear ? env.hear(_m.x, _m.y, _m.z, 380) : 0.5);
     D.flashT = 0.07;
@@ -276,15 +297,71 @@ export function createDefence(env) {
   function burstSound(o, D, G) {
     const k = env.hear ? env.hear(o.mesh.position.x, o.mesh.position.y, o.mesh.position.z, 420) : 0.5;
     const ty = D.type;
-    if (ty === 'vads') snd.burst(75, G.burst, k, { band: 1800, tone: 75 });
+    if (ty === 'vads' || ty === 'vadst') snd.burst(75, G.burst, k, { band: 1800, tone: 75 });
     else if (ty === 'ciws') snd.burst(75, G.burst, k, { band: 2400, tone: 75, q: 0.7 });
     else if (ty === 'shilka') snd.burst(56, G.burst, k, { band: 1100, tone: 56 });
+    else if (ty === 'zu23') snd.burst(33, G.burst, k, { band: 1000, tone: 48, q: 1.0 });
     else snd.burst(10, G.burst, k, { band: 700, tone: 40, q: 1.2 });
   }
   function muzzleFx(p, dir, s) {
     if (!fx) return;
     fx.add.spawn(p.x + dir.x * 0.3, p.y + dir.y * 0.3, p.z + dir.z * 0.3, dir.x * 4, dir.y * 4, dir.z * 4, 0.05, 0.9 * s, 1.6 * s, 1, 0.8, 0.45, 1);
+    fx.add.spawn(p.x + dir.x * 0.9, p.y + dir.y * 0.9, p.z + dir.z * 0.9, dir.x * 9, dir.y * 9, dir.z * 9, 0.035, 0.5 * s, 0.9 * s, 1, 0.65, 0.3, 0.8);   // the flame tongue ahead of it
     if (Math.random() < 0.5) fx.mix.spawn(p.x + dir.x * 0.6, p.y + dir.y * 0.6, p.z + dir.z * 0.6, dir.x * 3 + rnd(-.4, .4), dir.y * 3 + rnd(0.2, 0.8), dir.z * 3 + rnd(-.4, .4), rnd(0.8, 1.6), 0.4 * s, 2.2 * s, .62, .6, .56, 0.35, -0.2, 1.5, 0.6);
+  }
+  // spent cases / links thrown out of the gun (bright brass flecks under gravity), only where someone can see them
+  function ejectFx(o, D) {
+    const ud = o.mesh.userData; if (!fx || !ud.eject || D.camD > 140) return;
+    ud.pitch.localToWorld(_e.copy(ud.eject)); ud.pitch.getWorldQuaternion(_q); _d.set(1, 0.6, 0.2).applyQuaternion(_q);
+    if (ud.eject.x < 0) _d.x = -_d.x;
+    for (let i = 0; i < 2; i++) fx.add.spawn(_e.x, _e.y, _e.z, _d.x * rnd(2, 4) + rnd(-.5, .5), _d.y * rnd(2, 4), _d.z * rnd(2, 4) + rnd(-.5, .5), rnd(0.4, 0.7), 0.09, 0.07, 0.95, 0.72, 0.32, 0.9, 9.8, 0.3);
+  }
+  // muzzle blast kicking dust off the ground when the barrels are low; gun smoke hanging round the mount after a burst
+  function blastDust(o, D) {
+    if (!fx || D.pitch > 0.35 || D.camD > 300) return;
+    const ud = o.mesh.userData; ud.pitch.localToWorld(_e.copy(ud.muzzles[0])); barrelDir(o, _n);
+    const gx = _e.x + _n.x * 2, gz = _e.z + _n.z * 2, gy = H(gx, gz);
+    if (_e.y - gy > 3.5) return;
+    for (let i = 0; i < 6; i++) fx.mix.spawn(gx + rnd(-1, 1), gy + 0.3, gz + rnd(-1, 1), _n.x * rnd(2, 5) + rnd(-1.5, 1.5), rnd(0.4, 1.6), _n.z * rnd(2, 5) + rnd(-1.5, 1.5), rnd(1.2, 2.4), 0.8, 3.2, .52, .46, .36, 0.45, 0.4, 1.4, 0.7);
+  }
+  function burstEnd(o, D) {
+    if (!fx || D.camD > 400) return;
+    const ud = o.mesh.userData; ud.pitch.localToWorld(_e.copy(ud.muzzles[0])); barrelDir(o, _n);
+    for (let i = 0; i < 3; i++) { const s = rnd(0.3, 1.6); fx.mix.spawn(_e.x - _n.x * s, _e.y - _n.y * s + 0.2, _e.z - _n.z * s, rnd(-.3, .3), rnd(0.3, 0.8), rnd(-.3, .3), rnd(2.5, 4.5), 0.7, 3.4, .66, .65, .62, 0.3, -0.15, 0.8, 1.0); }
+  }
+
+  // ------------------------------------------------------------------ tracer streaks (visual only; war.js owns the rounds)
+  // one InstancedMesh for every unit: a thin additive streak per tracer round, flying the same ballistic path as the
+  // war.js projectile it was fired with (gravity 2.2 m/s2 for 'ciws' rounds). Colours follow war.js's round colours.
+  const TR_N = 320, trGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0, 0.5);
+  const trMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+  const trMesh = new THREE.InstancedMesh(trGeo, trMat, TR_N); trMesh.frustumCulled = false; trMesh.count = 0; trMesh.renderOrder = 4; scene.add(trMesh);
+  trMesh.setColorAt(0, new THREE.Color(1, 1, 1));
+  const TR = { n: 0, p: new Float32Array(TR_N * 3), v: new Float32Array(TR_N * 3), life: new Float32Array(TR_N), side: new Uint8Array(TR_N), g: new Float32Array(TR_N) };
+  const _tm = new THREE.Matrix4(), _tq = new THREE.Quaternion(), _ts = new THREE.Vector3(), _tp = new THREE.Vector3(), _tz = new THREE.Vector3(0, 0, -1), _tc = [new THREE.Color(), new THREE.Color(0.5, 1, 1), new THREE.Color(1, 0.55, 0.2)];
+  function tracer(p, dir, speed, life, side, grav = 2.2) {
+    const i = TR.n < TR_N ? TR.n++ : (Math.random() * TR_N) | 0, i3 = i * 3;
+    TR.p[i3] = p.x + dir.x * 1.5; TR.p[i3 + 1] = p.y + dir.y * 1.5; TR.p[i3 + 2] = p.z + dir.z * 1.5;
+    TR.v[i3] = dir.x * speed; TR.v[i3 + 1] = dir.y * speed; TR.v[i3 + 2] = dir.z * speed; TR.life[i] = life; TR.side[i] = side; TR.g[i] = grav;
+  }
+  function updateTracers(dt) {
+    for (let i = TR.n - 1; i >= 0; i--) {
+      const i3 = i * 3;
+      TR.life[i] -= dt; TR.v[i3 + 1] -= TR.g[i] * dt;
+      TR.p[i3] += TR.v[i3] * dt; TR.p[i3 + 1] += TR.v[i3 + 1] * dt; TR.p[i3 + 2] += TR.v[i3 + 2] * dt;
+      if (TR.life[i] <= 0 || TR.p[i3 + 1] < H(TR.p[i3], TR.p[i3 + 2])) {   // spent: move the last one into its place
+        const j = --TR.n, j3 = j * 3;
+        for (let k = 0; k < 3; k++) { TR.p[i3 + k] = TR.p[j3 + k]; TR.v[i3 + k] = TR.v[j3 + k]; }
+        TR.life[i] = TR.life[j]; TR.side[i] = TR.side[j]; TR.g[i] = TR.g[j];
+      }
+    }
+    for (let i = 0; i < TR.n; i++) {
+      const i3 = i * 3, vx = TR.v[i3], vy = TR.v[i3 + 1], vz = TR.v[i3 + 2], sp = Math.hypot(vx, vy, vz) || 1;
+      _tp.set(TR.p[i3], TR.p[i3 + 1], TR.p[i3 + 2]); _ts.set(vx / sp, vy / sp, vz / sp); _tq.setFromUnitVectors(_tz, _ts);
+      const len = Math.min(7, sp * 0.04);
+      _ts.set(0.07, 0.07, len); _tm.compose(_tp, _tq, _ts); trMesh.setMatrixAt(i, _tm); trMesh.setColorAt(i, _tc[TR.side[i]] || _tc[0]);
+    }
+    trMesh.count = TR.n; trMesh.instanceMatrix.needsUpdate = true; if (trMesh.instanceColor) trMesh.instanceColor.needsUpdate = true;
   }
 
   // ------------------------------------------------------------------ missiles
@@ -504,9 +581,92 @@ export function createDefence(env) {
     return firing;
   }
 
+  // ------------------------------------------------------------------ the crews (crew.js figures; models.js crewSpots)
+  // gunners ride the mount and look where the gun looks (scanning the sky while it searches); commanders stand in their
+  // hatches and duck while the guns fire; the spotter turns to the target and points it out, then covers his ears; the
+  // loaders keep the gun fed - walk to the ready-use boxes, pick one up, carry it to the gun, heave it up, go again
+  // while there is room (tune.js mag.trip rounds a box). The TALON's TICK climbs onto the deck and feeds the packs.
+  const WALK = 1.5, CARRY = 1.1;
+  function crewStep(o, D, T, f, firing, dt, t, show) {
+    const ud = o.mesh.userData, M = T.mag, hi = ud.hi;
+    let tb = null, tel = 0.3;   // the target's bearing / elevation in the unit's frame
+    if (f && hi) { _e.copy(f.p); hi.worldToLocal(_e); tb = Math.atan2(-_e.x, -_e.z); tel = Math.atan2(_e.y - 1.6, Math.hypot(_e.x, _e.z)); }
+    const loud = firing || D.burstT > 0 || D.flashT > -0.15;
+    const need = () => M && D.ammo + D.inbound * M.trip <= M.rounds - M.trip;
+    for (const c of ud.crew) {
+      const sp = c.spot, fig = c.fig, g = fig.g;
+      if (c.tick) { tickStep(o, D, T, c, f, tb, dt, t, show); continue; }
+      if (sp.role === 'gunner') {
+        if (show) fig.pose('sit', t, { look: f ? [sp.second ? -0.2 : 0, clamp(D.pitch * 0.7, -0.3, 0.7)] : [Math.sin(t * 0.4 + g.id) * (sp.second ? 0.9 : 0.4), 0.15 + Math.sin(t * 0.3) * 0.1], lean: firing ? 0.07 : 0, grip: firing ? Math.sin(t * 50) * 0.03 : 0 });
+        continue;
+      }
+      if (sp.role === 'hatch') {
+        const onYaw = g.parent === ud.yaw, rel = tb === null ? 0 : onYaw ? angDiff(D.yaw, tb) : tb;
+        if (show) fig.pose('hatch', t, { look: f ? [clamp(rel, -1.2, 1.2), clamp(tel, -0.2, 0.7)] : [Math.sin(t * 0.35 + g.id) * 1.1, 0.3 + Math.sin(t * 0.23) * 0.15], duck: loud && !sp.low ? 0.35 : 0 });
+        continue;
+      }
+      // on the ground: the spotter and the loaders
+      const face = want => { g.rotation.y += angDiff(g.rotation.y, want) * Math.min(1, 4 * dt); };
+      if (sp.role === 'spotter') {
+        if (tb !== null) face(tb);
+        if (show) fig.pose(loud ? 'kneel' : 'stand', t, { look: [tb === null ? Math.sin(t * 0.3) * 0.8 : angDiff(g.rotation.y, tb), tb === null ? 0.25 : clamp(tel, -0.2, 0.75)], ears: loud, point: f && !loud && D.lockT < T.lock ? [0, clamp(tel, 0, 0.6)] : null });
+        continue;
+      }
+      // loader
+      const walkTo = (x, z, v) => { const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz); if (d < 0.05) return true; const s = Math.min(d, v * dt); c.x += dx / d * s; c.z += dz / d * s; face(Math.atan2(-dx, -dz)); c.ph = (c.ph || 0) + s * 4.2; g.position.x = c.x; g.position.z = c.z; return d - s < 0.05; };
+      c.t -= dt;
+      switch (c.job) {
+        case 'idle':
+          if (need()) { c.job = 'fetch'; D.inbound++; break; }
+          if (tb !== null) face(tb);
+          if (show) fig.pose(loud && Math.hypot(c.x, c.z) < 6 ? 'kneel' : 'stand', t, { look: [tb === null ? Math.sin(t * 0.25 + g.id) * 0.9 : angDiff(g.rotation.y, tb), tb === null ? 0.2 : clamp(tel, -0.2, 0.7)], ears: loud });
+          break;
+        case 'fetch': if (walkTo(sp.ammo[0], sp.ammo[1], WALK)) { c.job = 'pick'; c.t = 0.7; } if (show) fig.pose(c.job === 'pick' ? 'kneel' : 'walk', t, { phase: c.ph, look: [0, -0.3] }); break;
+        case 'pick': if (show) fig.pose('kneel', t, { look: [0, -0.5] }); if (c.t <= 0) c.job = 'bring'; break;
+        case 'bring': if (walkTo(sp.gun[0], sp.gun[1], CARRY)) { c.job = 'load'; c.t = 1.3; face(Math.atan2(sp.gun[0], sp.gun[1])); } if (show) fig.pose('carry', t, { phase: c.ph, look: [0, 0] }); break;
+        case 'load':
+          if (show) fig.pose('load', t, { lift: (1.3 - c.t) / 1.3 * Math.PI - Math.PI / 2, look: [0, 0.4] });
+          if (c.t <= 0) { D.inbound = Math.max(0, D.inbound - 1); D.ammo = Math.min(M.rounds, D.ammo + M.trip); D.fed = (D.fed || 0) + 1; if (need()) { c.job = 'fetch'; D.inbound++; } else c.job = 'back'; }
+          break;
+        case 'back': if (walkTo(sp.home[0], sp.home[1], WALK)) c.job = 'idle'; if (show) fig.pose('walk', t, { phase: c.ph, look: [0, 0] }); break;
+        default: c.job = 'idle';
+      }
+    }
+  }
+  // the TICK: idles on the ground beside the truck, climbs onto the deck to feed the gun belts / missile packs, comes down
+  function tickStep(o, D, T, c, f, tb, dt, t, show) {
+    const sp = c.spot, fig = c.fig, g = fig.g, M = T.mag;
+    const work = (D.cellsSpent > 0 && D.mslCd > 0) || (M && D.ammo < M.rounds * 0.7);
+    const target = work ? 1 : 0, was = c.s;
+    c.s += clamp(target - c.s, -dt * 0.6, dt * 0.6);
+    const [hx, hy, hz] = sp.home, [kx, ky, kz] = sp.deck, s = c.s;
+    g.position.set(hx + (kx - hx) * s, hy + (ky - hy) * s + Math.sin(Math.PI * s) * 0.5, hz + (kz - hz) * s);
+    const moving = Math.abs(c.s - was) > 1e-5;
+    if (moving) { const dir = target ? Math.atan2(-(kx - hx), -(kz - hz)) : Math.atan2(kx - hx, kz - hz); g.rotation.y += angDiff(g.rotation.y, dir) * Math.min(1, 5 * dt); }
+    else if (s > 0.99) g.rotation.y += angDiff(g.rotation.y, Math.atan2(kx, kz - 2.3)) * Math.min(1, 3 * dt);   // on deck: faces the gun module
+    else if (tb !== null) g.rotation.y += angDiff(g.rotation.y, tb) * Math.min(1, 2 * dt);
+    if (s > 0.99 && work && M && D.ammo < M.rounds) D.ammo = Math.min(M.rounds, D.ammo + M.trip * dt / 2.5);
+    if (!show) return;
+    if (moving) fig.pose('walk', t);
+    else if (s > 0.99 && work) fig.pose('work', t, { look: [0, 0.6] });
+    else fig.pose('idle', t, { look: tb === null ? null : [angDiff(g.rotation.y, tb), 0.3] });
+  }
+
   // ------------------------------------------------------------------ tells and moving parts
   function animate(o, D, T, f, firing, dt, t) {
     const ud = o.mesh.userData;
+    // the stand-in (LOD far level) mirrors the turret; the crews are drawn near the camera only
+    if (ud.loYaw) { ud.loYaw.rotation.y = D.yaw; ud.loPitch.rotation.x = D.pitch; }
+    const show = D.camD < 170;
+    if (ud.crew && ud.crew.length && show !== D.crewShown) { D.crewShown = show; for (const c of ud.crew) c.fig.g.visible = show; }
+    if (ud.crew && ud.crew.length) crewStep(o, D, T, f, firing, dt, t, show);
+    // LANCE: the sensor head sweeps the sky searching, settles on the target tracking
+    if (ud.sens) { const want = f ? Math.sin(t * 7) * 0.03 : Math.sin(t * 0.7 + D.radarA) * 0.5; ud.sens.rotation.y += (want - ud.sens.rotation.y) * Math.min(1, 3 * dt); ud.sens.rotation.x = f ? 0 : Math.sin(t * 0.45) * 0.12; }
+    // damaged: smoke from the engine deck / mount, the odd spark
+    if (ud.state === 'damaged' && fx && D.camD < 600) {
+      D.smokeT -= dt;
+      if (D.smokeT <= 0) { D.smokeT = 0.12; o.mesh.localToWorld(_e.set(rnd(-0.6, 0.6), (ud.h || 2) * 0.55, rnd(-0.5, 1.5))); const g = rnd(.12, .22); fx.mix.spawn(_e.x, _e.y, _e.z, rnd(-.3, .3), rnd(1.2, 2.2), rnd(-.3, .3), rnd(3, 5), 0.8, 4.5, g, g, g, 0.5, -0.2, 0.6, 1.2); if (Math.random() < 0.08) fx.add.spawn(_e.x, _e.y, _e.z, rnd(-3, 3), rnd(2, 5), rnd(-3, 3), rnd(0.3, 0.6), 0.2, 0.1, 1, .7, .3, 1, 12, 0.4); }
+    }
     // radar: spins while searching; the dish (Shilka) / tracking antenna (Talon) points and nods while tracking
     if (ud.radar) {
       if (D.type === 'shilka') {
@@ -551,6 +711,21 @@ export function createDefence(env) {
     }
   }
 
+  // a knocked-out unit: the ready rounds cook off for a while (pops, sparks, the odd tracer whizzing out), then it
+  // smoulders (war.js's explosion lit the fire). The wreck stays on its slot until a new gun is built there.
+  function wreck(o, dt) {
+    const D = o.def; if (D.wreckT < 0) { D.wreckT = 0; D.cook = T_COOK(o); }
+    D.wreckT += dt; if (!fx || D.wreckT > D.cook) return;
+    if (Math.random() > dt * 5 * (1 - D.wreckT / D.cook)) return;
+    o.mesh.localToWorld(_e.set(rnd(-0.8, 0.8), rnd(0.8, 1.8), rnd(-1, 1)));
+    fx.add.spawn(_e.x, _e.y, _e.z, 0, 0, 0, 0.08, rnd(1, 2), rnd(2, 3), 1, .75, .4, 1);
+    for (let i = 0; i < 5; i++) fx.add.spawn(_e.x, _e.y, _e.z, rnd(-9, 9), rnd(3, 14), rnd(-9, 9), rnd(0.4, 0.9), 0.25, 0.15, 1, rnd(.6, .9), .3, 1, 12, 0.4);
+    fx.mix.spawn(_e.x, _e.y, _e.z, rnd(-.5, .5), rnd(1, 2), rnd(-.5, .5), rnd(2, 4), 0.8, 3, .15, .14, .13, 0.5, -0.3, 1, 0.8);
+    if (Math.random() < 0.3) { _n.set(rnd(-1, 1), rnd(0.2, 1), rnd(-1, 1)).normalize(); tracer(_e, _n, rnd(60, 110), rnd(0.6, 1.4), D.side); }
+    const k = env.hear ? env.hear(_e.x, _e.y, _e.z, 350) : 0.3; if (k > 0.03) snd.thud(k * 0.6);
+  }
+  const T_COOK = o => o.def.T.gun ? rnd(7, 12) : o.def.T.msl ? rnd(4, 7) : 0;
+
   // ------------------------------------------------------------------ the frame
   function tick(dt) {
     if (!(dt > 0)) dt = 0;
@@ -561,7 +736,9 @@ export function createDefence(env) {
       const gone = o.dead || !o.mesh.parent;
       if (gone && o.def.beam) { const B = o.def.beam; B.g.visible = B.spot.visible = B.line.visible = false; B.st = 'idle'; }
       if (!o.mesh.parent) units.delete(o);
+      else if (o.dead && !o.ship) wreck(o, dt);
     }
+    updateTracers(dt);
     snd.warn(warnMode, warnP); snd.laser(laserSt, laserP, laserK);
     rwrPublish(warnMode, warnP, env.time()); rwrBegin();   // CM: the cockpits' radar warning picture for this frame
     warnMode = 0; warnP = 0; laserSt = 0; laserP = 0; laserK = 0;
@@ -569,7 +746,7 @@ export function createDefence(env) {
   function reset() {
     for (const m of missiles) scene.remove(m.mesh); missiles.length = 0;
     for (const o of units) if (o.def.beam) { const B = o.def.beam; scene.remove(B.g, B.spot, B.line); }
-    units.clear(); snd.silence(); resetCM();
+    units.clear(); snd.silence(); resetCM(); TR.n = 0; trMesh.count = 0;
   }
-  return { pick, model, attach, refitCarrier, refitShip, update, tick, reset, units, missiles, los, smokeAlong, DEF, CM };
+  return { pick, model, attach, refitCarrier, refitShip, update, tick, reset, units, missiles, los, smokeAlong, DEF, CM, tracers: () => TR };
 }

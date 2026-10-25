@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { Kit, KITMAT, CAMO, COL } from './meshkit.js';
 import { buildWeaponModel } from './weaponmodels.js';
+import { m67Geometry, m67Into, grenadeMaterial } from './grenademodel.js';   // ngc/marine-polish
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const sstep = t => t * t * (3 - 2 * t);
@@ -118,7 +119,17 @@ export function buildMarine(o = {}) {
       k.cyl(0.045, 0.045, 0.16, od, [s * 0.16, -0.03, 0.11], 'y', 8);                   // canteen in its cover
       k.cyl(0.02, 0.02, 0.02, COL.black, [s * 0.16, 0.06, 0.11], 'y', 6);                // cap
     }
-    k.box(0.07, 0.07, 0.05, od, [0.0, 0.0, 0.14]);                                      // butt-pack / poncho roll
+    // ngc/marine-polish: the rest of a 1980 Marine's LC-2 belt - an M67 on the side of each ammo pouch (held by the
+    // pouch's side strap, the spoon against the pouch: TM 9-1330-200 / FM 21-75), the M7 bayonet in its M8A1 scabbard on
+    // the left hip, the folding entrenching tool in its LC-1 carrier at the back right, the butt pack / poncho behind
+    if (o.frags !== 0) for (const s of [-1, 1]) { m67Into(k, [s * 0.162, -0.005, -0.14], true); k.box(0.012, 0.02, 0.07, web, [s * 0.15, 0.035, -0.14]); }
+    k.box(0.04, 0.27, 0.022, 0x3f4430, [-0.185, -0.12, -0.05], [0, 0, 0.06]);              // M8A1 scabbard (OD fibreglass)
+    k.box(0.022, 0.03, 0.024, 0x6a6a62, [-0.19, -0.265, -0.05], [0, 0, 0.06]);            // its steel tip
+    k.box(0.028, 0.11, 0.026, 0x1c1c1a, [-0.177, 0.06, -0.05], [0, 0, 0.06]);              // M7 handle (black grips) + guard
+    k.box(0.05, 0.012, 0.03, 0x55554e, [-0.178, 0.0, -0.05]);
+    k.box(0.14, 0.21, 0.055, od, [0.085, -0.07, 0.15]);                                    // LC-1 entrenching tool carrier
+    k.box(0.03, 0.06, 0.02, 0x2a2a20, [0.085, 0.07, 0.15]);                                // the e-tool's handle end
+    k.box(0.1, 0.08, 0.06, od, [-0.075, 0.0, 0.145]);                                      // butt pack / poncho roll
   });
   // spine (stomach): flak vest lower half
   put('spine', k => {
@@ -138,7 +149,13 @@ export function buildMarine(o = {}) {
     for (const s of [-1, 1]) { k.box(0.045, 0.32, 0.012, web, [s * 0.1, 0.07, -0.142]); k.box(0.045, 0.32, 0.012, web, [s * 0.1, 0.07, 0.142]); k.box(0.045, 0.012, 0.27, web, [s * 0.1, 0.23, 0]); }   // suspenders
     k.box(0.07, 0.08, 0.04, od, [-0.1, 0.11, -0.165]);                                                         // first aid pouch on the left suspender
     for (const s of [-1, 1]) k.sphere(0.065, cloth, [s * 0.19, 0.14, 0], 7, null, [0, 0, 0], 'local');         // shoulders
-    if (o.pack) { k.box(0.32, 0.36, 0.16, od, [0, 0.05, 0.22]); k.box(0.3, 0.08, 0.17, od, [0, 0.25, 0.22], [0.2, 0, 0]); for (const s of [-1, 1]) k.box(0.08, 0.14, 0.06, od, [s * 0.12, -0.03, 0.33]); }
+    if (o.pack) {   // ALICE medium pack (LC-1): main bag, top flap, three outer pockets, cargo straps, a poncho roll under it
+      k.box(0.32, 0.36, 0.16, od, [0, 0.05, 0.22]); k.box(0.3, 0.08, 0.17, od, [0, 0.25, 0.22], [0.2, 0, 0]);
+      for (const s of [-1, 1]) k.box(0.09, 0.14, 0.06, od, [s * 0.11, -0.03, 0.33]);
+      k.box(0.09, 0.12, 0.055, od, [0, 0.0, 0.325]);
+      for (const s of [-1, 1]) k.box(0.025, 0.4, 0.012, web, [s * 0.07, 0.07, 0.305]);    // flap straps
+      k.cyl(0.055, 0.055, 0.34, 0x4f5236, [0, -0.17, 0.22], 'x', 8);                       // poncho / liner roll
+    }
   });
   put('neck', k => { k.cyl(0.05, 0.055, 0.1, skin, [0, 0.03, 0], 'y', 8); });
   // head + M1 helmet with the Mitchell cover, band, chin straps hanging, and the bug-juice bottle in the band
@@ -224,6 +241,20 @@ function stancePose(st, p, out) {
   } else if (st === 'down') {   // wounded / unconscious, on the back
     E.pelvis[0] = Math.PI / 2 - 0.05; out.pos[1] = 0.13; out.pos[2] = -0.6;
     E.chest[0] = 0.1; E.head[0] = -0.3; E.head[1] = 0.6; E.thighL[2] = -0.15; E.thighR[0] = 0.4; E.shinR[0] = -0.8; E.thighR[2] = 0.1; E.footL[0] = -0.6;
+  } else if (st === 'sit') {   // ngc/marine-polish: on a troop seat / bench (the seat 0.45 m over the feet), knees apart
+    E.thighL[0] = E.thighR[0] = 1.5; E.shinL[0] = E.shinR[0] = -1.45; E.footL[0] = E.footR[0] = -0.05;
+    E.thighL[2] = -0.14; E.thighR[2] = 0.14; E.thighL[1] = 0.12; E.thighR[1] = -0.12;
+    out.pos[1] = 0.52; out.pos[2] = 0.06; E.spine[0] = -0.12; E.chest[0] = -0.04; E.neck[0] = 0.08;
+  } else if (st === 'climb') {   // ngc/marine-polish: on a ladder - hand over hand, a knee up to the next rung (p.climb: m climbed)
+    const c = (p.climb || 0) / 0.6 * Math.PI * 2, a = Math.sin(c);
+    E.thighL[0] = 0.45 + 0.4 * a; E.thighR[0] = 0.45 - 0.4 * a; E.shinL[0] = -0.7 - 0.5 * a; E.shinR[0] = -0.7 + 0.5 * a;
+    E.footL[0] = 0.25; E.footR[0] = 0.25; out.pos[1] = 0.9; out.pos[2] = 0.08; E.spine[0] = -0.06; E.neck[0] = 0.15;
+  } else if (st === 'swim') {   // ngc/marine-polish: breaststroke, head up (p.swim = { ph 0..1, speed })
+    const sw = p.swim || {}, mv = clamp((sw.speed || 0) / 0.6, 0, 1), ph = (sw.ph || 0) * Math.PI * 2, kick = Math.max(0, Math.sin(ph + 2.2));
+    E.pelvis[0] = -(0.35 + 0.75 * mv); out.pos[1] = 1.0 + 0.2 * mv; out.pos[2] = 0.35 * mv;
+    E.neck[0] = 0.35 + 0.5 * mv; E.head[0] = 0.15 * mv;
+    E.thighL[0] = E.thighR[0] = 0.15 + (0.25 + 0.5 * mv) * kick; E.shinL[0] = E.shinR[0] = -0.3 - 1.3 * kick;
+    E.thighL[2] = -0.12 - 0.35 * kick * mv; E.thighR[2] = 0.12 + 0.35 * kick * mv; E.footL[0] = E.footR[0] = 0.6;
   }
   // lean: roll the spine and chest (prone: roll the whole body a little)
   const lean = p.lean || 0;
@@ -234,7 +265,7 @@ function stancePose(st, p, out) {
 }
 const _poseA = { e: {}, pos: [0, 0, 0] }, _poseB = { e: {}, pos: [0, 0, 0] };
 const HANDS_RATE = 4;   // 1 / s: ~0.25 s to let go of the rifle (or take it up again)
-const GREN_GEO = new THREE.SphereGeometry(0.034, 8, 6).scale(1, 1.2, 1), GREN_MAT = new THREE.MeshLambertMaterial({ color: 0x4d5636 });   // M67, olive drab
+const GREN_GEO = m67Geometry(), GREN_MAT = grenadeMaterial();   // M67 (ngc/marine-polish: grenademodel.js, fuze, spoon and ring)
 const _hR = new THREE.Vector3(), _hL = new THREE.Vector3(), _pR = new THREE.Vector3(), _pL = new THREE.Vector3(), _mw = new THREE.Vector3(), _pch = new THREE.Vector3();
 // arms: solve shoulder -> elbow -> hand to a target (all in WORLD space), elbow toward `pole`
 function ikArm(sk, side, target, pole) {
@@ -260,7 +291,7 @@ export function poseSkeleton(sk, pose, dt = 0.016) {
   const B = sk.bones, st = sk.state;
   st.t += dt;
   const from = pose.stanceT < 1 ? pose.stanceFrom : pose.stance, to = pose.stanceT < 1 ? pose.stanceTo : pose.stance, k = pose.stanceT < 1 ? sstep(pose.stanceT) : 1;
-  const st2 = pose.down ? 'down' : null;
+  const st2 = pose.down ? 'down' : pose.seat ? 'sit' : pose.climb != null ? 'climb' : pose.swim ? 'swim' : null;   // (ngc/marine-polish: seated, ladder, swimming)
   stancePose(st2 || from, pose, _poseA); stancePose(st2 || to, pose, _poseB);
   for (const n of POSE_BONES) {
     const ea = _poseA.e[n], eb = _poseB.e[n];
@@ -319,6 +350,13 @@ export function poseSkeleton(sk, pose, dt = 0.016) {
       _b.set(0.02, 0.02, 0.2); B.chest.localToWorld(_b); sk.root.worldToLocal(_b);
       B.chest.getWorldQuaternion(_wq); sk.root.getWorldQuaternion(_pq); _q.copy(_pq.invert().multiply(_wq)).multiply(_q2.setFromEuler(_e.set(1.35, 0, 0.55, 'XYZ')));
       g.position.lerp(_b, sling); g.quaternion.slerp(_q, sling);
+    }
+    // ngc/marine-polish: seated (a troop seat, a bench) the rifle stands upright between the knees, the butt on the floor,
+    // muzzle up, both hands on it (the way a squad rides in a CH-46 or a Huey)
+    if (pose.seat && sling <= 0) {
+      const bt = W.anchors.butt || [0, -0.1, 0.3];
+      _q.setFromEuler(_e.set(Math.PI / 2 - 0.12, 0, 0, 'XYZ'));
+      g.quaternion.copy(_q); g.position.set(0, 0.03, -0.42).sub(_v.set(bt[0], bt[1], bt[2]).applyQuaternion(_q));
     }
     if (pose.weaponState) W.setState(pose.weaponState);
     g.updateMatrixWorld(true);

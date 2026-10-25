@@ -41,6 +41,8 @@ const CSS = `
 .ngc-med .mi .n{position:absolute;right:3px;top:1px;color:#ff8;font-size:11px}
 .ngc-med .mi.food{background:rgba(44,74,92,.4)}.ngc-med .mi.rw{background:rgba(30,90,110,.4)}
 .ngc-med .cond div{padding:1px 0;border-bottom:1px solid #123a40;font-size:12px}.ngc-med .cond .r{color:#f66}.ngc-med .cond .o{color:#fb4}.ngc-med .cond .g{color:#6f8}.ngc-med .cond .c{color:#5ef}
+.ngc-med .mi.next{border-color:#ff4;box-shadow:0 0 10px #ff48;animation:ngcNext 1.2s ease-in-out infinite}@keyframes ngcNext{50%{box-shadow:0 0 2px #ff42}}
+.ngc-med .nextup .nx{color:#ff8;font-size:12.5px;padding:2px 0}.ngc-med .nextup .nx small{color:#cb8}.ngc-med .nextup>small{color:#8ab;font-size:10px}.ngc-med .nextup .nx.g{color:#6f8}
 .ngc-med .eff{display:grid;grid-template-columns:1fr auto;gap:0 8px;font-size:12px}.ngc-med .eff span{color:#6aa}.ngc-med .eff b{font-weight:normal;color:#fff}.ngc-med .eff b.bad{color:#fb4}.ngc-med .eff b.vbad{color:#f66}
 .ngc-med .act{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);width:440px;max-width:90%;background:rgba(0,14,26,.95);border:1px solid #4aa;padding:6px 10px;display:none}
 .ngc-med .act.on{display:block}.ngc-med .act .p{height:8px;border:1px solid #4aa;margin-top:4px}.ngc-med .act .p i{display:block;height:100%;background:#ff8;box-shadow:0 0 8px #ff8}
@@ -85,6 +87,8 @@ function figureSVG(M, opt = {}) {
     const R = sum[r], f = R.hp / R.max;
     s += `<path class="reg${opt.sel === r ? ' sel' : ''}" data-region="${r}" d="${FIG[r]}" fill="${R.lost ? 'url(#hatch)' : hpColor(f)}" fill-opacity="${R.blacked ? 1 : 0.82}"${R.blacked ? ' stroke="#f33"' : ''}/>`;
   }
+  // ngc/marine-polish: the part the next step goes on (opt.hint), outlined
+  if (opt.hint && FIG[opt.hint]) s += `<path class="hint" d="${FIG[opt.hint]}" fill="none" stroke="#ff4" stroke-width="2.2" stroke-dasharray="5 3" pointer-events="none"/>`;
   // anatomy hints
   s += `<path d="M100 92V170M80 128Q100 136 120 128M76 214H124" stroke="#0005" fill="none"/>`;
   // dressings, tourniquets, splints, wounds
@@ -162,13 +166,19 @@ export function createMedUI(opt) {
     for (const o of I.walk(opt.inv)) { const d = ITEMS[o.id]; if (!d.med || o._gone) continue; const k = d.id; if (!out.has(k)) out.set(k, { d, items: [] }); out.get(k).items.push(o); }
     return [...out.values()].sort((a, b) => (a.d.cat === 'med' ? 0 : 1) - (b.d.cat === 'med' ? 0 : 1));
   }
+  // ngc/marine-polish: opt.advise(med, by) -> { item, region, label, time } | null - the NEXT STEP by the 1980 first-aid
+  // doctrine (the host passes fieldcare.js pickAid: FM 21-11). Shown over CONDITIONS; its item glows in the list and its
+  // body part is outlined on the figure, so the screen says what to drag where.
+  let nextUp = null;
   function sideHTML() {
     const m = M(), b = by();
+    nextUp = opt.advise && !m.dead && !m.action ? opt.advise(m, b) : null;
+    const nxId = nextUp ? (typeof nextUp.item === 'object' ? nextUp.item.id : nextUp.item) : null;
     const list = medItems().map(({ d, items }) => {
       const t = d.med.time ? (b.self ? d.med.time.self : d.med.time.buddy) : 0; const ts = typeof t === 'object' ? `${t.arm}/${t.leg} S` : t + ' S';
       const n = items.reduce((s, o) => s + (o.n || 1) * (o.uses || 1), 0); const water = d.water ? ` ${(items.reduce((s, o) => s + o.water, 0) / 1000).toFixed(1)} L` : '';
       const lock = d.med.who === 'corpsman' && b.skill !== 'corpsman';
-      return `<div class="mi ${d.cat === 'food' || d.cat === 'drink' ? 'food' : ''} ${d.era === 'rw' ? 'rw' : ''}" data-id="${d.id}" style="${lock ? 'opacity:.45' : ''}"><div class="ico">${iconSVG(d.id, 32, 32)}</div><div class="t">${esc(d.short || d.name)}<small>${ts}${lock ? ' &middot; CORPSMAN' : ''}${water}</small></div><span class="n">${d.water ? '' : 'x' + n}</span></div>`;
+      return `<div class="mi ${d.cat === 'food' || d.cat === 'drink' ? 'food' : ''} ${d.era === 'rw' ? 'rw' : ''}${d.id === nxId ? ' next' : ''}" data-id="${d.id}" style="${lock ? 'opacity:.45' : ''}"><div class="ico">${iconSVG(d.id, 32, 32)}</div><div class="t">${esc(d.short || d.name)}<small>${ts}${lock ? ' &middot; CORPSMAN' : ''}${water}</small></div><span class="n">${d.water ? '' : 'x' + n}</span></div>`;
     }).join('') || '<div style="color:#678">NO MEDICAL ITEMS</div>';
     let cond = [];
     const sum = m.summary();
@@ -187,12 +197,15 @@ export function createMedUI(opt) {
       ['VISION', `TUNNEL ${(mo.vision.tunnel * 100).toFixed(0)}% GREY ${(mo.vision.grey * 100).toFixed(0)}% BLUR ${(mo.vision.blur * 100).toFixed(0)}%`, cl(mo.vision.tunnel + mo.vision.grey, 0.2, 0.8)]];
     const feed = m.log.filter(e => FEEDTXT[e.type]).slice(-6).reverse().map(e => `<div><b>${mmss(e.t)}</b> ${esc(FEEDTXT[e.type](e))}</div>`).join('');
     side.innerHTML = `<div class="sec"><h4>MEDICAL<span>${by().self ? 'SELF AID' : by().skill === 'corpsman' ? 'CORPSMAN' : 'BUDDY AID'}</span></h4><div class="medlist">${list}</div></div>
+      ${opt.advise ? `<div class="sec nextup"><h4>NEXT STEP<span>FM 21-11</span></h4>${m.action ? `<div class="nx">WORKING: ${esc(m.action.label)} &middot; ${Math.round(m.action.t)} / ${Math.round(m.action.T)} S</div>`
+        : nextUp ? `<div class="nx">${esc(nextUp.label)}${nextUp.region ? ' &rarr; ' + REGION[nextUp.region].name : ''} <small>(${nextUp.time} S)</small></div><small>DRAG THE GLOWING ITEM ONTO THE OUTLINED PART${opt.adviseKey ? ' &middot; OR ' + opt.adviseKey : ''}</small>`
+        : `<div class="nx g">${m.dead ? '-' : 'NOTHING MORE FROM THIS KIT'}</div>`}</div>` : ''}
       <div class="sec cond"><h4>CONDITIONS</h4>${cond.join('')}</div>
       <div class="sec"><h4>EFFECTS</h4><div class="eff">${eff.map(([k, v, c]) => `<span>${k}</span><b class="${c}">${v}</b>`).join('')}</div></div>
       <div class="sec feed"><h4>LOG</h4>${feed || '<div>-</div>'}</div>`;
   }
   function figure() {
-    fig.innerHTML = figureSVG(M(), { sel: S.sel });
+    fig.innerHTML = figureSVG(M(), { sel: S.sel, hint: nextUp && nextUp.region });
     let d = root.querySelector('.dead'); if (M().dead && !d) { d = document.createElement('div'); d.className = 'dead'; d.textContent = 'KIA'; $('.body').appendChild(d); } else if (!M().dead && d) d.remove();
     if (S.sel) {   // wounds of the selected part as an SVG callout
       const r = S.sel, bl = M().bleeds.filter(b => b.region === r);

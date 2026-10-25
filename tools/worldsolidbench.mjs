@@ -4,7 +4,8 @@
 import * as world from '../game/js/world.js';
 import * as N from '../game/js/world/net.js';
 import { createWorldSolid } from '../game/js/world/solid.js';
-import { townItems } from '../game/js/world/layout.js';
+import { townItems, zoneItems } from '../game/js/world/layout.js';
+import { DOORS } from '../game/js/interiors/doors.js';
 
 let pass = 0, fail = 0;
 const check = (ok, name, got = '') => { ok ? pass++ : fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name.padEnd(66)} ${got}`); };
@@ -17,7 +18,7 @@ function push(o, parts) {
   let n = 0;
   for (const b of parts) {
     if (o.y1 < b.y0 || o.y0 > b.y1) continue;
-    if (b.r !== undefined) { const dx = o.x - b.x, dz = o.z - b.z, d = Math.hypot(dx, dz), m = o.r + b.r; if (d < m) { o.x = b.x + dx / (d || 1) * m; o.z = b.z + dz / (d || 1) * m; n++; } continue; }
+    if (b.r !== undefined && b.hl === undefined) { const dx = o.x - b.x, dz = o.z - b.z, d = Math.hypot(dx, dz), m = o.r + b.r; if (d < m) { o.x = b.x + dx / (d || 1) * m; o.z = b.z + dz / (d || 1) * m; n++; } continue; }
     const c = Math.cos(b.yaw), s = Math.sin(b.yaw), dx = o.x - b.x, dz = o.z - b.z, lx = dx * c - dz * s, lz = dx * s + dz * c;
     const qx = Math.max(-b.hw, Math.min(b.hw, lx)), qz = Math.max(-b.hl, Math.min(b.hl, lz)), ex = lx - qx, ez = lz - qz, d = Math.hypot(ex, ez);
     if (d >= o.r) continue;
@@ -64,5 +65,37 @@ if (br) {
   check(par.length >= 2, 'the bridge has parapets', `${par.length}`);
   check(S.surface(x, z) !== null, 'the deck is a road surface', S.surface(x, z));
 } else check(false, 'found a bridge');
+
+// 4. ngc/integ: every outside door of an enterable building in the control zone (villages and cottages on the islands'
+// re-fitted ground, TERRAIN) can be walked in from the ground, the door open: a walker (r 0.3, 1.8 m tall) on the ground
+// 2.5 m out (or at the foot of the steps) walks square at the doorway, climbing at most 0.45 m a step (footsim STEP),
+// pushed by walls and furniture, and must get 1.3 m inside. (The wild lands are not held to it: a town house on its
+// platform can stand 4 m over the street.)
+function walkIn(S, R, d) {
+  const it = R.it, c = Math.cos(it.yaw || 0), sn = Math.sin(it.yaw || 0), w = (u, v) => [it.x + c * u + sn * v, it.z - sn * u + c * v], nv = Math.sign(d.v) || 1;
+  const D = DOORS.get(R.P.key + '#' + d.id); if (D) { D.a = 1; DOORS.place(D); }
+  const ground = (x, z, y) => { const g = world.islandH(x, z), f = S.floor(x, z, y, 0.45); return f === null ? g : Math.max(g, f); };
+  const foot = Math.max(2.5, ...R.P.floors.filter(f => f.kind === 'steps' && f.u0 < d.u && f.u1 > d.u).map(f => (nv > 0 ? f.v1 - d.v : d.v - f.v0) + 0.6));
+  let [x, z] = w(d.u, d.v + nv * foot), y = ground(x, z, world.islandH(x, z) + 0.45), why = '';
+  const o = { x, z, r: 0.3, y0: 0, y1: 0 }, [tx, tz] = w(d.u, d.v - nv * 1.6), into = () => ((o.x - it.x) * sn + (o.z - it.z) * c - d.v) * -nv;
+  for (let k = 0; k < 400 && into() < 1.3; k++) {
+    const dx = tx - o.x, dz = tz - o.z, L = Math.hypot(dx, dz) || 1, nx = o.x + dx / L * 0.05, nz = o.z + dz / L * 0.05, h = ground(nx, nz, y);
+    if (h > y + 0.45) { why = `a ${(h - y).toFixed(2)} m step ${(-into()).toFixed(1)} m out`; break; }
+    o.x = nx; o.z = nz; y = h; o.y0 = y + 0.25; o.y1 = y + 1.8;
+    const nb = S.near(o.x, o.z, 2), q = { ...o }; push(o, nb);
+    if (Math.hypot(o.x - q.x, o.z - q.z) > 0.04) why = 'stopped by ' + nb.filter(b => push({ ...q }, [b])).map(b => b.t + (b.furn ? ' furniture' : '')).join(', ');
+  }
+  if (D) { D.a = 0; DOORS.place(D); }
+  return into() >= 1.3 ? null : `${why || 'stuck'} ${into().toFixed(2)} m in`;
+}
+{
+  const ZS = createWorldSolid({ hf: world.islandH, zoneHf: world.islandH, zone: () => zoneItems(world.islandH) });   // (the zone as life.js builds it; islandH stands in for main.js terrainH off the pads)
+  const seen = new Set(), bad = []; let n = 0; t0 = performance.now();
+  for (const I of world.ISLANDS) for (const R of ZS.roomsNear(I.x, I.z, I.r + 80)) {
+    if (seen.has(R.P.key)) continue; seen.add(R.P.key);
+    for (const d of R.P.doors) if (d.out) { n++; const e = walkIn(ZS, R, d); if (e) bad.push(`${R.it.t} ${R.it.x.toFixed(0)},${R.it.z.toFixed(0)} door ${d.id}: ${e}`); }
+  }
+  check(n >= 40 && bad.length === 0, 'every outside door in the zone walks in from the ground', `${n - bad.length} / ${n} doors (${(performance.now() - t0).toFixed(0)} ms)${bad.length ? '\n      ' + bad.slice(0, 10).join('\n      ') : ''}`);
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import { BUDDY } from './units/infantry/medical.js';
 import * as I from './units/infantry/inventory.js';
 import { createMedUI } from './units/infantry/medui.js';
+import { pickAid } from './units/groundwar/fieldcare.js';   // ngc/marine-polish: the HEALTH screen's NEXT STEP
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 export function createMarineCare(Mr, ctx) {
@@ -30,7 +31,7 @@ export function createMarineCare(Mr, ctx) {
   let registered = null;
   function register() { const cv = CV(); if (cv && registered !== cv) { cv.setPlayer(me); registered = cv; const gw = GW(); if (gw) gw.sayHook = (txt, kind) => say(txt, 2.6); } }
   // ---- the casualty's HEALTH screen, treated with the player's kit
-  const uiOpt = { med: null, inv: MS.inv, parent: typeof document !== 'undefined' ? document.body : null, tabs: ['HEALTH'], title: '', by: () => ({ self: false, skill: 'rifleman' }), onClose: () => { if (Mr.ui === 'patient') { Mr.ui = null; C.patient = null; } } };
+  const uiOpt = { med: null, inv: MS.inv, parent: typeof document !== 'undefined' ? document.body : null, tabs: ['HEALTH'], title: '', by: () => ({ self: false, skill: 'rifleman' }), advise: (m, b) => pickAid(m, [MS.inv], b), onClose: () => { if (Mr.ui === 'patient') { Mr.ui = null; C.patient = null; } } };
   function openPatient(u) {
     if (typeof document === 'undefined') return;
     const gs = GS(); if (!u.rich) gs.enrich(u);   // (a man the camera had on the cheap model: on MEDINV's sim from now on)

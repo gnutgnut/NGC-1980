@@ -188,6 +188,9 @@ export function createSoldier(o = {}) {
     // direction: backwards and sideways are slower
     const dirF = my < -0.1 ? 0.6 : 1 - 0.2 * Math.abs(mx) / Math.max(0.01, ml);
     vmax *= dirF;
+    // ngc/marine-polish: a ground-speed cap from the host (a casualty on his shoulders or on the drag strap: MEDINV's
+    // BUDDY.carrySpeed / dragSpeed are speeds over the ground, so the cap comes after the direction factor)
+    if (m.vCap != null && vmax > m.vCap) vmax = m.vCap;
     // slope along the wish direction
     const fx = -Math.sin(S.yaw), fz = -Math.cos(S.yaw), rx = Math.cos(S.yaw), rz = -Math.sin(S.yaw);
     let wx = fx * my + rx * mx, wz = fz * my + rz * mx; const wl = Math.hypot(wx, wz);

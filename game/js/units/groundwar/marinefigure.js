@@ -33,7 +33,7 @@ export function buildMarineFigure(o = {}) {
     pose(state, ph = 0, dt = 0.016) {
       lite.pose(state, ph);
       if (level !== 'full') return;
-      P.down = state === 'fall' || state === 'dead'; P.stanceT = 1;
+      P.down = state === 'fall' || state === 'dead'; P.stanceT = 1; P.seat = state === 'seated';   // (ngc/marine-polish: seated on the troop seat, rifle between the knees)
       P.stance = P.stanceFrom = P.stanceTo = state === 'kneel' || state === 'aim' ? 'crouch' : 'stand';
       P.speed = state === 'run' ? 2.7 : state === 'walk' ? 1.4 : 0; P.gaitPhase = ph; P.gait = state === 'run' ? 'run' : 'walk';
       P.ads = state === 'aim' ? 1 : 0; P.aimPitch = 0;
@@ -47,7 +47,7 @@ export function buildMarineFigure(o = {}) {
         return;
       }
       if (level !== 'full') return;
-      Object.assign(P, p); if (p.cls) P.cls = p.cls;
+      Object.assign(P, p); if (p.cls) P.cls = p.cls; P.seat = !!p.seat; P.climb = p.climb ?? null; P.swim = p.swim || null;
       poseSkeleton(ensure(), P, dt);
     },
   };
