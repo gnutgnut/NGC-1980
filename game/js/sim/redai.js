@@ -83,6 +83,9 @@ export function createRedAI({ W, nav, feed = () => {}, sfx = {}, doctrine, log =
       const b = W.battleship; b.plan = (b.plan || 0) - 2;
       if (W.carrier && (b.plan <= 0 || !b.path.length)) { b.plan = 15; const c = W.carrier.p, a = Math.atan2(b.p.z - c.z, b.p.x - c.x), gx = c.x + Math.cos(a) * 170, gz = c.z + Math.sin(a) * 170; const [wx, wz] = nav.wet(gx, gz) ? [gx, gz] : nav.nearestWater(gx, gz); b.path = nav.path(b.p.x, b.p.z, wx, wz); }
     }
+    // PARITY: the KRAKEN's sky refit and the convoy hunts (units/parity/paritywar.js), as war.js think ends; the
+    // doctrine's knobs: aggression (hunt tempo), reserve, sky (the naval mix: a DREADNOUGHT wants her flying)
+    if (W.parity) W.parity.think(2, pl, { aggression: A * Math.max(0.5, M.naval), reserve: keep, sky: M.naval, note });
   }
 
   // ---------------------------------------------------------------- the ground and air arms, throttled by the mix

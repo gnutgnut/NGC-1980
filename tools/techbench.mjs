@@ -19,7 +19,7 @@ const sideOf = s => TECH.filter(t => t.side === s || t.side === 0);
 {
   const ids = TECH.map(t => t.id);
   check('ids are unique', new Set(ids).size === ids.length, `${ids.length} nodes`);
-  for (const s of [1, 2]) { const k = sideOf(s).length; check(`side ${s}: 12-20 nodes`, k >= 12 && k <= 20, k); }
+  for (const s of [1, 2]) { const k = sideOf(s).length; check(`side ${s}: 12-26 nodes (PARITY: up to 26)`, k >= 12 && k <= 26, k); }
   const bad = TECH.filter(t => t.requires.some(r => !techNode(r) || (techNode(r).side !== t.side && techNode(r).side !== 0)));
   check('every requirement exists, on the same side', !bad.length, bad.map(t => t.id).join(' ') || 'ok');
   const tierBad = TECH.filter(t => t.requires.some(r => techNode(r).tier > t.tier));
@@ -153,7 +153,7 @@ const sideOf = s => TECH.filter(t => t.side === s || t.side === 0);
 
 // ------------------------------------------------------------------ every gate is real game code
 {
-  const all = ['game/js/war.js', 'game/js/main.js', 'game/js/units/air/airwar.js', 'game/js/units/groundwar/groundwar.js', 'game/js/units/defence/brain.js', 'game/js/units/commander/board.js'].map(src).join('\n');
+  const all = ['game/js/war.js', 'game/js/main.js', 'game/js/units/air/airwar.js', 'game/js/units/groundwar/groundwar.js', 'game/js/units/defence/brain.js', 'game/js/units/commander/board.js', 'game/js/units/parity/paritywar.js'].map(src).join('\n');
   const fleetIds = new Set(FLEET_TYPES.map(t => t.id));
   for (const [k, g] of Object.entries(GATES)) {
     const inFile = g.where.every(f => src(f).includes(`'${k}'`));

@@ -150,6 +150,7 @@ export function createCommander(h) {
       if (bs.length) C.baseKey = bs[(k + d + bs.length) % bs.length].key; render(true); sfx?.ui?.('select'); return true;
     }
     if (c === 'Enter' || c === 'Space' || c === 'KeyF') { nav(); C.act(); render(true); return true; }
+    if (e.shiftKey && /^Digit[1-5]$/.test(c) && h.orders) { nav(); say(h.orders.run(+c.slice(5)), 2.4); render(true); return true; }   // PARITY: the support orders
     if (/^Digit[1-9]$/.test(c)) { const i = +c.slice(5) - 1; if (i < R.length) { nav(); C.sel = i; C.act(i); render(true); } return true; }
     if (c === 'KeyR') { nav(); C.recall(); render(true); return true; }
     if (c === 'KeyX') { nav(); C.standDown(); render(true); return true; }
@@ -180,7 +181,12 @@ export function createCommander(h) {
       const st = o.act ? `<i>YOU ARE HERE</i>  ·  ${esc(o.status)}${more}` : o.out ? `<i>OUT</i>  ·  ${esc(o.status)}  ·  ENTER: SWITCH TO IT${o.r.recall && /CAP/.test(o.status) ? '  ·  R: RECALL' : ''}${o.r.standDown && o.r.canStandDown && o.r.canStandDown() ? '  ·  X: STAND DOWN' : ''}${more}` : `${o.action === 'none' ? '' : 'ENTER: '}${esc(o.label)}`;
       html += `<div class="${cls}" data-i="${i}"><span class="k">${i + 1}</span><span class="nm">${esc(o.t.short)}<small>${esc(o.r.label || o.t.label)}  ·  ${esc(o.t.note)}</small></span><span class="ct">${o.n}<small>IN RESERVE</small></span><span class="st">${st}</span></div>`;
     });
-    html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER VEHICLE  ·  / NEXT UNIT  ·  T RESEARCH  ·  \\ CLOSE<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
+    if (h.orders) {   // PARITY: the support orders (units/commander/orders.js), at the island selected on the map
+      const tg = h.orderTarget ? h.orderTarget() : '';
+      html += `<div class="sub" style="margin-top:8px">SUPPORT ORDERS  ·  AT <b>${esc(tg || 'NO ISLAND SELECTED (M, CLICK ONE)')}</b></div>`;
+      for (const o of h.orders.rows()) html += `<div class="row${o.locked ? ' lock off' : ''}"><span class="k">⇧${o.n}</span><span class="nm">${esc(o.label)}<small>${o.cost ? o.cost + ' MATERIEL' : 'NO COST'}</small></span><span class="ct"></span><span class="st">${esc(o.locked ? o.why : o.status)}</span></div>`;
+    }
+    html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER VEHICLE  ·  / NEXT UNIT  ·  SHIFT+1-5 SUPPORT ORDERS  ·  T RESEARCH  ·  \\ CLOSE<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
     if (force || html !== C.lastHtml) { C.lastHtml = html; el.innerHTML = html; }
   }
   // per frame: the HUD fleet strip; the open board refreshes ~4x a second (statuses move)

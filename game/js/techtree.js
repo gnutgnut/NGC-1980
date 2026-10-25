@@ -62,6 +62,11 @@ export const TECH = [
     desc: 'M151A2 JEEPS BY CH-46, M35A2 TRUCKS BY LCM-8 (COMMAND 7)' },
   { id: 'p.airwing', side: 1, tier: 0, name: 'CARRIER AIR WING', cost: { mat: 40 }, time: 30, requires: [], unlocks: { units: ['jet'] },
     desc: 'F/A-18A HORNETS OFF CAT 1 (COMMAND 5)' },
+  // PARITY (ngc/parity): the TASK FORCE's counterparts of RUNAWAY units, each on the tier of the unit it mirrors
+  { id: 'p.sealift', side: 1, tier: 0, name: 'MSC SEALIFT', cost: { mat: 20 }, time: 20, requires: [], unlocks: { units: ['convoy'] },
+    desc: 'MSC FREIGHTERS SHIP OUR OUTPOSTS\' OUTPUT TO THE ALBATROSS (AUTOMATIC: GUARD THE CONVOYS)' },
+  { id: 'p.cobra', side: 1, tier: 0, name: 'AH-1T SEACOBRA', cost: { mat: 30 }, time: 30, requires: ['p.huey'], unlocks: { units: ['cobra'] },
+    desc: 'MARINE ATTACK HELICOPTERS: STRIKE, OVERWATCH AND ESCORT SORTIES (MAP: SHIFT+1)' },
   // tier 1
   { id: 'p.amtrac', side: 1, tier: 1, name: 'AMPHIBIOUS ARMOUR', cost: { mat: 40 }, time: 40, requires: ['p.motorpool'], unlocks: { units: ['m113'] },
     desc: 'LCM-8 LANDING CRAFT PUT M113A2 APCS ON A FRIENDLY BEACH (COMMAND 0)' },
@@ -73,9 +78,15 @@ export const TECH = [
     desc: 'THE SICKBAY RETURNS EVACUATED MARINES 1.6 X FASTER (CHEAPER SEA KNIGHT STICKS)' },
   { id: 'p.picket', side: 1, tier: 1, name: 'RADAR PICKET', cost: { mat: 35 }, time: 40, requires: ['p.aaa'], unlocks: { mods: { sight: 1.25 } },
     desc: 'PICKET RADARS: EVERY FRIENDLY SIGHT RANGE + 25%' },
+  { id: 'p.hawkeye', side: 1, tier: 1, name: 'E-2C HAWKEYE', cost: { mat: 30 }, time: 50, requires: ['p.airwing'], unlocks: { units: ['hawkeye'] },
+    desc: 'AIRBORNE EARLY WARNING: FINDS THE KRAKEN, LONG SIGHT (MAP: SHIFT+3)' },
+  { id: 'p.hawk', side: 1, tier: 1, name: 'MIM-23 HAWK', cost: { mat: 40 }, time: 60, requires: ['p.aaa'], unlocks: { units: ['hawk'] },
+    desc: 'HAWK SAM BATTERIES ON OUR HQ ISLANDS (NEW AA ORDERS THERE)' },
   // tier 2
-  { id: 'p.mbt', side: 1, tier: 2, name: 'HEAVY ARMOUR', cost: { mat: 70 }, time: 60, requires: ['p.amtrac'], unlocks: { units: ['m60'] },
-    desc: 'M60A3 TTS MAIN BATTLE TANKS BY LCM-8 (COMMAND 9)' },
+  { id: 'p.mbt', side: 1, tier: 2, name: 'HEAVY ARMOUR', cost: { mat: 70 }, time: 60, requires: ['p.amtrac'], unlocks: { units: ['m60', 'armour'] },
+    desc: 'M60A3 TTS MAIN BATTLE TANKS BY LCM-8 (COMMAND 9; AI PLATOONS: MAP SHIFT+2)' },
+  { id: 'p.tomahawk', side: 1, tier: 2, name: 'BGM-109 SALVOS', cost: { mat: 45 }, time: 60, requires: ['p.hawkeye'], unlocks: { units: ['tomahawk'] },
+    desc: 'GROUND-LAUNCHED MISSILES FROM OUR ISLANDS AT THE SPOTTED KRAKEN OR THEIR BUILDINGS (MAP: SHIFT+4)' },
   { id: 'p.tomcat', side: 1, tier: 2, name: 'TOMCAT CONVERSION', cost: { mat: 60 }, time: 50, requires: ['p.cap'], unlocks: { units: ['tomcat'] },
     desc: 'FLY THE F-14A YOURSELF (COMMAND 8)' },
   { id: 'p.seabees', side: 1, tier: 2, name: 'SEABEE ENGINEERS', cost: { mat: 45 }, time: 45, requires: ['p.aaa', 'p.motorpool'], unlocks: { mods: { 'aa.build': 0.6, rebuild: 0.6 } },
@@ -89,6 +100,10 @@ export const TECH = [
     desc: 'THE ALBATROSS PATCHES ITSELF TWICE AS FAST, AA GUNS +50% HP' },
   { id: 'p.sky', side: 1, tier: 3, name: 'SKY CARRIER PROGRAMME', cost: { mat: 120, fuel: 40 }, time: 90, requires: ['p.seabees', 'p.yield'], unlocks: { abilities: ['sky'] },
     desc: 'THE LIFT-FAN REFIT FOR THE ALBATROSS (COMMAND 6, THEN 300 MATERIEL)' },
+  { id: 'p.iowa', side: 1, tier: 3, name: 'IOWA REACTIVATION', cost: { mat: 100 }, time: 90, requires: ['p.yield', 'p.mbt'], unlocks: { units: ['battleship'] },
+    desc: 'OUR FACTORIES REACTIVATE THE BATTLESHIP USS IOWA: SHE HUNTS THE KRAKEN (MAP: SHIFT+5 TO TASK HER)' },
+  { id: 'p.navyyard', side: 1, tier: 3, name: 'REACTIVATION CREWS', cost: { mat: 60 }, time: 60, requires: ['p.iowa'], unlocks: { mods: { 'bship.rate': 1.5 } },
+    desc: 'THE IOWA IS READY 50% SOONER' },
 
   // ================================================================ RUNAWAY (side 2, futuristic + seized modern)
   { id: 'e.mv22', side: 2, tier: 0, name: 'MV-22B LANDING FORCE', cost: { mat: 30 }, time: 30, requires: [], unlocks: { units: ['transport'] },
@@ -109,7 +124,8 @@ export const TECH = [
     desc: 'THEIR ISLANDS PRODUCE 25% MORE' },
   { id: 'e.ceramic', side: 2, tier: 1, name: 'CERAMIC SHELLS', cost: { mat: 40 }, time: 60, requires: ['e.wasp'], unlocks: { mods: { 'hp.gunship': 1.4, 'hp.transport': 1.25 } },
     desc: 'WASPS +40% HP, OSPREYS +25%' },
-  { id: 'e.shrike', side: 2, tier: 2, name: 'RW-4 SHRIKE FIGHTERS', cost: { mat: 60 }, time: 80, requires: ['e.reaper'], unlocks: { units: ['shrike'] },
+  { id: 'e.shrike', side: 2, tier: 1, name: 'RW-4 SHRIKE FIGHTERS', cost: { mat: 60 }, time: 80, requires: ['e.wasp'],   // PARITY: tier 1, facing the Tomcat CAP (was tier 2 after the REAPER)
+    unlocks: { units: ['shrike'] },
     desc: 'MACHINE FIGHTERS OFF THE KRAKEN: THEY ANSWER OUR TOMCATS' },
   { id: 'e.shahed', side: 2, tier: 2, name: 'SHAHED SALVOS', cost: { mat: 45 }, time: 60, requires: ['e.reaper'], unlocks: { units: ['shahed'] },
     desc: 'LOITERING MUNITIONS AT THE SPOTTED ALBATROSS OR OUR BUILDINGS' },
@@ -123,6 +139,11 @@ export const TECH = [
     desc: 'IRONHOLD\'S SHIPYARD STARTS THE RW-9 RAILGUN MONITOR' },
   { id: 'e.yards', side: 2, tier: 3, name: 'IRONHOLD YARDS', cost: { mat: 60 }, time: 60, requires: ['e.leviathan'], unlocks: { mods: { 'bship.rate': 1.5 } },
     desc: 'THE LEVIATHAN IS BUILT 50% FASTER' },
+  // PARITY (ngc/parity): the RUNAWAY's counterparts of TASK FORCE nodes
+  { id: 'e.sky', side: 2, tier: 3, name: 'KRAKEN LIFT FANS', cost: { mat: 120, fuel: 40 }, time: 90, requires: ['e.nanorepair', 'e.fab'], unlocks: { abilities: ['sky'] },
+    desc: 'THE KRAKEN GROWS LIFT FANS AND FLIES (300 MATERIEL REFIT)' },
+  { id: 'e.lattice', side: 2, tier: 3, name: 'LATTICE ARMOUR', cost: { mat: 60 }, time: 60, requires: ['e.nanorepair'], unlocks: { mods: { 'aa.hp': 1.5 } },
+    desc: 'THEIR NEW AA UNITS +50% HP (DAMAGE CONTROL PARTIES\' COUNTERPART)' },
 ];
 
 // every gated key and the game code that asks for it (tools/techbench.mjs greps each 'where' for the key)
@@ -133,12 +154,15 @@ export const GATES = {
   jet: { side: 1, where: ['game/js/units/commander/fleet.js'] }, m113: { side: 1, where: ['game/js/main.js'] },
   escort: { side: 1, where: ['game/js/units/air/airwar.js'] }, logistics: { side: 1, where: ['game/js/main.js'] },
   m60: { side: 1, where: ['game/js/main.js'] }, tomcat: { side: 1, where: ['game/js/units/commander/fleet.js'] },
-  sky: { side: 1, where: ['game/js/war.js'] },
+  sky: { side: 0, where: ['game/js/war.js'] },   // PARITY: the KRAKEN's refit too
+  convoy: { side: 1, where: ['game/js/units/parity/paritywar.js'] }, cobra: { side: 1, where: ['game/js/units/parity/paritywar.js'] },
+  hawkeye: { side: 1, where: ['game/js/units/parity/paritywar.js'] }, tomahawk: { side: 1, where: ['game/js/units/parity/paritywar.js'] },
+  armour: { side: 1, where: ['game/js/units/parity/paritywar.js'] }, hawk: { side: 1, where: ['game/js/units/defence/brain.js'] },
   transport: { side: 2, where: ['game/js/war.js'] }, gunship: { side: 2, where: ['game/js/war.js'] },
   freighter: { side: 2, where: ['game/js/war.js'] }, reaper: { side: 2, where: ['game/js/units/air/airwar.js'] },
   hovertank: { side: 2, where: ['game/js/units/groundwar/groundwar.js'] }, lance: { side: 2, where: ['game/js/units/defence/brain.js'] },
   shrike: { side: 2, where: ['game/js/units/air/airwar.js'] }, shahed: { side: 2, where: ['game/js/units/air/airwar.js'] },
-  mbt: { side: 2, where: ['game/js/units/groundwar/groundwar.js'] }, battleship: { side: 2, where: ['game/js/war.js'] },
+  mbt: { side: 2, where: ['game/js/units/groundwar/groundwar.js'] }, battleship: { side: 0, where: ['game/js/war.js'] },   // PARITY: the IOWA (side 1) too
 };
 // every mod key: what it scales (game level), and where
 export const MODS = {
@@ -150,7 +174,7 @@ export const MODS = {
   'aa.hp': 'hit points of a new AA gun (war.js buildAA)',
   rebuild: 'time before a flattened building is rebuilt (war.js killStruct)',
   'ship.repair': 'the carrier\'s self-repair rate (war.js updateEconomy)',
-  'bship.rate': 'the LEVIATHAN build rate (war.js updateEconomy)',
+  'bship.rate': 'the LEVIATHAN / IOWA build rate (war.js updateEconomy)',
   'hp.drone': 'CH-46 hit points (war.js makeAir)', 'hp.gunship': 'WASP hit points (war.js makeAir)', 'hp.transport': 'MV-22 hit points (war.js makeAir)',
   medic: 'sickbay recovery speed (units/groundwar/casevac.js)',
 };
@@ -158,16 +182,16 @@ export const MODS = {
 // research orders for the default policy (any node left out is tried afterwards, by tier)
 export const DOCTRINES = {
   1: {
-    balanced: ['p.cap', 'p.amtrac', 'p.logistics', 'p.picket', 'p.medicine', 'p.yield', 'p.helo', 'p.mbt', 'p.seabees', 'p.tomcat', 'p.damagectl', 'p.sky'],
-    air: ['p.cap', 'p.tomcat', 'p.picket', 'p.logistics', 'p.yield', 'p.helo', 'p.seabees', 'p.sky'],
-    ground: ['p.amtrac', 'p.medicine', 'p.mbt', 'p.helo', 'p.logistics', 'p.yield', 'p.seabees'],
-    econ: ['p.logistics', 'p.yield', 'p.seabees', 'p.damagectl', 'p.picket', 'p.sky'],
+    balanced: ['p.cap', 'p.hawkeye', 'p.amtrac', 'p.logistics', 'p.hawk', 'p.picket', 'p.medicine', 'p.yield', 'p.helo', 'p.mbt', 'p.tomahawk', 'p.seabees', 'p.iowa', 'p.tomcat', 'p.damagectl', 'p.sky', 'p.navyyard'],
+    air: ['p.cap', 'p.hawkeye', 'p.tomcat', 'p.tomahawk', 'p.picket', 'p.logistics', 'p.yield', 'p.helo', 'p.seabees', 'p.sky'],
+    ground: ['p.amtrac', 'p.medicine', 'p.mbt', 'p.helo', 'p.logistics', 'p.yield', 'p.hawk', 'p.seabees', 'p.iowa'],
+    econ: ['p.logistics', 'p.yield', 'p.seabees', 'p.hawk', 'p.damagectl', 'p.picket', 'p.iowa', 'p.navyyard', 'p.sky'],
   },
   2: {
-    balanced: ['e.reaper', 'e.hover', 'e.fab', 'e.shahed', 'e.lance', 'e.shrike', 'e.mbt', 'e.ceramic', 'e.assault', 'e.nanorepair', 'e.leviathan', 'e.yards'],
-    air: ['e.reaper', 'e.ceramic', 'e.shrike', 'e.shahed', 'e.fab', 'e.lance', 'e.hover'],
+    balanced: ['e.reaper', 'e.hover', 'e.fab', 'e.shahed', 'e.lance', 'e.shrike', 'e.mbt', 'e.ceramic', 'e.assault', 'e.nanorepair', 'e.leviathan', 'e.yards', 'e.lattice', 'e.sky'],
+    air: ['e.reaper', 'e.ceramic', 'e.shrike', 'e.shahed', 'e.fab', 'e.lance', 'e.hover', 'e.nanorepair', 'e.sky'],
     ground: ['e.hover', 'e.assault', 'e.fab', 'e.mbt', 'e.reaper', 'e.lance'],
-    naval: ['e.fab', 'e.hover', 'e.mbt', 'e.leviathan', 'e.nanorepair', 'e.yards', 'e.reaper'],
+    naval: ['e.fab', 'e.hover', 'e.mbt', 'e.leviathan', 'e.nanorepair', 'e.yards', 'e.sky', 'e.reaper'],
   },
 };
 

@@ -13,6 +13,7 @@ import { structAngle } from './world/net.js';   // WORLD: the HQ / production sl
 import { createDefence } from './units/defence/brain.js';   // NGC-1980 DEFENCE: AA unit models + engagement logic
 import { createRotary } from './units/air/rotary/rotary.js';   // NGC-1980: CH-46 + Marines, MV-22, RW-3 WASP (physical AI rotorcraft)
 import { createGroundWar } from './units/groundwar/groundwar.js';   // NGC-1980 GROUND WAR: STRIDERs, RW-7s, seized MBTs and Marines fighting on the islands
+const addLiftFansRW = addLiftFans;   // PARITY-TODO: the RUNAWAY's own fans (units/naval/skyfans.js) when the model lands
 import { buildCarrier, buildBattleship, buildFreighter, buildDrone, buildTransport, buildGunship, buildTomcat, buildGun, buildStructure, buildRubble, CARRIER, BSHIP, FREIGHTER, TEAM } from './ships.js';
 // NAVAL: ship motion in a seaway (heave / pitch / roll by sea state and speed) and the naval effects
 import { SHIPS as SHIP_MOTION, makeSea, createShipMotion, shipPointY, shipPointVY, retuneSea, advanceSea, seaElevation } from './units/naval/seamotion.js';
@@ -21,11 +22,12 @@ import { createNavalFx } from './units/naval/navalfx.js';
 import { createAirWar } from './units/air/airwar.js';             // AIR: sim-flown Tomcats, SHRIKE / REAPER / SHAHED (ngc/airfw)
 import { homeAAM, decoyCheck } from './units/air/gameproj.js';     // AIR: the shared game-level missile homing and decoy rule
 import { createTech, unitAllowed, gateMsg, aiPickResearch, techStartFromQuery } from './techtree.js';   // TECH TREE: research gates every buy / build / launch
+import { createParityWar, SHIP_NAME, PAR_T } from './units/parity/paritywar.js';   // PARITY: each side's counterparts (MSC convoys, IOWA, KRAKEN sky refit, AH-1T, E-2C, BGM-109, M60A3 by LCM-8)
 
 const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const angDiff = (a, b) => { let d = (b - a) % (2 * Math.PI); if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; return d; };
-export const COST = { drone: 40, aa: 30, heli: 60, escort: 30, jet: 80, sky: 300 };
+export const COST = { drone: 40, aa: 30, heli: 60, escort: 30, jet: 80, sky: 300, cobra: 24, hawkeye: 20, tomahawk: 6, armour: 55 };   // PARITY: + the Task Force's counterparts (units/parity/paritywar.js)
 export const SIDE_NAME = ['NEUTRAL', 'FRIENDLY', 'ENEMY'];
 export const CAP_TIME = { heli: 6, drone: 9, transport: 10 };   // (SIM MODE: exported so a sweep can tune them)
 export const PROD = { fuel: { fuel: 0.55 }, factory: { mat: 0.4 }, radar: {}, hq: { fuel: 0.3, mat: 0.3 }, fortress: { fuel: 0.6 } };
@@ -38,7 +40,7 @@ export function createWar(ctx) {
     islands: ctx.ISLANDS, units: [], proj: [], E: { fuel: 0, mat: 0, bship: 0 }, P: ctx.G, time: 0, over: null,
     carrier: null, enemyCarrier: null, battleship: null, thinkT: 0, raidT: 120, econT: 0, deckCache: null,
   };
-  const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _skyAim = new THREE.Vector3();
+  const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _skyAim = new THREE.Vector3(), _skyAim2 = new THREE.Vector3();
   // NAVAL: the sea state (?sea=0..7, default 4 MODERATE; waves from the west-south-west) and the ships' wake / spray
   const _sq = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
   W.sea = makeSea(_sq && _sq.has('sea') ? +_sq.get('sea') : 4, -1.2, 11);
@@ -178,17 +180,17 @@ export function createWar(ctx) {
 
   // ------------------------------------------------------------------------------------- ships
   function makeShip(type, side, x, z, yaw) {
-    const m = type === 'carrier' ? buildCarrier(side) : type === 'freighter' ? buildFreighter() : buildBattleship();
-    if (type === 'carrier' && side === 1) defence.refitCarrier(m, 1);   // DEFENCE hook: the ALBATROSS's close-in guns and missile boxes
+    const m = type === 'carrier' ? buildCarrier(side) : type === 'freighter' ? buildFreighter(side) : buildBattleship(side);   // PARITY: side 1 = the MSC freighter / USS IOWA
+    if (side === 1) defence.refitCarrier(m, 1);   // DEFENCE hook: the ALBATROSS's close-in guns and missile boxes (PARITY: the MSC ship's and the IOWA's too)
     else if (side === 2) defence.refitShip(m, 2);   // SEAWORLD: KRAKEN / LEVIATHAN / container ship get TALON and LANCE mounts
     const dims = type === 'carrier' ? CARRIER : type === 'freighter' ? FREIGHTER : BSHIP;
     const u = { type, side, p: new THREE.Vector3(x, 0, z), v: new THREE.Vector3(), yaw, w: 0, speed: 0, max: { carrier: 6, freighter: 5, battleship: 7.5 }[type], hp: { carrier: 600, freighter: 70, battleship: 420 }[type], mesh: m.group, parts: m, dims, path: [], guns: [], wakeT: 0, launchT: 0 };
-    u.hpMax = u.hp;
+    u.hpMax = u.hp; u.name = SHIP_NAME(type, side);   // PARITY: ALBATROSS / KRAKEN, IOWA / LEVIATHAN, MSC SHIP / CONTAINER SHIP
     u.guns = m.guns.map(g => ({ mesh: g, hp: 9, max: 9, dead: false, cd: rnd(1, 3), range: type === 'carrier' ? 150 : 130, ship: u }));
     for (const g of u.guns) defence.attach(g);   // DEFENCE hook (no-op for the generic buildGun mounts)
     if (m.turrets) u.turrets = m.turrets.map(t => ({ mesh: t, cd: rnd(2, 5) }));
     if (m.dims) u.dims = m.dims;   // NAVAL: the builder's own dimensions (same contract numbers for the carriers)
-    u.mo = createShipMotion(SHIP_MOTION[m.motion || (type === 'carrier' ? (side === 1 ? 'albatross' : 'kraken') : type === 'freighter' ? 'container' : 'leviathan')], W.sea, (W.units.length + 1) * 31 + side);
+    u.mo = createShipMotion(SHIP_MOTION[m.motion] || SHIP_MOTION[(type === 'carrier' ? (side === 1 ? 'albatross' : 'kraken') : type === 'freighter' ? 'container' : 'leviathan')], W.sea, (W.units.length + 1) * 31 + side);
     u.att = { heave: 0, pitch: 0, roll: 0, vHeave: 0, vPitch: 0, vRoll: 0 };
     m.group.position.copy(u.p); m.group.rotation.y = yaw; scene.add(m.group); W.units.push(u); return u;
   }
@@ -236,15 +238,16 @@ export function createWar(ctx) {
   // and the lift lever all move slowly, and the ship answers them slowly - minutes of inertia, not seconds.
   // sky.manual: someone is at the helm (main.js sets sky.tel / sky.helmIn / sky.lift each frame).
   const SKY = { VMAX: 16, ACC: 0.3, DEC: 0.45, YAW: 0.06, YAW_ACC: 0.01, CLIMB: 3.2, V_ACC: 0.32, CEIL: 230, CRUISE: 70 };
-  W.upgradeCarrier = (o = {}) => {   // o.free: no materiel; o.instant: no 24 s refit (SHIFT+6 in main.js)
-    const u = W.carrier;
+  W.upgradeCarrier = (o = {}) => {   // o.free: no materiel; o.instant: no 24 s refit (SHIFT+6 in main.js); PARITY: o.side 2 = the KRAKEN's refit (the enemy commander buys it)
+    const side = o.side || 1, u = side === 1 ? W.carrier : W.enemyCarrier, S = store(side), nm = side === 1 ? 'ALBATROSS' : 'KRAKEN';
     if (!u || u.sinking !== undefined) return 'NO CARRIER TO REFIT';
-    if (u.sky) { if (!u.sky.up && o.instant) { u.sky.refit = 0.01; return 'SKY CARRIER  -  LIFT FANS COMING ONLINE'; } return u.sky.up ? 'THE ALBATROSS ALREADY FLIES' : `REFIT UNDER WAY  -  ${Math.ceil(u.sky.refit)}s`; }
-    if (!o.free && !W.allow(1, 'sky')) return W.gateMsg(1, 'sky');   // TECH (SHIFT+6, free and instant, skips the gate)
-    if (!o.free && W.P.mat < COST.sky) return `SKY CARRIER REFIT NEEDS ${COST.sky} MATERIEL`;
-    if (!o.free) W.P.mat -= COST.sky; u.path = []; u.goal = null;
-    addLiftFans(u.parts);
+    if (u.sky) { if (!u.sky.up && o.instant) { u.sky.refit = 0.01; return 'SKY CARRIER  -  LIFT FANS COMING ONLINE'; } return u.sky.up ? `THE ${nm} ALREADY FLIES` : `REFIT UNDER WAY  -  ${Math.ceil(u.sky.refit)}s`; }
+    if (!o.free && !W.allow(side, 'sky')) return W.gateMsg(side, 'sky');   // TECH (SHIFT+6, free and instant, skips the gate)
+    if (!o.free && S.mat < COST.sky) return `SKY CARRIER REFIT NEEDS ${COST.sky} MATERIEL`;
+    if (!o.free) S.mat -= COST.sky; u.path = []; u.goal = null;
+    if (side === 1) addLiftFans(u.parts); else addLiftFansRW(u.parts);   // PARITY: the RUNAWAY's own fans (units/naval/skyfans.js)
     u.sky = { refit: o.instant ? 0.01 : 24, up: false, deploy: 0, spin: 0, tel: 0, helmIn: 0, lift: 0, telV: 0, helmV: 0, liftV: 0, yawRate: 0, vy: 0, pitch: 0, roll: 0, manual: false, hold: 0, scrapeT: 0 };
+    if (side === 2) { feed('RADAR: THE KRAKEN IS GROWING LIFT FANS  -  SHE WILL FLY', 'bad'); sfx.alarm?.(); return 'KRAKEN SKY REFIT STARTED'; }
     if (o.instant) { sfx.dock(); return 'SKY CARRIER  -  LIFT FANS COMING ONLINE  -  TAB AT THE HELM'; }
     feed('SKY CARRIER REFIT STARTED  -  LIFT FANS GOING ON THE ALBATROSS (24s)', 'good'); sfx.dock();
     return 'SKY CARRIER REFIT  -  STAND CLEAR OF THE OUTRIGGERS';
@@ -255,7 +258,7 @@ export function createWar(ctx) {
     const k = clamp(1 - S.refit / 8, 0, 1);   // the last 8 s: the outriggers fold out and the fans spin up
     for (const f of u.parts.fans) { f.arm.visible = k > 0; const e = k * k * (3 - 2 * k); f.arm.scale.set(Math.max(0.001, e), Math.max(0.001, e), Math.max(0.001, e)); }
     if (Math.random() < 0.3) { toWorld(u, rnd(-12, 12), CARRIER.DECK + 1, rnd(-50, 50)); fx.add.spawn(_v.x, _v.y, _v.z, rnd(-3, 3), rnd(2, 5), rnd(-3, 3), 0.3, 0.3, 0.1, 1, .9, .5, 1, 9); }   // welding sparks
-    if (S.refit <= 0) { S.up = true; S.hold = 40; feed('SKY CARRIER ALBATROSS  -  LIFT FANS ONLINE  -  TAKE THE HELM FROM THE DECK (TAB)', 'good'); sfx.alarm?.(); }
+    if (S.refit <= 0) { S.up = true; S.hold = 40; if (u.side === 1) feed('SKY CARRIER ALBATROSS  -  LIFT FANS ONLINE  -  TAKE THE HELM FROM THE DECK (TAB)', 'good'); else feed('RADAR: THE KRAKEN IS AIRBORNE', 'bad'); sfx.alarm?.(); }   // PARITY: either carrier
   }
   const lever = (cur, want, rate, dt) => cur + clamp(want - cur, -rate * dt, rate * dt);
   function hullFloor(u) {   // the highest ground under the hull (sea = 0), sampled along and across it
@@ -419,6 +422,7 @@ export function createWar(ctx) {
   function makeAir(type, side, x, y, z, extra = {}) {
     const hpMod = u => { const k = W.techMod(side, 'hp.' + type); if (k !== 1) { u.hp *= k; u.hpMax *= k; } return u; };   // TECH: armour upgrades
     { const ru = ROT.make(type, side, x, y, z, extra); if (ru) { W.units.push(hpMod(ru)); return ru; } }   // NGC-1980 hook
+    if (type === 'cobra') return null;   // PARITY: the AH-1T is the rotary module's (no old-style stand-in)
     const m = type === 'drone' ? buildDrone() : type === 'transport' ? buildTransport() : type === 'escort' ? buildTomcat(side) : buildGunship(side);
     const hp = { drone: 5, transport: 7, gunship: 3, escort: 4 }[type];
     const u = { type, side, p: new THREE.Vector3(x, y, z), v: new THREE.Vector3(), yaw: 0, hp, hpMax: hp, mesh: m.group, parts: m, r: type === 'transport' ? 4.5 : type === 'escort' ? 4 : 3.2, cd: rnd(1, 2.5), ph: rnd(6.28), state: 'go', ...extra };
@@ -587,7 +591,7 @@ export function createWar(ctx) {
   function damage(t, dmg, side) {
     if (t.player) { if (side === 2) ctx.hurtPlayer(Math.min(0.6, 0.06 * dmg), dmg >= 9 ? 'MISSILE' : 'HIT'); return; }   // AIR: the player as an air target
     if (t.ship) {   // a ship's gun mount
-      t.hp -= dmg; if (t.hp <= 0 && !t.dead) { t.dead = true; t.mesh.getWorldPosition(_w); fx.explode(_w.x, _w.y + 1, _w.z, 1.4, { debris: 5 }); t.mesh.visible = false; t.rebuild = 45; boomAt(_w.x, _w.y, _w.z, 0.5); if (t.ship.side === 2) { ctx.addScore(300); feed(`${t.ship.type === 'carrier' ? 'KRAKEN' : t.ship.type === 'freighter' ? 'CONTAINER SHIP' : 'LEVIATHAN'} GUN DESTROYED`, 'good'); } }
+      t.hp -= dmg; if (t.hp <= 0 && !t.dead) { t.dead = true; t.mesh.getWorldPosition(_w); fx.explode(_w.x, _w.y + 1, _w.z, 1.4, { debris: 5 }); t.mesh.visible = false; t.rebuild = 45; boomAt(_w.x, _w.y, _w.z, 0.5); if (t.ship.side === 2) { ctx.addScore(300); feed(`${t.ship.name} GUN DESTROYED`, 'good'); } }
       t.ship.hp -= dmg * 0.25; checkShip(t.ship); return;
     }
     if (t.dims) { t.hp -= dmg; t.lastHit = W.time; checkShip(t); return; }
@@ -604,7 +608,9 @@ export function createWar(ctx) {
     for (let i = 0; i < 6; i++) setTimeout(() => { toWorld(u, rnd(-10, 10), u.dims.DECK, rnd(-u.dims.L / 2, u.dims.L / 2)); fx.explode(_v.x, _v.y, _v.z, rnd(2.5, 4), { debris: 10, color: 0x4a4440, oil: true }); boomAt(_v.x, _v.y, _v.z, 1.2); }, i * 450);
     for (let i = 0; i < 4; i++) { const e = fx.burn(0, 0, 0, 60, 2.5, u.p); e.ox = rnd(-8, 8); e.oy = u.dims.DECK; e.oz = rnd(-40, 40); }
     for (let i = 0; i < 6; i++) fx.water.add({ x: u.p.x + rnd(-30, 30), y: 0.12, z: u.p.z + rnd(-30, 30), size: rnd(14, 26), grow: 0.25, a: 0.85, life: 300, tile: 3, fadeIn: 3 });
-    if (u.type === 'battleship') { W.battleship = null; ctx.addScore(5000); feed('LEVIATHAN SUNK', 'good'); }
+    if (u.type === 'battleship' && u.side === 1) { W.iowa = null; feed('THE IOWA IS SINKING', 'bad'); }   // PARITY
+    else if (u.type === 'freighter' && u.side === 1) { const lost = Math.round(u.cargo || 0); W.E.mat += Math.round(lost * 0.5); feed(`MSC SHIP SUNK  -  ${lost} MATERIEL LOST`, 'bad'); }   // PARITY: the enemy salvages half, as we do theirs
+    else if (u.type === 'battleship') { W.battleship = null; ctx.addScore(5000); feed('LEVIATHAN SUNK', 'good'); }
     else if (u.type === 'freighter') { const salvage = Math.round(u.cargo * 0.5); W.P.mat += salvage; ctx.addScore(800); feed(`ENEMY CONTAINER SHIP SUNK  -  ${salvage} MATERIEL SALVAGED`, 'good'); }
     else if (u.side === 2) { ctx.addScore(10000); feed('THE KRAKEN IS SINKING', 'good'); end('win', 'ENEMY CARRIER SUNK'); }
     else { feed('ALBATROSS IS SINKING', 'bad'); end('lose', 'OUR CARRIER WAS SUNK'); }
@@ -650,7 +656,7 @@ export function createWar(ctx) {
           fx.flak(x, y, z); if (hear(x, y, z, 300) > 0) sfx.flak?.();
           for (const t of targets(b.side)) if (t.p && !t.dims && t.p.distanceTo(b.p) < 8) damage(t, 1.2, b.side);
           if (b.side === 2 && pl.alive && !pl.inCave && pl.pos.distanceTo(b.p) < 7 + (pl.hitR || 2.6) - 2.6) ctx.hurtPlayer(0.13, 'FLAK', null, null, 'flak');
-          const sc = W.carrier; if (b.side === 2 && sc && sc.sky && sc.sky.up && sc.p.y > 8) { const [lx, lz] = toLocal(sc, x, z); if (Math.abs(lx) < 34 && Math.abs(lz) < 66 && Math.abs(y - (sc.p.y + 4)) < 10) damage(sc, 2, 2); }
+          const sc = b.side === 2 ? W.carrier : W.enemyCarrier; if (sc && sc.sky && sc.sky.up && sc.p.y > 8) { const [lx, lz] = toLocal(sc, x, z); if (Math.abs(lx) < 34 && Math.abs(lz) < 66 && Math.abs(y - (sc.p.y + 4)) < 10) damage(sc, 2, b.side); }   // PARITY: either sky carrier
         }
       } else if (!done) {
         if (GW.segHit(b, _pp)) done = true;   // NGC-1980 GROUND WAR hook: this frame's path against STRIDERs, RW-7s, MBTs (our rounds) or Marines (theirs)
@@ -685,7 +691,8 @@ export function createWar(ctx) {
     const list = [];
     for (const u of W.units) if (u.side !== side && !u.dead && !u.dying && u.p && !u.dims && !u.ground) list.push(u);   // (GROUND WAR: AA guns don't engage squads on the ground)
     if (side === 2 && pl.alive && !pl.inCave) list.push({ p: pl.pos, v: pl.vel, player: true, vis: pl.detect ?? 1 });
-    const sc = W.carrier; if (side === 2 && sc && sc.sky && sc.sky.up && sc.p.y > 8 && sc.sinking === undefined) list.push({ p: _skyAim.set(sc.p.x, sc.p.y + 4, sc.p.z), v: sc.v });
+    const sc = side === 2 ? W.carrier : W.enemyCarrier;   // PARITY: a flying carrier of either side is an air target for the other side's guns
+    if (sc && sc.sky && sc.sky.up && sc.p.y > 8 && sc.sinking === undefined) list.push({ p: (side === 2 ? _skyAim : _skyAim2).set(sc.p.x, sc.p.y + 4, sc.p.z), v: sc.v });
     return list;
   }
   function gunFire(g, gx, gy, gz, side, dt, foes, range) {
@@ -749,6 +756,7 @@ export function createWar(ctx) {
   function updateEconomy(dt) {
     W.econT += dt; if (W.econT < 1) return; const k = W.econT; W.econT = 0;
     const bshipOk = W.allow(2, 'battleship'), kb = k * W.techMod(2, 'bship.rate');   // TECH: the LEVIATHAN programme
+    const bshipOk1 = W.allow(1, 'battleship'), kb1 = k * W.techMod(1, 'bship.rate');   // PARITY: the IOWA programme
     for (const I of W.islands) {
       if (!I.owner) continue;
       const S = store(I.owner), pk = PROD_KIND[I.kind], prodOk = !pk || I.structs.some(s => s.kind === pk && !s.dead), hqOk = I.structs.some(s => s.kind === 'hq' && !s.dead);
@@ -756,9 +764,11 @@ export function createWar(ctx) {
       if (prodOk && hqOk) {
         const km = k * W.techMod(I.owner, 'econ.mat'), kf = k * W.techMod(I.owner, 'econ.fuel');   // TECH: production upgrades
         if (I.owner === 2 && I.kind !== 'hq') I.stock = (I.stock || 0) + (P.mat || 0) * km + (P.fuel || 0) * 0.5 * kf;   // enemy outposts ship their output by freighter
+        else if (I.kind !== 'hq') { I.stock = (I.stock || 0) + (P.mat || 0) * km; I.stockFuel = (I.stockFuel || 0) + (P.fuel || 0) * kf; }   // PARITY: so do ours, by MSC freighter (units/parity/paritywar.js)
         else { if (P.fuel) S.fuel = Math.min(S.fuelMax ?? 1e9, S.fuel + P.fuel * kf); if (P.mat) S.mat += P.mat * km; }
       }
       if (I.owner === 2 && I.kind === 'factory' && prodOk && bshipOk) W.E.bship += 0.08 * kb;
+      else if (I.owner === 1 && I.kind === 'factory' && prodOk && bshipOk1) W.P.bship = (W.P.bship || 0) + PAR_T.IOWA_RATE * kb1;   // PARITY: the IOWA's reactivation, from our factories as the LEVIATHAN from theirs
       // rebuild flattened buildings when the owner can pay for it and nobody has hit the island for a while
       for (const s of I.structs) if (s.dead && s.kind !== 'aa' && s.side === I.owner) {
         s.rebuild -= k;
@@ -767,6 +777,7 @@ export function createWar(ctx) {
     }
     if (W.islands.find(I => I.name === 'IRONHOLD').yard && !W.islands.find(I => I.name === 'IRONHOLD').yard.dead && W.islands.find(I => I.name === 'IRONHOLD').owner === 2 && bshipOk) W.E.bship += 0.06 * kb;
     if (W.battleship) W.E.bship = Math.min(W.E.bship, 99);
+    { const HI = W.islands.find(I => I.name === 'HOME ISLAND'); if (bshipOk1 && HI && HI.owner === 1 && HI.structs.some(s => s.kind === 'hq' && !s.dead)) W.P.bship = (W.P.bship || 0) + PAR_T.IOWA_HOME * kb1; if (W.iowa) W.P.bship = Math.min(W.P.bship, 99); }   // PARITY: the naval station (the LEVIATHAN's yard)
     // carriers patch themselves up with materiel when nobody is shooting at them
     for (const c of [W.carrier, W.enemyCarrier]) if (c && c.sinking === undefined && c.hp < c.hpMax && W.time - (c.lastHit ?? -99) > 15) { const S = store(c.side), fix = Math.min(c.hpMax - c.hp, 3 * k * W.techMod(c.side, 'ship.repair'), S.mat * 4); c.hp += fix; S.mat -= fix / 4; }
   }
@@ -863,42 +874,56 @@ export function createWar(ctx) {
       const b = W.battleship; b.plan = (b.plan || 0) - 2;
       if (W.carrier && (b.plan <= 0 || !b.path.length)) { b.plan = 15; const c = W.carrier.p, a = Math.atan2(b.p.z - c.z, b.p.x - c.x), gx = c.x + Math.cos(a) * 170, gz = c.z + Math.sin(a) * 170; const [wx, wz] = nav.wet(gx, gz) ? [gx, gz] : nav.nearestWater(gx, gz); b.path = nav.path(b.p.x, b.p.z, wx, wz); }
     }
+    PAR.think(2, pl);   // PARITY: the KRAKEN's sky refit, WASP hunts on the MSC convoys (sim/redai.js calls the same with its knobs)
   }
   function nearestLaunch(x, z) {
     let best = launchPoint(2), bd = Math.hypot(best[0] - x, best[2] - z);
     for (const I of W.islands) if (I.owner === 2 && I.structs.some(s => s.kind === 'hq' && !s.dead)) { const d = Math.hypot(I.pad.x - x, I.pad.z - z); if (d < bd) { bd = d; best = [I.pad.x, I.pad.h + 4, I.pad.z]; } }
     return best;
   }
-  function freightDest() {
-    const ec = W.enemyCarrier; if (ec && ec.sinking === undefined) return [ec.p.x, ec.p.z];
-    const I = W.islands.find(I => I.name === 'IRONHOLD'); return nav.nearestWater(I.x - 150, I.z + 150);
-  }
   function updateFreighters(dt) {
     for (const u of W.units) {
       if (u.type !== 'freighter' || u.sinking !== undefined || u.gone) continue;
-      const [dx, dz] = freightDest(), d = Math.hypot(dx - u.p.x, dz - u.p.z);
-      if (d < 75) { W.E.mat += u.cargo; scene.remove(u.mesh); u.gone = true; continue; }   // delivered
+      const [dx, dz] = PAR.freightDest(u.side, u), d = Math.hypot(dx - u.p.x, dz - u.p.z);   // PARITY: either side's carrier (or HQ island)
+      if (d < 75) {   // delivered
+        const S = store(u.side); S.mat += u.cargo; if (u.fuelCargo) S.fuel = Math.min(S.fuelMax ?? 1e9, S.fuel + u.fuelCargo);
+        if (u.side === 1) feed(`MSC SHIP ALONGSIDE  -  ${Math.round(u.cargo)} MATERIEL DELIVERED`, 'good');
+        scene.remove(u.mesh); u.gone = true; continue;
+      }
       u.repath -= dt; if (u.repath <= 0 || !u.path.length) { u.repath = 12; u.path = nav.path(u.p.x, u.p.z, dx, dz); }
     }
   }
+  // the capital ships' guns (PARITY: the IOWA's 16-inch as the LEVIATHAN's rails): an enemy capital ship, carrier or
+  // freighter in reach first, else the buildings of an island she was sent to shell, else any enemy building in reach
+  const SHIP_PRI = { battleship: 0, carrier: 1, freighter: 2 };
   function updateBattleship(dt) {
-    const b = W.battleship; if (!b || b.sinking !== undefined || !b.turrets) return;
-    for (const t of b.turrets) {
-      t.cd -= dt;
-      let tgt = W.carrier && W.carrier.sinking === undefined && W.carrier.p.distanceTo(b.p) < 320 ? W.carrier.p : null;
-      if (!tgt) { for (const I of W.islands) if (I.owner === 1) for (const s of I.structs) if (!s.dead && Math.hypot(s.x - b.p.x, s.z - b.p.z) < 260) { tgt = _w.set(s.x, s.y, s.z); break; } }
-      if (!tgt) continue;
-      toWorld(b, 0, BSHIP.DECK + 2, t.mesh.position.z);
-      const yaw = Math.atan2(-(tgt.x - _v.x), -(tgt.z - _v.z)) - b.yaw; t.mesh.rotation.y += angDiff(t.mesh.rotation.y, yaw) * Math.min(1, 2 * dt);
-      if (t.cd <= 0) {
-        t.cd = 6 + rnd(3);
-        const dx = tgt.x - _v.x + rnd(-14, 14), dz = tgt.z - _v.z + rnd(-14, 14), d = Math.hypot(dx, dz), T = 2 + d / 70;   // flight time: a high arc that clears the hills between
-        const vy0 = (tgt.y + 6 - _v.y) / T + 0.5 * 9 * T;
-        shoot('shell', 2, _v.x, _v.y, _v.z, dx / T, vy0, dz / T, T + 2);
-        // NAVAL: the rails elevate to the shot and kick back; a cyan flare at the muzzle
-        const ud = t.mesh.userData; if (ud.barrels) ud.barrels.rotation.x = Math.atan2(vy0, d / T); ud.fire?.();
-        for (let i = 0; i < 8; i++) fx.add.spawn(_v.x + fwdX(b.yaw + t.mesh.rotation.y) * 13, _v.y + 1, _v.z + fwdZ(b.yaw + t.mesh.rotation.y) * 13, rnd(-4, 4), rnd(-1, 4), rnd(-4, 4), rnd(0.15, 0.35), 2, 0.5, .55, .95, 1, 1);
-        fx.flash(_v.x + fwdX(b.yaw + t.mesh.rotation.y) * 8, _v.y + 1, _v.z + fwdZ(b.yaw + t.mesh.rotation.y) * 8, 2.5); fx.mix.spawn(_v.x, _v.y + 2, _v.z, 0, 3, 0, 3, 3, 9, .5, .5, .5, 0.5, -0.3, 1); boomAt(_v.x, _v.y, _v.z, 0.6);
+    for (const b of [W.battleship, W.iowa]) {
+      if (!b || b.sinking !== undefined || !b.turrets) continue;
+      const foe = 3 - b.side, bI = PAR.bombardIsland(b);
+      let ship = null, sp = 9;
+      for (const u of W.units) if (u.dims && u.side === foe && u.sinking === undefined && !u.gone && SHIP_PRI[u.type] < sp && u.p.distanceTo(b.p) < 320) { ship = u; sp = SHIP_PRI[u.type]; }
+      for (const t of b.turrets) {
+        t.cd -= dt;
+        let tgt = ship ? ship.p : null;
+        if (!tgt && bI) for (const s of bI.structs) if (!s.dead && s.side === foe && Math.hypot(s.x - b.p.x, s.z - b.p.z) < 320) { tgt = _w.set(s.x, s.y, s.z); if (s.kind === 'aa') break; }
+        if (!tgt) { for (const I of W.islands) if (I.owner === foe) for (const s of I.structs) if (!s.dead && Math.hypot(s.x - b.p.x, s.z - b.p.z) < 260) { tgt = _w.set(s.x, s.y, s.z); break; } }
+        if (!tgt) continue;
+        toWorld(b, 0, b.dims.DECK + 2, t.mesh.position.z);
+        const yaw = Math.atan2(-(tgt.x - _v.x), -(tgt.z - _v.z)) - b.yaw; t.mesh.rotation.y += angDiff(t.mesh.rotation.y, yaw) * Math.min(1, 2 * dt);
+        if (t.cd <= 0) {
+          t.cd = 6 + rnd(3);
+          const dx = tgt.x - _v.x + rnd(-14, 14), dz = tgt.z - _v.z + rnd(-14, 14), d = Math.hypot(dx, dz), T = 2 + d / 70;   // flight time: a high arc that clears the hills between
+          const vy0 = (tgt.y + 6 - _v.y) / T + 0.5 * 9 * T;
+          shoot('shell', b.side, _v.x, _v.y, _v.z, dx / T, vy0, dz / T, T + 2);
+          // NAVAL: the rails (the IOWA's barrels) elevate to the shot and kick back; a cyan flare (a gun's orange flash and brown smoke) at the muzzle
+          const ud = t.mesh.userData; if (ud.barrels) ud.barrels.rotation.x = Math.atan2(vy0, d / T); ud.fire?.();
+          const mx = fwdX(b.yaw + t.mesh.rotation.y), mz = fwdZ(b.yaw + t.mesh.rotation.y), hot = b.side === 1 ? [1, .7, .3] : [.55, .95, 1];
+          for (let i = 0; i < 8; i++) fx.add.spawn(_v.x + mx * 13, _v.y + 1, _v.z + mz * 13, rnd(-4, 4) + mx * 6, rnd(-1, 4), rnd(-4, 4) + mz * 6, rnd(0.15, 0.35), 2, 0.5, hot[0], hot[1], hot[2], 1);
+          fx.flash(_v.x + mx * 8, _v.y + 1, _v.z + mz * 8, b.side === 1 ? 3.2 : 2.5);
+          if (b.side === 1) for (let i = 0; i < 3; i++) fx.mix.spawn(_v.x + mx * (10 + i * 5), _v.y + 2, _v.z + mz * (10 + i * 5), mx * 4, 2, mz * 4, 4 + i, 4, 10, .42, .38, .33, 0.6, -0.3, 1);   // cordite smoke
+          else fx.mix.spawn(_v.x, _v.y + 2, _v.z, 0, 3, 0, 3, 3, 9, .5, .5, .5, 0.5, -0.3, 1);
+          boomAt(_v.x, _v.y, _v.z, b.side === 1 ? 0.8 : 0.6);
+        }
       }
     }
   }
@@ -909,7 +934,7 @@ export function createWar(ctx) {
     const s = [], sm = W.techMod(1, 'sight');   // TECH: the radar picket
     if (pl.alive) s.push({ x: pl.pos.x, z: pl.pos.z, r: pl.inCave ? 60 : pl.sight || SIGHT.heli });
     if (pl.alive && pl.sources) s.push(...pl.sources);
-    for (const u of W.units) if (u.side === 1 && !u.dead && !u.gone) s.push({ x: u.p.x, z: u.p.z, r: u.dims ? SIGHT.carrier * (1 + clamp(u.p.y / 120, 0, 0.8)) : SIGHT.drone });
+    for (const u of W.units) if (u.side === 1 && !u.dead && !u.gone) s.push({ x: u.p.x, z: u.p.z, r: u.dims ? SIGHT.carrier * (1 + clamp(u.p.y / 120, 0, 0.8)) : u.sight || SIGHT.drone });   // (PARITY: u.sight - the E-2C's radar)
     for (const I of W.islands) if (I.owner === 1) s.push({ x: I.x, z: I.z, r: I.kind === 'radar' && I.structs.some(q => q.kind === 'radar' && !q.dead) ? SIGHT.radar : SIGHT.island + I.r * 0.4 });
     return sm === 1 ? s : s.map(v => ({ ...v, r: v.r * sm }));   // (copies: pl.sources may be the caller's own objects)
   };
@@ -927,6 +952,7 @@ export function createWar(ctx) {
     W.enemyCarrier = makeShip('carrier', 2, ctx.enemyStart[0], ctx.enemyStart[1], ctx.enemyStart[2]);
     for (const I of W.islands) ctx.onOwner(I, I.owner);
     W.air.reset();   // AIR
+    PAR.reset();   // PARITY
   };
   W.update = (dt, pl, peace) => {
     W.time += dt; W._pl = pl; W.peace = peace;
@@ -948,6 +974,7 @@ export function createWar(ctx) {
     updateCapture(dt, pl);
     updateEconomy(dt);
     updateBattleship(dt); updateFreighters(dt);
+    PAR.update(dt, pl, peace);   // PARITY: MSC convoys, the IOWA
     if (!peace) { W.thinkT -= dt; if (W.thinkT <= 0) { W.thinkT = 2; if (W.redAI) W.redAI.think(pl, think); else { GW.think(pl); think(pl); W.air.think(pl); } } }   // SIM MODE hook: a CPU doctrine (sim/redai.js) can stand in for the enemy commander; GROUND WAR: its ground plans first (armour is saved up for); AIR: + the enemy air arm's plans
     W.air.frame(dt, pl);   // AIR: launch queue, drone rails, engine sounds
     // buildings animate
@@ -957,7 +984,7 @@ export function createWar(ctx) {
       if (ud.dish) ud.dish.rotation.y += dt * 1.2;
       if (ud.beam) ud.beam.rotation.z = Math.sin(W.time * 1.5 + s.x) * 0.25;
       if (ud.flag) ud.flag.rotation.y = Math.sin(W.time * 2 + s.z) * 0.3;
-      if (ud.hull) ud.hull.scale.y = Math.max(0.01, W.E.bship / 100);
+      if (ud.hull) ud.hull.scale.y = Math.max(0.01, (store(s.side).bship || 0) / 100);
     }
   };
   W.setVisibility = fog => {   // enemy aircraft and ships only where we can see; buildings once explored
@@ -969,5 +996,7 @@ export function createWar(ctx) {
   W.sim = { makeAir, buildAA, makeShip, launchPoint, nearestLaunch, end, COST };   // SIM MODE hook: what the CPU commanders (game/js/sim/) build with
   W.makeShip = makeShip;   // NAVAL: tests and the dev tools place ships with it
   W.air = createAirWar(W, ctx, { shoot, damage, blast, hear, boomAt, feed, CARRIER, COST_ESCORT: COST.escort });   // AIR (units/air/airwar.js)
+  const PAR = createParityWar(W, ctx, { makeShip, makeAir, feed, store, launchPoint, nav, sfx, COST });   // PARITY (units/parity/paritywar.js)
+  W.parity = PAR;
   return W;
 }

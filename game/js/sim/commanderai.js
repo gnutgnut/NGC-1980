@@ -105,9 +105,46 @@ export function createCommanderAI({ W, nav, doctrine, tech = null, strike = null
       const r = W.sendEscort(raided && myAir('escort') > 0 ? raided : null);
       if (/TO THE CAT/.test(r)) { C.escortT = 20; C.spent.escort += COST.escort; note(`TOMCAT CAP ${raided && myAir('escort') > 1 ? 'OVER ' + raided.name : 'OVER THE ALBATROSS'}`, { order: 'escort' }); return; }
     }
+    // 5b. PARITY: the counterparts (units/parity/paritywar.js) through the same calls the map's SHIFT+1..5 make
+    if (parity(t, pk, spare, keep)) return;
     // 6. the sky carrier refit, when the doctrine wants it and the store is deep
     if (D.sky > 0 && allow('sky') && W.carrier && !W.carrier.sky && spare() >= COST.sky + keep + 60 / D.sky) { const r = W.upgradeCarrier(); if (/STARTED|REFIT/.test(r)) { C.spent.sky += COST.sky; note('SKY CARRIER REFIT', { order: 'sky' }); return; } }
   };
+  // PARITY: AH-1T sorties (strike the island we want next, or overwatch an island of ours with machines ashore), M60A3s
+  // by LCM-8 where the ground fight is, the E-2C to find the KRAKEN, BGM-109 salvos at her or a factory, the IOWA's tasking
+  const PT = { cobra: 20, armour: 40, hawkeye: 30, salvo: 120, iowa: 0 };
+  function parity(t, pk, spare, keep) {
+    const ok = (k, c) => allow(k) && spare() >= c + keep, sent = (r, what, order) => { if (/LAUNCHED|AWAY|UNDER WAY/.test(r)) { C.spent[order] = (C.spent[order] || 0) + (COST[order] || 0); note(what, { order }); return true; } return false; };
+    for (const k in PT) PT[k] -= 2;
+    // Cobras: a landing party of theirs on our island, else the next target when it is guarded
+    if (PT.cobra <= 0 && W.sendCobra && ok('cobra', COST.cobra) && myAir('cobra') < Math.max(1, Math.round(2 * M.air * A))) {
+      PT.cobra = 30 / Math.max(0.3, A);
+      const ours = W.ground ? W.islands.find(I => I.owner === 1 && !I.cave && W.ground.presence(I, 2) > 0) : null;
+      const I = ours || (pk && pk.danger > 0 ? pk.I : null);
+      if (I && sent(W.sendCobra(I), `COBRAS ${ours ? 'OVER' : 'STRIKE'} ${I.name}`, 'cobra')) return true;
+    }
+    // armour: where the machines are ashore (ours to hold, or the next target with a fight on it)
+    if (PT.armour <= 0 && W.sendArmour && ok('armour', COST.armour)) {
+      PT.armour = 60 / Math.max(0.3, M.ground);
+      const G = W.ground, I = G && (W.islands.find(I => I.owner === 1 && !I.cave && G.presence(I, 2) > 1) || (pk && !pk.I.cave && G.presence(pk.I, 1) > 0 ? pk.I : null));
+      if (I && sent(W.sendArmour(I), `M60A3 BY LCM-8 TO ${I.name}`, 'armour')) return true;
+    }
+    // the Hawkeye up, now and then
+    if (PT.hawkeye <= 0 && W.sendHawkeye && ok('hawkeye', COST.hawkeye) && myAir('hawkeye') === 0) { PT.hawkeye = 200; if (sent(W.sendHawkeye(), 'E-2C HAWKEYE UP', 'hawkeye')) return true; }
+    // a salvo: at the KRAKEN when she has been spotted lately, else at a factory of theirs
+    if (PT.salvo <= 0 && W.salvoTomahawk && ok('tomahawk', COST.tomahawk * 4)) {
+      const spotted = W.spotP && t - W.spotP.t < 40;
+      PT.salvo = spotted ? 60 : 160 / Math.max(0.3, M.air);
+      if (sent(W.salvoTomahawk(spotted ? null : (pk && pk.I.owner === 2 ? pk.I : null)), `BGM-109 SALVO${spotted ? ' AT THE KRAKEN' : ''}`, 'tomahawk')) return true;
+    }
+    // the IOWA: the gun line on the next island of theirs when the LEVIATHAN is not out, else her hunt
+    if (PT.iowa <= 0 && W.iowa && W.iowa.sinking === undefined && W.orderIowa) {
+      PT.iowa = 60; const lev = W.battleship && W.battleship.sinking === undefined, want = !lev && pk && pk.I.owner === 2 ? pk.I : null, cur = W.parity.iowaOrder;
+      if (want && !(cur && cur.I === want)) note(W.orderIowa(want), { order: 'iowa' });
+      else if (!want && cur) { W.parity.iowaOrder = null; note('IOWA: HUNT', { order: 'iowa' }); }
+    }
+    return false;
+  }
   function strikeTarget(pk, rich) {
     const near = (x, z) => { const [cx, cz] = carrierXZ(); return Math.hypot(x - cx, z - cz); };
     const b = W.battleship; if (b && b.sinking === undefined && near(b.p.x, b.p.z) < 1400) return { t: b, why: 'ON THE LEVIATHAN' };

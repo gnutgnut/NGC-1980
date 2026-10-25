@@ -67,6 +67,16 @@ export const DEF = {
     beam: { range: 150, charge: 1.8, on: 2.2, dwell: 0.45, dps: 3.2, playerDps: 0.26, cool: 5, width: 2.2, full: 60, falloff: 0.2 },
   },
 };
+// PARITY: the TASK FORCE's counterpart of the LANCE on HQ islands - a HAWK battery section (one launcher, three rounds
+// on the rails). Matched to the LANCE as a GAME unit: the same hp and hit size class, a slower lock (a radar battery,
+// not a beam that is already on you), longer reach (the LANCE burns to 150 m, the HAWK reaches 230 m but needs 50 m
+// to arm), a few hits' damage per round like the Sea Sparrow's, and 12 s between rounds (the three on the rails show it), so
+// the threat per minute to a helicopter low over the island is about the LANCE's.
+DEF.hawk = {
+  name: 'MIM-23 HAWK', side: 1, hp: 7, r: 3.2, h: 1.8, yawRate: 0.9, pitchRate: 0.7, pitchMin: 0.05, pitchMax: 1.0,
+  scan: 0.5, lock: 1.4, lockKeep: 0.5, tol: 0.25,
+  msl: { min: 50, range: 230, salvo: 1, gap: 0, reload: 12, speed0: 20, speed: 90, accel: 110, turn: 2.0, life: 6, prox: 6, dmg: 5, playerDmg: 0, lockExtra: 0.8 },
+};
 // SEAWORLD: the RUNAWAY ships' mounts (brain.js refitShip). The same units on a deck; a ship's mount is tougher (the
 // old ship guns had 9 hp) and the LANCE's beam a little weaker (a moving, rolling platform; four of them on the LEVIATHAN)
 DEF.talonm = { ...DEF.talon, name: 'RW TALON (ship mount)', hp: 9, r: 2.4, h: 1.4 };

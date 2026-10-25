@@ -28,6 +28,7 @@ const isJet = () => G.craft === 'jet' || G.craft === 'tomcat';   // TOMCAT: the 
 // the Huey's AI crew and the jets' wingman who fly a unit the commander leaves
 import { createFleet } from './units/commander/fleet.js';
 import { createCommander } from './units/commander/board.js';
+import { createOrders } from './units/commander/orders.js';   // PARITY: SHIFT+1..5 support orders (AH-1T, M60A3 by LCM-8, E-2C, BGM-109, the IOWA)
 import { createTechUI } from './techui.js';   // TECH TREE: the RESEARCH page (the tree itself is war.tech, techtree.js)
 import { createHeliAI } from './units/commander/heliai.js';
 import { createWingman, wingmanEnv } from './units/commander/wingman.js';
@@ -80,6 +81,7 @@ addEventListener('keydown', e => {
   if (G.state === 'play' && commandKey(e.code, e.shiftKey)) return;   // COMMANDER: \ the command board, / the next unit out
   if (G.state === 'play' && G.mode === 'zarch') {
     if (((e.code === 'Digit6' && e.shiftKey) || e.code === 'F6') && !e.repeat) { e.preventDefault(); say(war.upgradeCarrier({ free: true, instant: true }), 2.5); return; }   // SHIFT+6 (or F6 where the browser lets it through): the SKY CARRIER now, free, from any unit (6 alone is the 300-materiel refit)
+    if (e.shiftKey && /^Digit[1-5]$/.test(e.code)) { say(parityOrders.run(+e.code.slice(5)), 2.4); return; }   // PARITY: the support orders at the selected island
     if (motorKey(e.code)) return;   // ngc/wheeledgame: 7 then 1 / 2 picks the motor pool's delivery
     if (e.code === 'KeyY') { getInOut(); return; }
     if (e.code === 'BracketLeft' || e.code === 'BracketRight') { crafts.cycleSeat(e.code === 'BracketRight' ? 1 : -1); return; }
@@ -1403,8 +1405,9 @@ function clearHandOn() {   // the commander picked a unit: no automatic hand-on 
   G.crewDownT = 0; G.jetDownT = 0; G.tomcatDownT = 0; Z.handedOn = true;
   if (JP.active && !JP.alive) JP.stow(); if (tomcatC.TP.active && !tomcatC.TP.alive) tomcatC.TP.stow();
 }
+const parityOrders = createOrders({ war, target: () => selIsl, cost: COST });   // PARITY: SHIFT+1..5 (map and board)
 const commander = createCommander({
-  fleet, say, feed, sfx, hud: $('hud'), roster, bases: commandBases, store: PSTORE,
+  fleet, say, feed, sfx, hud: $('hud'), roster, bases: commandBases, store: PSTORE, orders: parityOrders, orderTarget: () => selIsl ? selIsl.name : '',   // PARITY
   gate: id => war.allow(1, id) ? '' : war.gateMsg(1, id), research: () => techUI.open(),   // TECH TREE
   researchLine: () => { const T = war.tech[1], c = T.current && T.node(T.current.id); return c ? `<br>RESEARCH <b>${c.name}  ${Math.round(T.progress * 100)}%  (${Math.ceil(T.remaining)} s)</b>  ·  T: THE RESEARCH PAGE` : '<br>RESEARCH <b>IDLE</b>  ·  T: THE RESEARCH PAGE'; },
   here: () => Z.pos, mat: () => G.mat, fuelStores: () => G.res,
@@ -1848,7 +1851,7 @@ function updateFogImg() {
   for (let k = 0; k < fog.N * fog.N; k++) { const e = fog.enabled ? fog.exp[k] : 1, v = fog.enabled ? fog.vis[k] : 1; d[k * 4] = 4; d[k * 4 + 1] = 8; d[k * 4 + 2] = 16; d[k * 4 + 3] = (1 - e) * 240 + e * (1 - v) * 110; }
   fogCtx.putImageData(fogData, 0, 0);
 }
-const shipName = u => ({ battleship: 'LEVIATHAN', freighter: 'CONTAINER SHIP' }[u.type] || (u.side === 1 ? 'ALBATROSS' : 'KRAKEN'));
+const shipName = u => u.name || ({ battleship: 'LEVIATHAN', freighter: 'CONTAINER SHIP' }[u.type] || (u.side === 1 ? 'ALBATROSS' : 'KRAKEN'));   // PARITY: war.js names every ship (IOWA, MSC SHIP)
 const KIND_TAG = { hq: 'HQ', fortress: 'C', fuel: 'F', factory: 'M', radar: 'R' };
 const OWN_COL = ['#e8e4d0', '#4cf', '#f54'];
 let mapView = null;
@@ -1923,8 +1926,9 @@ function drawMap() {
     const lk = (key, t) => war.allow(1, key) ? t : `${t.replace(/ \(\d+\)$/, '')} [RESEARCH]`;   // TECH TREE: locked orders say so
     fit(`1: ${lk('drone', `SEA KNIGHT + 13 MARINES (${COST.drone})`)}  ·  2: ${lk('aa', `AA GUN ON OUR ISLAND (${COST.aa})`)}  ·  3: ${lk('heli', `NEW HELICOPTER (${COST.heli})`)}  ·  4: ${lk('escort', `TOMCAT ESCORT (${COST.escort})`)}`, Hh - 64, 14);
     fit(`6: ${lk('sky', `SKY CARRIER REFIT (${COST.sky})`)}  ·  8: ${lk('tomcat', 'FLY A TOMCAT')}  ·  9: ${lk('m60', 'M60A3')} / 0: ${lk('m113', 'M113A2')} BY LCM-8     MATERIEL ${Math.floor(G.mat)}`, Hh - 44, 14);
+    radar.fillStyle = '#fd8'; fit(parityOrders.legend() + `  ·  AT ${selIsl ? selIsl.name : 'THE SELECTED ISLAND'}`, Hh - 108, 13);   // PARITY: the support orders
     radar.font = '12px monospace'; radar.fillStyle = '#8ab';
-    radar.fillText('HQ  HEADQUARTERS     C  CAVE FORTRESS (STEAL ITS POD)     F  FUEL     M  MATERIEL (FACTORY)     R  RADAR     ▲ AA GUNS     SHIPS: ALBATROSS · KRAKEN · LEVIATHAN · CONTAINER SHIP', W / 2, Hh - 24);
+    radar.fillText('HQ  HEADQUARTERS     C  CAVE FORTRESS (STEAL ITS POD)     F  FUEL     M  MATERIEL (FACTORY)     R  RADAR     ▲ AA GUNS     SHIPS: ALBATROSS · KRAKEN · IOWA · LEVIATHAN · MSC SHIP · CONTAINER SHIP', W / 2, Hh - 24);
     if (selIsl) {
       const I = selIsl, own = I.seen, info = [`${I.name}`, `${own < 0 ? 'UNKNOWN' : ['NEUTRAL', 'OURS', 'ENEMY'][own]}  ·  ${{ hq: 'HEADQUARTERS', fortress: 'CAVE FORTRESS', fuel: 'OIL - FUEL', factory: 'FACTORY - MATERIEL', radar: 'RADAR - LONG SIGHT' }[I.kind]}`];
       if (fog.visibleAt(I.pad.x, I.pad.z) && own > 0) info.push(`AA GUNS ${war.aliveAA(I)}`);
@@ -2029,7 +2033,8 @@ function updateHud() {
     const c = war.carrier, b = war.battleship, eb = war.E.bship;
     const html = `<span style="color:#4cf">OURS ${n[1]}</span> &nbsp; <span style="color:#f54">ENEMY ${n[2]}</span> &nbsp; <span style="color:#ddd">FREE ${n[0]}</span>` +
       ` &nbsp;·&nbsp; ALBATROSS <b style="color:${c && c.hp / c.hpMax < 0.4 ? '#f54' : '#9ff'}">${c ? Math.max(0, Math.round(100 * c.hp / c.hpMax)) : 0}%</b>` +
-      (b && b.sinking === undefined ? ` &nbsp;·&nbsp; <b style="color:#f54">LEVIATHAN AT SEA ${Math.round(100 * b.hp / b.hpMax)}%</b>` : ` &nbsp;·&nbsp; LEVIATHAN BUILT <b style="color:${eb > 70 ? '#f54' : '#fb6'}">${Math.floor(eb)}%</b>`);
+      (b && b.sinking === undefined ? ` &nbsp;·&nbsp; <b style="color:#f54">LEVIATHAN AT SEA ${Math.round(100 * b.hp / b.hpMax)}%</b>` : ` &nbsp;·&nbsp; LEVIATHAN BUILT <b style="color:${eb > 70 ? '#f54' : '#fb6'}">${Math.floor(eb)}%</b>`) +
+      (war.iowa && war.iowa.sinking === undefined ? ` &nbsp;·&nbsp; <b style="color:#8cf">IOWA ${Math.round(100 * war.iowa.hp / war.iowa.hpMax)}%</b>` : war.allow(1, 'battleship') ? ` &nbsp;·&nbsp; IOWA <b style="color:#8cf">${Math.floor(war.P.bship || 0)}%</b>` : '');   // PARITY
     if (_hud.war !== html) { _hud.war = html; $('war').innerHTML = html; }
     const now = performance.now(), fh = feedItems.filter(f => now - f.at < 14000).map(f => `<div style="color:${f.kind === 'good' ? '#7f9' : f.kind === 'bad' ? '#f86' : '#cde'};opacity:${Math.min(1, (14000 - (now - f.at)) / 2000).toFixed(2)}">${f.t}</div>`).join('');
     if (_hud.feed !== fh) { _hud.feed = fh; $('feed').innerHTML = fh; }

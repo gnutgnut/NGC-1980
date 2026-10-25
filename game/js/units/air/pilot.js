@@ -47,6 +47,8 @@ export const PILOTS = {
     gun: { range: 280, cone: 0.04, speed: 480, burst: 0.4, rest: 0.8 },
   },
   REAPER: { climbEAS: 52, capEAS: 50, corner: 60, fightTop: 70, gmax: 2.5, gfight: 2.5, capAlt: 260, capR: 300, radar: 0, leash: 0, bingo: 0, weapons: [], gun: null },
+  // PARITY: the E-2C HAWKEYE (hawkeyefm.js HAWKEYE_PILOT, same numbers): orbit ~165 KEAS, 300 m, 450 m radius; no intercepts, no weapons
+  HAWKEYE: { climbEAS: 85, capEAS: 85, corner: 100, fightTop: 120, vmin: 62, gmax: 2.0, gfight: 2.2, capAlt: 300, capR: 450, radar: 0, leash: 0, bingo: 0, weapons: [], gun: null, landX: -4.5, catX: 4.5 },
 };
 
 export function createPilot(A, o = {}) {
