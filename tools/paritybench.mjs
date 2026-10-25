@@ -68,6 +68,25 @@ console.log('--- the RUNAWAY hunt our convoys ---');
   const { feed } = await war({ seed: 7, tmax: 600, tech: 'all', onStep: W => { for (const u of W.units) if (u.type === 'gunship' && u.raid && u.raid.type === 'freighter' && u.raid.side === 1 && !u._h) { u._h = 1; hunts++; } } });
   check('WASPs are sent at MSC ships', hunts >= 2 && feed.some(t => /WASPS HEADING FOR AN MSC SHIP/.test(t)), `${hunts} WASPs raided a convoy`);
 }
+console.log('--- E-2C Hawkeye, BGM-109 salvo, MIM-23 HAWK (the REAPER\'s, SHAHED\'s, LANCE\'s counterparts) ---');
+{
+  let sent = '', spotT = null, salvo = '', glcm = 0, hit = 0, krakenHp0 = null, hawk = '', hawkType = null, sight = 0;
+  await war({ seed: 9, tmax: 400, tech: 'all', pilot: 'none', hook: ({ W }) => {
+      W.P.mat = 999; sent = W.sendHawkeye();
+      const H = W.islands.find(I => I.name === 'HOME ISLAND'); hawk = W.orderAA(H); const s = H.structs.filter(s => s.kind === 'aa').pop(); hawkType = s && s.def && s.def.type;
+    },
+    onStep: W => {
+      const ec = W.enemyCarrier; if (krakenHp0 === null && ec) krakenHp0 = ec.hp;
+      const hk = W.units.find(u => u.type === 'hawkeye'); if (hk) sight = Math.max(sight, hk.sight || 0);
+      if (W.spotP && spotT === null) { spotT = W.time; W.P.mat = Math.max(W.P.mat, 100); salvo = W.salvoTomahawk(null); }
+      for (const u of W.units) if (u.type === 'glcm' && !u._n) { u._n = 1; glcm++; }
+      if (ec && krakenHp0 !== null && ec.hp < krakenHp0 - 1) hit = krakenHp0 - ec.hp;
+    } });
+  check('the Hawkeye launches and has the long sight', /LAUNCHED/.test(sent) && sight >= 500, `${sent}; sight ${sight} m`);
+  check('she spots the KRAKEN', spotT !== null, spotT === null ? 'never' : `at ${spotT.toFixed(0)} s`);
+  check('a salvo flies at the spotted KRAKEN', /AWAY/.test(salvo) && glcm >= 4, `${salvo}; ${glcm} BGM-109s flew; KRAKEN -${hit.toFixed(0)} hp`);
+  check('a new AA order on HOME ISLAND is a HAWK battery', /GOING UP/.test(hawk) && hawkType === 'hawk', `${hawk} -> ${hawkType}`);
+}
 console.log('--- the new orders\' gates (tech=default) ---');
 {
   let r = null;

@@ -1928,7 +1928,7 @@ function drawMap() {
     fit(`6: ${lk('sky', `SKY CARRIER REFIT (${COST.sky})`)}  ·  8: ${lk('tomcat', 'FLY A TOMCAT')}  ·  9: ${lk('m60', 'M60A3')} / 0: ${lk('m113', 'M113A2')} BY LCM-8     MATERIEL ${Math.floor(G.mat)}`, Hh - 44, 14);
     radar.fillStyle = '#fd8'; fit(parityOrders.legend() + `  ·  AT ${selIsl ? selIsl.name : 'THE SELECTED ISLAND'}`, Hh - 108, 13);   // PARITY: the support orders
     radar.font = '12px monospace'; radar.fillStyle = '#8ab';
-    radar.fillText('HQ  HEADQUARTERS     C  CAVE FORTRESS (STEAL ITS POD)     F  FUEL     M  MATERIEL (FACTORY)     R  RADAR     ▲ AA GUNS     SHIPS: ALBATROSS · KRAKEN · IOWA · LEVIATHAN · MSC SHIP · CONTAINER SHIP', W / 2, Hh - 24);
+    fit('HQ  HEADQUARTERS     C  CAVE FORTRESS (STEAL ITS POD)     F  FUEL     M  MATERIEL (FACTORY)     R  RADAR     ▲ AA GUNS     SHIPS: ALBATROSS · KRAKEN · IOWA · LEVIATHAN · MSC SHIP · CONTAINER SHIP', Hh - 24, 12);   // (PARITY: fitted: the ship list grew)
     if (selIsl) {
       const I = selIsl, own = I.seen, info = [`${I.name}`, `${own < 0 ? 'UNKNOWN' : ['NEUTRAL', 'OURS', 'ENEMY'][own]}  ·  ${{ hq: 'HEADQUARTERS', fortress: 'CAVE FORTRESS', fuel: 'OIL - FUEL', factory: 'FACTORY - MATERIEL', radar: 'RADAR - LONG SIGHT' }[I.kind]}`];
       if (fog.visibleAt(I.pad.x, I.pad.z) && own > 0) info.push(`AA GUNS ${war.aliveAA(I)}`);

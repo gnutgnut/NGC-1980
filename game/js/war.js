@@ -184,7 +184,7 @@ export function createWar(ctx) {
     if (side === 1) defence.refitCarrier(m, 1);   // DEFENCE hook: the ALBATROSS's close-in guns and missile boxes (PARITY: the MSC ship's and the IOWA's too)
     else if (side === 2) defence.refitShip(m, 2);   // SEAWORLD: KRAKEN / LEVIATHAN / container ship get TALON and LANCE mounts
     const dims = type === 'carrier' ? CARRIER : type === 'freighter' ? FREIGHTER : BSHIP;
-    const u = { type, side, p: new THREE.Vector3(x, 0, z), v: new THREE.Vector3(), yaw, w: 0, speed: 0, max: { carrier: 6, freighter: 5, battleship: 7.5 }[type], hp: { carrier: 600, freighter: 70, battleship: 420 }[type], mesh: m.group, parts: m, dims, path: [], guns: [], wakeT: 0, launchT: 0 };
+    const u = { type, side, p: new THREE.Vector3(x, 0, z), v: new THREE.Vector3(), yaw, w: 0, speed: 0, max: { carrier: 6, freighter: 5, battleship: 7.5 }[type], hp: type === "battleship" && side === 1 ? PAR_T.IOWA_HP : { carrier: 600, freighter: 70, battleship: 420 }[type], mesh: m.group, parts: m, dims, path: [], guns: [], wakeT: 0, launchT: 0 };
     u.hpMax = u.hp; u.name = SHIP_NAME(type, side);   // PARITY: ALBATROSS / KRAKEN, IOWA / LEVIATHAN, MSC SHIP / CONTAINER SHIP
     u.guns = m.guns.map(g => ({ mesh: g, hp: 9, max: 9, dead: false, cd: rnd(1, 3), range: type === 'carrier' ? 150 : 130, ship: u }));
     for (const g of u.guns) defence.attach(g);   // DEFENCE hook (no-op for the generic buildGun mounts)

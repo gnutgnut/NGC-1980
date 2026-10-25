@@ -184,7 +184,7 @@ export function createCommander(h) {
     if (h.orders) {   // PARITY: the support orders (units/commander/orders.js), at the island selected on the map
       const tg = h.orderTarget ? h.orderTarget() : '';
       html += `<div class="sub" style="margin-top:8px">SUPPORT ORDERS  ·  AT <b>${esc(tg || 'NO ISLAND SELECTED (M, CLICK ONE)')}</b></div>`;
-      for (const o of h.orders.rows()) html += `<div class="row${o.locked ? ' lock off' : ''}"><span class="k">⇧${o.n}</span><span class="nm">${esc(o.label)}<small>${o.cost ? o.cost + ' MATERIEL' : 'NO COST'}</small></span><span class="ct"></span><span class="st">${esc(o.locked ? o.why : o.status)}</span></div>`;
+      for (const o of h.orders.rows()) html += `<div class="row${o.locked ? ' lock off' : ''}" style="padding:2px 8px;margin:2px 0"><span class="k">⇧${o.n}</span><span class="nm" style="font-size:13px">${esc(o.label)}<small>${o.cost ? o.cost + ' MAT' : ''}  ·  ${esc(o.locked ? o.why : o.status)}</small></span><span class="ct"></span></div>`;
     }
     html += `<div class="foot">UP / DOWN SELECT  ·  LEFT / RIGHT BASE  ·  ENTER DEPLOY OR SWITCH  ·  1-${h.roster.length} PICK  ·  R RECALL A JET  ·  X STAND DOWN  ·  N ANOTHER VEHICLE  ·  / NEXT UNIT  ·  SHIFT+1-5 SUPPORT ORDERS  ·  T RESEARCH  ·  \\ CLOSE<br>THE WAR GOES ON: A UNIT YOU LEAVE IS FLOWN HOME BY ITS CREW OR PARKS WHERE IT IS</div>`;
     if (force || html !== C.lastHtml) { C.lastHtml = html; el.innerHTML = html; }
