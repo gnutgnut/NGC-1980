@@ -43,3 +43,18 @@ Huey before boarding, and `SLOW=<n>` throttles the CPU to test a loaded machine.
 **Cause.** Not found. The ground under her still reads as deck height after the deck has gone (a held platform or a
 stale ground sample, probably in ground.js / the Huey's `env.groundY`).
 **Action.** OPEN. With 75755a7 it no longer happens in the tests; worth a look by whoever owns ground.js (collision).
+
+## 2026-10-25 - a crew-flown Huey struck a parked Tomcat's fin landing on spot H3
+**Finding.** commander.mjs step 12d: the Huey's crew, landing on ALBATROSS spot `ship:0` (H3, ship-local x -2, z 32)
+while the ship slowed and turned, died with "ROTOR STRIKE" 1.7 m above the deck.
+**Evidence.** runs/2026-10-25_15-37-03-commander (log t 541-644 s: touchdown at ship-local x 0..0.5, z 31.7-33.4,
+then `lastDeath.why` ROTOR STRIKE). The same landing with the ship stopped or steaming on another spot passes
+(scene hueyspot.mjs, runs 2026-10-25_15-50-46 and 15-52-58).
+**Cause.** The deck's height field (war.deckY -> albatross.js `deckWith`) includes the two parked decor Tomcats at
+ship-local (9, 27) and (9.3, 46.5). From x -2 the 7.3 m disc came within about 2 m of their fins (x 7.4 and up, 4.9 m
+high); a touchdown 2.5 m to starboard of the spot put a blade tip over a fin. The helicopter spots H3 and the
+round-down (x -2) also sit on the landing line (x -2.5, wires z 30.5-44).
+**Action.** Fixed in this branch: spots 0 and 1 moved to x -5.5 (5 m clear of the fins) and a spot counts as free only
+when nothing under the disc (radius 7.6 m) stands 1.5 m above it (`discClear`: parked aircraft, the island, lifts, high
+ground). OPEN / suggestion for ngc/bugsweep's deck-ops module: helicopter spots in the landing area should be
+fouled-deck aware (no Huey parked or landing on the landing line during a recovery); `HELO_SPOTS` in main.js is the hook.

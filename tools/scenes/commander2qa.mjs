@@ -23,7 +23,8 @@ export default {
     await h.eval(`(() => { const J = __G.JP.J, _v = new __G.THREE.Vector3(); window.__minLand = 1e9;
       window.__camHook = c => { const w = __G.jetC.wing; if (!w || !__G.JP.alive) return; const v = J.vel, s = Math.hypot(v.x, v.z) || 1;
         c.position.set(J.pos.x - v.x / s * 38, J.pos.y + 11, J.pos.z - v.z / s * 38); c.lookAt(_v.set(J.pos.x + v.x / s * 30, J.pos.y - 2, J.pos.z + v.z / s * 30)); c.updateMatrixWorld();
-        const g = __G.terrainH(J.pos.x, J.pos.z); if (g > 1 && !J.onGround) __minLand = Math.min(__minLand, J.pos.y - g); };
+        const g = __G.terrainH(J.pos.x, J.pos.z); if (g > 1 && !J.onGround) __minLand = Math.min(__minLand, J.pos.y - g);
+        if (w.state === 'final' || w.state === 'waveoff') { const a = J.attitude(); (window.__fin = window.__fin || []).push([+__G.war.time.toFixed(1), w.state, Math.round(J.pos.y), w.lso ? Math.round(w.lso.R) : null, Math.round(J.eas), Math.round(a.roll * 57.3), Math.round(a.pitch * 57.3), +J.vel.y.toFixed(1), J.gearCmd, J.flapSel]); if (__fin.length > 400) __fin.splice(0, 100); } };
       return 1; })()`);
     let k = 0;
     for (let i = 0; i < 120; i++) {
@@ -32,13 +33,14 @@ export default {
       if (i % 3 === 0 && k < 14) { await h.shot(`wingman-${String(++k).padStart(2, '0')}-${r.st}`); }
       await h.wait(5000);
     }
-    await h.eval('({ minOverLand: Math.round(__minLand), alive: __G.JP.alive, parked: !!(__G.jetC.park && __G.jetC.park.on) })');
+    await h.eval('({ minOverLand: Math.round(__minLand), alive: __G.JP.alive, parked: !!(__G.jetC.park && __G.jetC.park.on), why: __G.JP.J.dead || null, final: (window.__fin || []).filter((r, i, a) => i % 4 === 0 || i > a.length - 12) })');   // [t, state, y, R, eas, roll, pitch, vy, gear, flap]
     await h.expect('__G.JP.alive && __minLand > 20', 'the wingman stayed clear of the islands (more than 20 m over land)');
     await h.expect('__G.jetC.park && __G.jetC.park.on && __G.war.shipAt(__G.JP.J.pos.x, __G.JP.J.pos.z) === __G.war.carrier', 'she trapped and parks on the deck');
     await h.eval('(window.__camHook = null, 1)');
     // ---- b. out of the Huey on deck, back in by the pilot's door: first and third person
     await h.eval('(__G.cockpitCam = true, 1)');
     await h.key('tap', 'KeyY'); await h.wait(800);
+    await h.eval('({ craft: __G.G.craft, msg: document.getElementById("msg") && document.getElementById("msg").textContent, landed: __G.H.landed, stowed: __G.G.heliStowed, alive: __G.Z.alive, coll: __G.H.coll })');
     await h.expect("__G.G.craft === 'foot'", 'out of the Huey on foot');
     await h.eval(`(() => { const c = __G.war.carrier, d = __G.crafts.toWorld(__G.heliC, [2.6, -1.84, -1.9]); return __G.foot.spawnAt({ x: d.x, y: c.p.y + 8, z: d.z, yaw: d.yaw + Math.PI / 2 }); })()`);
     await h.eval("(__G.marine.view = 'first', 1)"); await h.wait(1500);
